@@ -14,6 +14,12 @@ class CompressionRuntimeError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class CompressionToken:
+    text: str
+    kept: bool
+
+
+@dataclass(frozen=True)
 class CompressionResult:
     compressed_text: str
     original_tokens: int
@@ -23,6 +29,7 @@ class CompressionResult:
     target_rate: float
     model: str
     elapsed_ms: float
+    labeled_tokens: list[CompressionToken]
 
 
 class PromptCompressionService:
@@ -75,6 +82,24 @@ class PromptCompressionService:
             return min_rate
         return 1.0 - bounded * (1.0 - min_rate)
 
+    def parse_word_labels(
+        self,
+        labeled_prompt: str,
+        word_sep: str = "\t\t|\t\t",
+        label_sep: str = " ",
+    ) -> list[CompressionToken]:
+        tokens: list[CompressionToken] = []
+        if not labeled_prompt:
+            return tokens
+
+        for entry in labeled_prompt.split(word_sep):
+            word, separator, label = entry.rpartition(label_sep)
+            if not separator or not word:
+                continue
+            tokens.append(CompressionToken(text=word, kept=label.strip() == "1"))
+
+        return tokens
+
     def compress(self, text: str, aggressiveness: float) -> CompressionResult:
         start = time.perf_counter()
         compressor = self._load()
@@ -93,6 +118,9 @@ class PromptCompressionService:
         compressed_text = raw_result.get("compressed_prompt", "")
         original_tokens = int(raw_result.get("origin_tokens", 0))
         compressed_tokens = int(raw_result.get("compressed_tokens", 0))
+        labeled_tokens = self.parse_word_labels(
+            raw_result.get("fn_labeled_original_prompt", "")
+        )
 
         if original_tokens <= 0:
             original_tokens = len(text.split())
@@ -112,4 +140,5 @@ class PromptCompressionService:
             target_rate=target_rate,
             model=self.model_name,
             elapsed_ms=(time.perf_counter() - start) * 1000,
+            labeled_tokens=labeled_tokens,
         )

@@ -43,6 +43,12 @@ Open the API docs:
 http://127.0.0.1:8000/docs
 ```
 
+Open the prompt compression UI:
+
+```text
+http://127.0.0.1:8000/
+```
+
 Run the smoke test in another terminal:
 
 ```powershell
@@ -54,6 +60,11 @@ python scripts\smoke_test.py
 ### `GET /health`
 
 Checks whether the service is up.
+
+### `GET /`
+
+Opens a browser UI where you can paste a prompt, compress it, and inspect which
+words were kept or dropped.
 
 ### `POST /compress`
 
@@ -77,7 +88,12 @@ Response:
   "aggressiveness": 0.25,
   "target_rate": 0.8625,
   "model": "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
-  "elapsed_ms": 123.4
+  "elapsed_ms": 123.4,
+  "labeled_tokens": [
+    {"text": "Prompts", "kept": true},
+    {"text": "are", "kept": false},
+    {"text": "production", "kept": true}
+  ]
 }
 ```
 

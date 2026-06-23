@@ -11,6 +11,11 @@ class CompressRequest(BaseModel):
     )
 
 
+class LabeledToken(BaseModel):
+    text: str
+    kept: bool
+
+
 class CompressResponse(BaseModel):
     compressed_text: str
     original_tokens: int
@@ -20,6 +25,7 @@ class CompressResponse(BaseModel):
     target_rate: float
     model: str
     elapsed_ms: float
+    labeled_tokens: list[LabeledToken] = []
 
 
 class HealthResponse(BaseModel):
