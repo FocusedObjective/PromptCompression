@@ -1,5 +1,5 @@
 from app import main
-from app.compressor import CompressionResult, CompressionToken
+from app.compressor import CompressionOutputSection, CompressionResult, CompressionToken
 from app.schemas import CompressRequest
 
 
@@ -22,6 +22,19 @@ class FakeCompressionService:
                 CompressionToken(text="are", kept=False),
                 CompressionToken(text="code.", kept=True),
             ],
+            output_sections=[
+                CompressionOutputSection(
+                    text="Prompts code.",
+                    kind="prose",
+                    compressed=True,
+                    protected=False,
+                    labeled_tokens=[
+                        CompressionToken(text="Prompts", kept=True),
+                        CompressionToken(text="are", kept=False),
+                        CompressionToken(text="code.", kept=True),
+                    ],
+                )
+            ],
         )
 
 
@@ -30,6 +43,7 @@ def test_index_returns_prompt_compression_ui():
 
     assert "Prompt Compression" in response
     assert "Dropped Words Highlighted" in response
+    assert "JSON compressed to TOON" in response
 
 
 def test_compress_response_includes_labeled_tokens(monkeypatch):
@@ -43,4 +57,17 @@ def test_compress_response_includes_labeled_tokens(monkeypatch):
         {"text": "Prompts", "kept": True},
         {"text": "are", "kept": False},
         {"text": "code.", "kept": True},
+    ]
+    assert [section.model_dump() for section in response.output_sections] == [
+        {
+            "text": "Prompts code.",
+            "kind": "prose",
+            "compressed": True,
+            "protected": False,
+            "labeled_tokens": [
+                {"text": "Prompts", "kept": True},
+                {"text": "are", "kept": False},
+                {"text": "code.", "kept": True},
+            ],
+        }
     ]

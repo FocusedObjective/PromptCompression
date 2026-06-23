@@ -215,6 +215,42 @@ APP_HTML = """
       text-decoration-thickness: 1.5px;
     }
 
+    .section {
+      margin: 0 0 14px;
+    }
+
+    .section-label {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      margin: 4px 0 8px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: #e8f3ec;
+      color: #25613b;
+      font: 12px/1.2 Inter, ui-sans-serif, system-ui, sans-serif;
+      font-weight: 680;
+    }
+
+    .section-label.json {
+      background: #eef2f8;
+      color: #40506a;
+    }
+
+    .structured-block {
+      display: block;
+      margin: 0;
+      padding: 12px;
+      border: 1px solid #b9d8c3;
+      border-radius: 7px;
+      background: #f6fbf7;
+      color: var(--kept);
+      white-space: pre-wrap;
+      overflow-x: auto;
+      overflow-wrap: normal;
+      font: inherit;
+    }
+
     .status {
       color: var(--muted);
       font-size: 13px;
@@ -319,10 +355,8 @@ The assistant must return concise output and preserve critical details.</textare
       resultStatus.className = isError ? "status error" : "status";
     }
 
-    function renderDiff(labeledTokens) {
-      diff.textContent = "";
+    function renderTokenDiff(container, labeledTokens) {
       if (!labeledTokens || labeledTokens.length === 0) {
-        diff.textContent = "No labels returned by the compressor.";
         return;
       }
 
@@ -330,8 +364,62 @@ The assistant must return concise output and preserve critical details.</textare
         const span = document.createElement("span");
         span.className = token.kept ? "token keep" : "token drop";
         span.textContent = token.text;
-        diff.appendChild(span);
-        diff.appendChild(document.createTextNode(" "));
+        container.appendChild(span);
+        container.appendChild(document.createTextNode(" "));
+      }
+    }
+
+    function labelForSection(section) {
+      if (section.kind === "toon") {
+        return "JSON compressed to TOON";
+      }
+      if (section.kind === "json") {
+        return "JSON protected";
+      }
+      if (section.kind === "html") {
+        return "HTML whitespace-normalized";
+      }
+      if (section.kind === "nocompress") {
+        return "No-compress protected";
+      }
+      return "";
+    }
+
+    function renderSections(sections, fallbackTokens) {
+      diff.textContent = "";
+      if (!sections || sections.length === 0) {
+        renderTokenDiff(diff, fallbackTokens);
+        if (diff.textContent) {
+          return;
+        }
+        diff.textContent = "No labels returned by the compressor.";
+        return;
+      }
+
+      for (const section of sections) {
+        if (!section.text) {
+          continue;
+        }
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "section";
+        const label = labelForSection(section);
+
+        if (label) {
+          const labelNode = document.createElement("div");
+          labelNode.className = `section-label ${section.kind}`;
+          labelNode.textContent = label;
+          wrapper.appendChild(labelNode);
+
+          const block = document.createElement("pre");
+          block.className = "structured-block";
+          block.textContent = section.text;
+          wrapper.appendChild(block);
+        } else {
+          renderTokenDiff(wrapper, section.labeled_tokens);
+        }
+
+        diff.appendChild(wrapper);
       }
     }
 
@@ -396,7 +484,7 @@ The assistant must return concise output and preserve critical details.</textare
 
         latestCompressedText = data.compressed_text;
         copyButton.disabled = !latestCompressedText;
-        renderDiff(data.labeled_tokens);
+        renderSections(data.output_sections, data.labeled_tokens);
         reduction.textContent = `${Math.round(data.reduction * 100)}%`;
         tokens.textContent = `${data.original_tokens} -> ${data.compressed_tokens}`;
         elapsed.textContent = `${Math.round(data.elapsed_ms)} ms`;

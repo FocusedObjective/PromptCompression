@@ -16,6 +16,14 @@ class LabeledToken(BaseModel):
     kept: bool
 
 
+class OutputSection(BaseModel):
+    text: str
+    kind: str
+    compressed: bool
+    protected: bool
+    labeled_tokens: list[LabeledToken] = Field(default_factory=list)
+
+
 class CompressResponse(BaseModel):
     compressed_text: str
     original_tokens: int
@@ -25,7 +33,8 @@ class CompressResponse(BaseModel):
     target_rate: float
     model: str
     elapsed_ms: float
-    labeled_tokens: list[LabeledToken] = []
+    labeled_tokens: list[LabeledToken] = Field(default_factory=list)
+    output_sections: list[OutputSection] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

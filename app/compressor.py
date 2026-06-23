@@ -1,9 +1,10 @@
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
 
+from app.compression_pipeline import CompressionSegment, PromptPreprocessor
 from app.protected_spans import force_tokens_for_text
 
 DEFAULT_MODEL = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
@@ -20,6 +21,15 @@ class CompressionToken:
 
 
 @dataclass(frozen=True)
+class CompressionOutputSection:
+    text: str
+    kind: str
+    compressed: bool
+    protected: bool
+    labeled_tokens: list[CompressionToken] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class CompressionResult:
     compressed_text: str
     original_tokens: int
@@ -30,6 +40,7 @@ class CompressionResult:
     model: str
     elapsed_ms: float
     labeled_tokens: list[CompressionToken]
+    output_sections: list[CompressionOutputSection] = field(default_factory=list)
 
 
 class PromptCompressionService:
@@ -39,6 +50,7 @@ class PromptCompressionService:
         self.min_rate = float(os.getenv("COMPRESSOR_MIN_RATE", "0.45"))
         self._compressor: Any | None = None
         self._lock = Lock()
+        self.preprocessor = PromptPreprocessor()
 
     @property
     def is_loaded(self) -> bool:
@@ -100,32 +112,80 @@ class PromptCompressionService:
 
         return tokens
 
-    def compress(self, text: str, aggressiveness: float) -> CompressionResult:
-        start = time.perf_counter()
-        compressor = self._load()
-        target_rate = self.target_rate_for_aggressiveness(aggressiveness)
-
+    def _compress_segment(
+        self,
+        compressor: Any,
+        segment: CompressionSegment,
+        target_rate: float,
+    ) -> tuple[str, list[CompressionToken]]:
         try:
             raw_result = compressor.compress_prompt_llmlingua2(
-                text,
+                segment.text,
                 rate=target_rate,
-                force_tokens=force_tokens_for_text(text),
+                force_tokens=force_tokens_for_text(segment.text),
                 return_word_label=True,
             )
         except Exception as exc:  # pragma: no cover - model-specific runtime path
             raise CompressionRuntimeError(f"Compression failed: {exc}") from exc
 
         compressed_text = raw_result.get("compressed_prompt", "")
-        original_tokens = int(raw_result.get("origin_tokens", 0))
-        compressed_tokens = int(raw_result.get("compressed_tokens", 0))
         labeled_tokens = self.parse_word_labels(
             raw_result.get("fn_labeled_original_prompt", "")
         )
+        return compressed_text, labeled_tokens
 
-        if original_tokens <= 0:
-            original_tokens = len(text.split())
-        if compressed_tokens <= 0:
-            compressed_tokens = len(compressed_text.split())
+    def _kept_segment_token(self, segment: CompressionSegment) -> CompressionToken:
+        return CompressionToken(text=segment.text, kept=True)
+
+    def compress(self, text: str, aggressiveness: float) -> CompressionResult:
+        start = time.perf_counter()
+        target_rate = self.target_rate_for_aggressiveness(aggressiveness)
+        segments = self.preprocessor.prepare(text)
+        compressible_segments = [
+            segment for segment in segments if segment.compressible and segment.text.strip()
+        ]
+
+        compressor = self._load() if compressible_segments else None
+        output_parts: list[str] = []
+        labeled_tokens: list[CompressionToken] = []
+        output_sections: list[CompressionOutputSection] = []
+
+        for segment in segments:
+            if not segment.compressible or not segment.text.strip():
+                output_parts.append(segment.text)
+                token = self._kept_segment_token(segment)
+                labeled_tokens.append(token)
+                output_sections.append(
+                    CompressionOutputSection(
+                        text=segment.text,
+                        kind=segment.kind,
+                        compressed=segment.kind in {"html", "toon"},
+                        protected=not segment.compressible,
+                        labeled_tokens=[token],
+                    )
+                )
+                continue
+
+            compressed_part, segment_labels = self._compress_segment(
+                compressor,
+                segment,
+                target_rate,
+            )
+            output_parts.append(compressed_part)
+            labeled_tokens.extend(segment_labels)
+            output_sections.append(
+                CompressionOutputSection(
+                    text=compressed_part,
+                    kind=segment.kind,
+                    compressed=True,
+                    protected=False,
+                    labeled_tokens=segment_labels,
+                )
+            )
+
+        compressed_text = "".join(output_parts)
+        original_tokens = len(text.split())
+        compressed_tokens = len(compressed_text.split())
 
         reduction = 0.0
         if original_tokens:
@@ -141,4 +201,5 @@ class PromptCompressionService:
             model=self.model_name,
             elapsed_ms=(time.perf_counter() - start) * 1000,
             labeled_tokens=labeled_tokens,
+            output_sections=output_sections,
         )
