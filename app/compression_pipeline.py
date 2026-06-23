@@ -22,6 +22,12 @@ JSON_FENCE_PATTERN = re.compile(
     re.DOTALL,
 )
 
+HTML_BLOCK_PATTERN = re.compile(
+    r"<(?P<tag>html|body|main|article|section|div|table|ul|ol|pre|code|p)\b[^>]*>"
+    r".*?</(?P=tag)\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 @dataclass(frozen=True)
 class CompressionSegment:
@@ -108,16 +114,12 @@ class PromptPreprocessor:
         while search_cursor < len(text):
             start = self._find_json_start(text, search_cursor)
             if start is None:
-                segment = self._prose_segment(text[cursor:])
-                if segment is not None:
-                    segments.append(segment)
+                segments.extend(self._prose_segments(text[cursor:]))
                 break
 
             end = self._find_balanced_json_end(text, start)
             if end is None:
-                segment = self._prose_segment(text[cursor:])
-                if segment is not None:
-                    segments.append(segment)
+                segments.extend(self._prose_segments(text[cursor:]))
                 break
 
             candidate = text[start:end]
@@ -127,13 +129,32 @@ class PromptPreprocessor:
                 continue
 
             if start > cursor:
-                segment = self._prose_segment(text[cursor:start])
-                if segment is not None:
-                    segments.append(segment)
+                segments.extend(self._prose_segments(text[cursor:start]))
 
             segments.append(json_segment)
             cursor = end
             search_cursor = end
+
+        return segments
+
+    def _prose_segments(self, text: str) -> list[CompressionSegment]:
+        segments: list[CompressionSegment] = []
+        cursor = 0
+
+        for match in HTML_BLOCK_PATTERN.finditer(text):
+            prose_segment = self._prose_segment(text[cursor : match.start()])
+            if prose_segment is not None:
+                segments.append(prose_segment)
+
+            html_segment = self._prose_segment(match.group(0))
+            if html_segment is not None:
+                segments.append(html_segment)
+
+            cursor = match.end()
+
+        prose_segment = self._prose_segment(text[cursor:])
+        if prose_segment is not None:
+            segments.append(prose_segment)
 
         return segments
 

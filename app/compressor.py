@@ -6,6 +6,7 @@ from typing import Any
 
 from app.compression_pipeline import CompressionSegment, PromptPreprocessor
 from app.protected_spans import force_tokens_for_text
+from app.token_estimator import estimate_token_count
 
 DEFAULT_MODEL = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
 
@@ -184,8 +185,8 @@ class PromptCompressionService:
             )
 
         compressed_text = "".join(output_parts)
-        original_tokens = len(text.split())
-        compressed_tokens = len(compressed_text.split())
+        original_tokens = estimate_token_count(text)
+        compressed_tokens = estimate_token_count(compressed_text)
 
         reduction = 0.0
         if original_tokens:

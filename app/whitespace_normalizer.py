@@ -61,7 +61,7 @@ class _HtmlWhitespaceParser(HTMLParser):
         self.parts.append(f"<![{data}]>")
 
     def normalized(self) -> str:
-        return "".join(self.parts).strip()
+        return "".join(self.parts)
 
     def _format_starttag(
         self,
@@ -104,7 +104,28 @@ def _normalize_html_whitespace(text: str) -> str:
     parser = _HtmlWhitespaceParser()
     parser.feed(text)
     parser.close()
-    return parser.normalized()
+    normalized = parser.normalized().strip()
+    return f"{_leading_boundary(text)}{normalized}{_trailing_boundary(text)}"
+
+
+def _leading_boundary(text: str) -> str:
+    match = re.match(r"\s+", text)
+    if match is None:
+        return ""
+    return _compact_boundary(match.group(0))
+
+
+def _trailing_boundary(text: str) -> str:
+    match = re.search(r"\s+$", text)
+    if match is None:
+        return ""
+    return _compact_boundary(match.group(0))
+
+
+def _compact_boundary(boundary: str) -> str:
+    if "\n" in boundary or "\r" in boundary:
+        return "\n"
+    return " "
 
 
 def _normalize_markdown_safe_whitespace(text: str) -> str:

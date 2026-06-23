@@ -41,6 +41,29 @@ Please review the risk summary."""
     ]
 
 
+def test_toonified_json_keeps_boundary_before_following_html():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = """Please review:
+{
+  "users": [
+    {"id": 1, "name": "Alice", "role": "admin"},
+    {"id": 2, "name": "Bob", "role": "user"},
+    {"id": 3, "name": "Cora", "role": "user"}
+  ]
+}
+
+<html>   
+  <a>a</a>   <b>b</b>
+</html>"""
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert "  3,Cora,user\n<html>" in result.compressed_text
+    assert "<a>a</a> <b>b</b>" in result.compressed_text
+    assert "<a>a</a><b>b</b>" not in result.compressed_text
+
+
 def test_toon_unavailable_preserves_json_and_still_skips_model():
     def unavailable_toon_encoder(value: Any) -> str:
         raise ToonEncodingError("missing")

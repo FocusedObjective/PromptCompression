@@ -35,3 +35,37 @@ def test_html_whitespace_normalization_skips_model():
     assert result.output_sections[0].kind == "html"
     assert result.output_sections[0].compressed is True
     assert result.output_sections[0].protected is True
+
+
+def test_html_blocks_are_split_from_surrounding_prose():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = """<html>
+  <a>a</a>   <b>b</b>
+</html>
+
+Do not remove API keys, URLs, dates, or hard constraints.
+
+<html>
+  <a>a</a>   <b>b</b>
+</html>
+
+and html?"""
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert [section.kind for section in result.output_sections] == [
+        "html",
+        "prose",
+        "html",
+        "prose",
+    ]
+    assert compressor.inputs == [
+        "\n\nDo not remove API keys, URLs, dates, or hard constraints.\n\n",
+        "\n\nand html?",
+    ]
+    assert "<a>a</a> <b>b</b>" in result.compressed_text
+    assert "<a>a</a><b>b</b>" not in result.compressed_text
+    assert "</html>\n\nDo not remove" in result.compressed_text
+    assert "constraints.\n\n<html>" in result.compressed_text
+    assert "</html>\n\nand html?" in result.compressed_text

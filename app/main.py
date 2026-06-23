@@ -298,7 +298,7 @@ APP_HTML = """
       </div>
       <div class="stats" aria-live="polite">
         <div class="stat"><strong id="reduction">-</strong><span>Reduction</span></div>
-        <div class="stat"><strong id="tokens">-</strong><span>Tokens</span></div>
+        <div class="stat"><strong id="tokens">-</strong><span>Est. tokens</span></div>
         <div class="stat"><strong id="elapsed">-</strong><span>Elapsed</span></div>
       </div>
     </header>
@@ -353,6 +353,10 @@ The assistant must return concise output and preserve critical details.</textare
     function setStatus(message, isError = false) {
       resultStatus.textContent = message;
       resultStatus.className = isError ? "status error" : "status";
+    }
+
+    function estimateTokenCount(text) {
+      return (text.match(/[\\p{L}\\p{N}]+|[^\\s]/gu) || []).length;
     }
 
     function renderTokenDiff(container, labeledTokens) {
@@ -428,8 +432,8 @@ The assistant must return concise output and preserve critical details.</textare
     });
 
     promptInput.addEventListener("input", () => {
-      const count = promptInput.value.trim() ? promptInput.value.trim().split(/\\s+/).length : 0;
-      inputStatus.textContent = `${count} words`;
+      const count = estimateTokenCount(promptInput.value);
+      inputStatus.textContent = `${count} est. tokens`;
     });
     promptInput.dispatchEvent(new Event("input"));
 

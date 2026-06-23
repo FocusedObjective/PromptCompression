@@ -45,3 +45,16 @@ def test_html_whitespace_is_normalized_and_protected_tags_are_preserved():
     )
     assert result.kind == "html"
     assert result.compressible is False
+
+
+def test_html_inline_element_spacing_is_preserved():
+    result = normalize_whitespace("<html>   <a>a</a>   <b>b</b>\n</html>")
+
+    assert result.text == "<html> <a>a</a> <b>b</b> </html>"
+    assert "<a>a</a><b>b</b>" not in result.text
+
+
+def test_html_leading_newline_boundary_is_preserved():
+    result = normalize_whitespace("\n\n<html>   <a>a</a>   <b>b</b>\n</html>")
+
+    assert result.text == "\n<html> <a>a</a> <b>b</b> </html>"
