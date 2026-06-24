@@ -37,6 +37,32 @@ class CompressResponse(BaseModel):
     output_sections: list[OutputSection] = Field(default_factory=list)
 
 
+class V1CompressionSettings(BaseModel):
+    aggressiveness: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="0.0 keeps almost everything; 1.0 is most aggressive.",
+    )
+
+
+class V1CompressRequest(BaseModel):
+    model: str = Field(default="bear-2", description="Accepted for request compatibility.")
+    input: str = Field(..., min_length=1, description="Text to compress.")
+    compression_settings: V1CompressionSettings | None = None
+
+
+class V1CompressResponse(BaseModel):
+    output: str
+    output_tokens: int
+    input_tokens: int
+    original_input_tokens: int
+    tokens_saved: int
+    compression_ratio: float
+    compression_time: float
+    warnings: list[str] = Field(default_factory=list)
+
+
 class HealthResponse(BaseModel):
     status: str
     model: str

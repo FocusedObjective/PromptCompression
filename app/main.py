@@ -1,10 +1,21 @@
 from dataclasses import asdict
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from app.compressor import CompressionRuntimeError, PromptCompressionService
-from app.schemas import CompressRequest, CompressResponse, HealthResponse
+from app.schemas import (
+    CompressRequest,
+    CompressResponse,
+    HealthResponse,
+    V1CompressRequest,
+    V1CompressResponse,
+)
+
+DASHBOARD_EMBED_HEADERS = {
+    "Content-Security-Policy": "frame-ancestors *",
+}
 
 APP_HTML = """
 <!doctype html>
@@ -147,6 +158,46 @@ APP_HTML = """
       flex-wrap: wrap;
     }
 
+    .tag-reference {
+      display: grid;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: #fbfcfe;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .tag-reference-title {
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .tag-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 12px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .tag-list li {
+      min-width: 0;
+    }
+
+    code {
+      padding: 1px 4px;
+      border: 1px solid #dce3ee;
+      border-radius: 4px;
+      background: #f2f5f9;
+      color: #27354a;
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      overflow-wrap: anywhere;
+    }
+
     label {
       display: flex;
       align-items: center;
@@ -278,6 +329,10 @@ APP_HTML = """
         grid-template-columns: 1fr;
       }
 
+      .tag-list {
+        grid-template-columns: 1fr;
+      }
+
       textarea {
         min-height: 320px;
       }
@@ -313,6 +368,17 @@ APP_HTML = """
 
 Do not remove API keys, URLs, dates, or hard constraints.
 The assistant must return concise output and preserve critical details.</textarea>
+        <div class="tag-reference">
+          <div class="tag-reference-title">Optional preserve controls</div>
+          <ul class="tag-list">
+            <li><code>&lt;nocompress&gt;...&lt;/nocompress&gt;</code> skips model compression and removes the wrapper.</li>
+            <li><code>```json ... ```</code> protects medium/large JSON, converting to TOON when smaller.</li>
+            <li><code>{...}</code> or <code>[...]</code> medium/large raw JSON uses the same JSON protection path.</li>
+            <li>HTML blocks <code>&lt;html&gt;</code>, <code>&lt;body&gt;</code>, <code>&lt;main&gt;</code>, <code>&lt;article&gt;</code>, <code>&lt;section&gt;</code>, <code>&lt;div&gt;</code>, <code>&lt;table&gt;</code>, <code>&lt;ul&gt;</code>, <code>&lt;ol&gt;</code>, <code>&lt;pre&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;p&gt;</code> are whitespace-normalized and protected.</li>
+            <li><code>&lt;pre&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;textarea&gt;</code> preserve internal whitespace inside HTML.</li>
+            <li><code>```</code> and <code>~~~</code> markdown fences preserve whitespace during cleanup; wrap with <code>&lt;nocompress&gt;</code> to skip compression.</li>
+          </ul>
+        </div>
         <div class="controls">
           <label>
             Aggressiveness
@@ -509,13 +575,19 @@ app = FastAPI(
     version="0.1.0",
     description="Fast prompt compression API backed by a token-classification model.",
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 compression_service = PromptCompressionService()
 
 
 @app.get("/", response_class=HTMLResponse)
-def index() -> str:
-    return APP_HTML
+def index() -> HTMLResponse:
+    return HTMLResponse(content=APP_HTML, headers=DASHBOARD_EMBED_HEADERS)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -538,3 +610,41 @@ def compress(request: CompressRequest) -> CompressResponse:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return CompressResponse(**asdict(result))
+
+
+@app.post("/v1/compress", response_model=V1CompressResponse)
+def compress_v1(
+    request: V1CompressRequest,
+) -> V1CompressResponse:
+    aggressiveness = 0.25
+    if (
+        request.compression_settings is not None
+        and request.compression_settings.aggressiveness is not None
+    ):
+        aggressiveness = request.compression_settings.aggressiveness
+
+    try:
+        result = compression_service.compress(
+            text=request.input,
+            aggressiveness=aggressiveness,
+        )
+    except CompressionRuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    tokens_saved = max(0, result.original_tokens - result.compressed_tokens)
+    compression_ratio = (
+        0.0
+        if result.compressed_tokens == 0
+        else result.original_tokens / result.compressed_tokens
+    )
+
+    return V1CompressResponse(
+        output=result.compressed_text,
+        output_tokens=result.compressed_tokens,
+        input_tokens=result.original_tokens,
+        original_input_tokens=result.original_tokens,
+        tokens_saved=tokens_saved,
+        compression_ratio=compression_ratio,
+        compression_time=result.elapsed_ms,
+        warnings=[],
+    )

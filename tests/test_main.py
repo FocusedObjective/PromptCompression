@@ -1,6 +1,12 @@
+from fastapi.testclient import TestClient
+
 from app import main
 from app.compressor import CompressionOutputSection, CompressionResult, CompressionToken
-from app.schemas import CompressRequest
+from app.schemas import (
+    CompressRequest,
+    V1CompressRequest,
+    V1CompressionSettings,
+)
 
 
 class FakeCompressionService:
@@ -8,6 +14,8 @@ class FakeCompressionService:
     is_loaded = True
 
     def compress(self, text: str, aggressiveness: float) -> CompressionResult:
+        self.last_text = text
+        self.last_aggressiveness = aggressiveness
         return CompressionResult(
             compressed_text="Prompts code.",
             original_tokens=4,
@@ -40,10 +48,39 @@ class FakeCompressionService:
 
 def test_index_returns_prompt_compression_ui():
     response = main.index()
+    body = response.body.decode()
 
-    assert "Prompt Compression" in response
-    assert "Dropped Words Highlighted" in response
-    assert "JSON compressed to TOON" in response
+    assert "Prompt Compression" in body
+    assert "Dropped Words Highlighted" in body
+    assert "JSON compressed to TOON" in body
+    assert "Optional preserve controls" in body
+    assert "&lt;nocompress&gt;...&lt;/nocompress&gt;" in body
+    assert "markdown fences preserve whitespace" in body
+
+
+def test_index_http_allows_iframe_embedding():
+    client = TestClient(main.app)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-security-policy"] == "frame-ancestors *"
+    assert "x-frame-options" not in response.headers
+
+
+def test_api_allows_sandboxed_iframe_fetches():
+    client = TestClient(main.app)
+
+    response = client.options(
+        "/compress",
+        headers={
+            "Origin": "null",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
 
 
 def test_compress_response_includes_labeled_tokens(monkeypatch):
@@ -71,3 +108,74 @@ def test_compress_response_includes_labeled_tokens(monkeypatch):
             ],
         }
     ]
+
+
+def test_v1_compress_returns_compatible_shape(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1(
+        V1CompressRequest(
+            model="bear-2",
+            input="Prompts are code.",
+            compression_settings=V1CompressionSettings(
+                aggressiveness=0.6
+            ),
+        )
+    )
+
+    assert service.last_text == "Prompts are code."
+    assert service.last_aggressiveness == 0.6
+    assert response.model_dump() == {
+        "output": "Prompts code.",
+        "output_tokens": 2,
+        "input_tokens": 4,
+        "original_input_tokens": 4,
+        "tokens_saved": 2,
+        "compression_ratio": 2.0,
+        "compression_time": 12.5,
+        "warnings": [],
+    }
+
+
+def test_v1_compress_defaults_aggressiveness(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    main.compress_v1(
+        V1CompressRequest(
+            model="bear-2",
+            input="Prompts are code.",
+        )
+    )
+
+    assert service.last_aggressiveness == 0.25
+
+
+def test_v1_compress_http_accepts_compatible_request(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/v1/compress",
+        headers={"Authorization": "Bearer test-key"},
+        json={
+            "model": "bear-2",
+            "input": "Prompts are code.",
+            "compression_settings": {"aggressiveness": 0.4},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "output": "Prompts code.",
+        "output_tokens": 2,
+        "input_tokens": 4,
+        "original_input_tokens": 4,
+        "tokens_saved": 2,
+        "compression_ratio": 2.0,
+        "compression_time": 12.5,
+        "warnings": [],
+    }
+    assert service.last_aggressiveness == 0.4

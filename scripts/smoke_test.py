@@ -1,9 +1,10 @@
 import json
+import os
 import sys
 
 import requests
 
-API_URL = "http://127.0.0.1:8000/compress"
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/compress")
 
 PAYLOAD = {
     "aggressiveness": 0.25,

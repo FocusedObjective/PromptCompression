@@ -97,6 +97,42 @@ Response:
 }
 ```
 
+### `POST /v1/compress`
+
+Compatibility endpoint for clients that expect a `/v1/compress` API with
+`input`, `output`, and token-savings fields. This service runs the local
+`COMPRESSOR_MODEL`. The `model` value is accepted for request compatibility.
+
+Request:
+
+```json
+{
+  "model": "bear-2",
+  "input": "Prompts are production code. Manage them that way.",
+  "compression_settings": {
+    "aggressiveness": 0.25
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "output": "Prompts production code. Manage way.",
+  "output_tokens": 8,
+  "input_tokens": 12,
+  "original_input_tokens": 12,
+  "tokens_saved": 4,
+  "compression_ratio": 1.5,
+  "compression_time": 123.4,
+  "warnings": []
+}
+```
+
+Use `http://127.0.0.1:8000/v1/compress` for the local compatible endpoint.
+Bearer auth headers are ignored and not required by the local MVP.
+
 ## How Aggressiveness Works
 
 This MVP maps `aggressiveness` to LLMLingua-2's retention `rate`.
@@ -120,7 +156,9 @@ Included files:
 
 ## Docker
 
-The Docker image targets Python 3.14.
+The Docker image targets Python 3.14 and exposes the API on container port `8080`.
+The Hugging Face model is downloaded during the Docker build and baked into the
+image so Cloud Run does not need to download it on first request.
 
 Build:
 
@@ -140,21 +178,119 @@ Then visit:
 http://127.0.0.1:8080/docs
 ```
 
+### Docker Compose
+
+For a repeatable local deployment instance with a persistent Hugging Face model
+cache:
+
+```powershell
+docker compose up --build -d
+```
+
+Check the container:
+
+```powershell
+docker compose ps
+curl http://127.0.0.1:8080/health
+```
+
+Run the smoke test against Docker:
+
+```powershell
+$env:API_URL="http://127.0.0.1:8080/compress"
+python scripts\smoke_test.py
+```
+
+Stop it:
+
+```powershell
+docker compose down
+```
+
+To remove the downloaded model cache too:
+
+```powershell
+docker compose down -v
+```
+
+If Docker reports `Access is denied` for `//./pipe/docker_engine`, run the Docker
+commands from an elevated terminal or update Docker Desktop permissions for your
+Windows user.
+
 ## Cloud Run Hosting Shape
 
-For the lightest hosted MVP:
+Cloud Run sends traffic to the port in its `PORT` environment variable. The
+Dockerfile uses that value and falls back to `8080` for local Docker runs.
 
-1. Build this Docker image.
-2. Push it to Artifact Registry or another container registry.
-3. Deploy it to Cloud Run.
-4. Use 1-2 vCPU and 1-2 GB RAM to start.
-5. Set `min_instances=1` if cold starts are unacceptable.
+Set your project and region:
+
+```powershell
+gcloud config set project YOUR_PROJECT_ID
+$env:REGION="us-central1"
+$env:SERVICE="prompt-compression"
+$env:REPO="prompt-compression"
+$env:PROJECT_ID="$(gcloud config get-value project)"
+$env:IMAGE="$env:REGION-docker.pkg.dev/$env:PROJECT_ID/$env:REPO/$env:SERVICE`:latest"
+```
+
+Enable the required services:
+
+```powershell
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
+```
+
+Create the Artifact Registry repository once:
+
+```powershell
+gcloud artifacts repositories create $env:REPO `
+  --repository-format=docker `
+  --location=$env:REGION `
+  --description="Prompt Compression images"
+```
+
+Build and push the image with Cloud Build:
+
+```powershell
+gcloud builds submit --tag $env:IMAGE .
+```
+
+Deploy to Cloud Run:
+
+```powershell
+gcloud run deploy $env:SERVICE `
+  --image $env:IMAGE `
+  --region $env:REGION `
+  --platform managed `
+  --allow-unauthenticated `
+  --port 8080 `
+  --cpu 2 `
+  --memory 4Gi `
+  --concurrency 1 `
+  --timeout 300s `
+  --set-env-vars COMPRESSOR_DEVICE=cpu,COMPRESSOR_MIN_RATE=0.45
+```
+
+Use `--no-allow-unauthenticated` instead of `--allow-unauthenticated` if the API
+should require IAM authentication.
+
+Check the deployed service:
+
+```powershell
+$env:SERVICE_URL="$(gcloud run services describe $env:SERVICE --region $env:REGION --format='value(status.url)')"
+curl "$env:SERVICE_URL/health"
+$env:API_URL="$env:SERVICE_URL/compress"
+python scripts\smoke_test.py
+```
+
+For lower cold-start latency, redeploy with `--min-instances 1`. That keeps one
+instance warm and increases idle cost. To use a different Hugging Face model,
+rebuild with `--build-arg COMPRESSOR_MODEL=...` so the runtime stays offline and
+deterministic.
 
 Later optimization steps:
 
 - Export the classifier to ONNX.
 - Quantize to INT8.
-- Bake the model into the image instead of downloading on first startup.
 - Add metrics for latency, reduction percentage, and model version.
 
 ## Notes

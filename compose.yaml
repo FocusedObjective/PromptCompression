@@ -1,0 +1,19 @@
+services:
+  prompt-compression:
+    build:
+      context: .
+    image: prompt-compression:local
+    ports:
+      - "8080:8080"
+    environment:
+      COMPRESSOR_MODEL: ${COMPRESSOR_MODEL:-microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank}
+      COMPRESSOR_MIN_RATE: ${COMPRESSOR_MIN_RATE:-0.45}
+      COMPRESSOR_DEVICE: ${COMPRESSOR_DEVICE:-cpu}
+      HF_HOME: /cache/huggingface
+      TRANSFORMERS_CACHE: /cache/huggingface
+    volumes:
+      - huggingface-cache:/cache/huggingface
+    restart: unless-stopped
+
+volumes:
+  huggingface-cache:
