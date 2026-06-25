@@ -30,13 +30,9 @@ def test_markdown_fenced_code_whitespace_is_preserved():
 
 
 def test_html_whitespace_is_preserved_verbatim_and_protected():
-    html = """<div>
-  <p>Please   review</p>
-  <!-- remove me -->
-  <pre>  keep
+    html = """<pre>  keep
 
-   exact </pre>
-</div>"""
+   exact </pre>"""
 
     result = normalize_whitespace(html)
 
@@ -76,6 +72,13 @@ def test_embedded_html_example_does_not_protect_surrounding_prompt():
     text = "The prompt may mention <div>example</div> without becoming an HTML document."
 
     result = normalize_whitespace(text)
+
+    assert result.kind == "prose"
+    assert result.compressible is True
+
+
+def test_common_html_content_tags_are_not_protected():
+    result = normalize_whitespace("<div><p>Please review.</p></div>")
 
     assert result.kind == "prose"
     assert result.compressible is True

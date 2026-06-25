@@ -121,7 +121,7 @@ This is the recommended deployment path because it does not require local Docker
 ```powershell
 gcloud builds submit `
   --config cloudbuild.yaml `
-  --substitutions _REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE `
+  --substitutions="_REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE" `
   .
 ```
 
@@ -189,7 +189,7 @@ From the repository root:
 python -m pytest
 gcloud builds submit `
   --config cloudbuild.yaml `
-  --substitutions _REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE `
+  --substitutions="_REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE" `
   .
 gcloud run deploy $env:SERVICE `
   --image $env:IMAGE `
@@ -263,7 +263,7 @@ If you change `COMPRESSOR_MODEL`, rebuild the image so the new model is download
 ```powershell
 gcloud builds submit `
   --config cloudbuild.yaml `
-  --substitutions _REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE,_COMPRESSOR_MODEL=YOUR_HUGGING_FACE_MODEL `
+  --substitutions="_REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE,_COMPRESSOR_MODEL=YOUR_HUGGING_FACE_MODEL" `
   .
 ```
 

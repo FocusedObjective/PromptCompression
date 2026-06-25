@@ -17,16 +17,31 @@ NOCOMPRESS_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-JSON_FENCE_PATTERN = re.compile(
-    r"(?P<fence>`{3,})(?P<lang>json|JSON)[^\n]*\n(?P<body>.*?)(?P=fence)",
+MARKDOWN_FENCE_PATTERN = re.compile(
+    r"(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)\n"
+    r"(?P<body>.*?)(?:\n(?P=fence)[ \t]*(?:\n|$)|(?P=fence))",
     re.DOTALL,
 )
-
-HTML_BLOCK_PATTERN = re.compile(
-    r"<(?P<tag>html|body|main|article|section|div|table|ul|ol|pre|code|p)\b[^>]*>"
-    r".*?</(?P=tag)\s*>",
-    re.IGNORECASE | re.DOTALL,
+JSON_START_PATTERN = re.compile(r"[{\[]")
+HTML_BLOCK_TAGS = (
+    "html",
+    "head",
+    "body",
+    "pre",
+    "code",
+    "script",
+    "style",
+    "template",
+    "svg",
 )
+HTML_START_TAG_PATTERN = re.compile(
+    r"<(?P<tag>" + "|".join(HTML_BLOCK_TAGS) + r")\b[^>]*>",
+    re.IGNORECASE,
+)
+HTML_END_TAG_PATTERNS = {
+    tag: re.compile(r"</" + tag + r"\s*>", re.IGNORECASE)
+    for tag in HTML_BLOCK_TAGS
+}
 UI_BLOCK_PATTERN = re.compile(
     r"(?ms)^\[(?P<name>UI|FOLLOW_ON_QUESTIONS|SWITCH_PANEL_AGENT)\]\s*\n"
     r".*?^\[/(?P=name)\][ \t]*(?:\n|$)",
@@ -115,19 +130,34 @@ class PromptPreprocessor:
         self,
         text: str,
     ) -> list[CompressionSegment]:
+        if "```" not in text and "~~~" not in text:
+            return self._prepare_raw_json_text(text)
+
         segments: list[CompressionSegment] = []
         cursor = 0
 
-        for match in JSON_FENCE_PATTERN.finditer(text):
+        for match in MARKDOWN_FENCE_PATTERN.finditer(text):
             segments.extend(self._prepare_raw_json_text(text[cursor : match.start()]))
+
+            if not self._is_json_fence(match.group("info")):
+                segments.append(
+                    CompressionSegment(
+                        text=match.group(0),
+                        compressible=False,
+                        kind="code",
+                    )
+                )
+                cursor = match.end()
+                continue
+
             body = match.group("body").rstrip("\n")
-            json_segment = self._json_segment_for_candidate(body)
+            json_segment = self._json_segment_for_candidate(body, allow_toon=False)
             if json_segment is None:
                 segments.append(
                     CompressionSegment(
                         text=match.group(0),
-                        compressible=True,
-                        kind="prose",
+                        compressible=False,
+                        kind="code",
                     )
                 )
             elif json_segment.kind == "toon":
@@ -155,7 +185,14 @@ class PromptPreprocessor:
         segments.extend(self._prepare_raw_json_text(text[cursor:]))
         return segments
 
+    def _is_json_fence(self, info: str) -> bool:
+        language = info.strip().split(maxsplit=1)[0].lower() if info.strip() else ""
+        return language == "json"
+
     def _special_spans(self, text: str) -> list[_Span]:
+        if "[" not in text and "#" not in text:
+            return []
+
         spans: list[_Span] = []
         for pattern in (
             UI_BLOCK_PATTERN,
@@ -200,7 +237,11 @@ class PromptPreprocessor:
                 break
 
             candidate = text[start:end]
-            json_segment = self._json_segment_for_candidate(candidate)
+            leading_context = text[max(0, cursor) : start]
+            json_segment = self._json_segment_for_candidate(
+                candidate,
+                leading_context=leading_context,
+            )
             if json_segment is None:
                 search_cursor = end
                 continue
@@ -215,25 +256,55 @@ class PromptPreprocessor:
         return segments
 
     def _prose_segments(self, text: str) -> list[CompressionSegment]:
+        if "<" not in text:
+            prose_segment = self._prose_segment(text)
+            return [] if prose_segment is None else [prose_segment]
+
         segments: list[CompressionSegment] = []
         cursor = 0
 
-        for match in HTML_BLOCK_PATTERN.finditer(text):
-            prose_segment = self._prose_segment(text[cursor : match.start()])
+        for span in self._html_block_spans(text):
+            prose_segment = self._prose_segment(text[cursor : span.start])
             if prose_segment is not None:
                 segments.append(prose_segment)
 
-            html_segment = self._prose_segment(match.group(0))
+            html_segment = self._prose_segment(text[span.start : span.end])
             if html_segment is not None:
                 segments.append(html_segment)
 
-            cursor = match.end()
+            cursor = span.end
 
         prose_segment = self._prose_segment(text[cursor:])
         if prose_segment is not None:
             segments.append(prose_segment)
 
         return segments
+
+    def _html_block_spans(self, text: str) -> list[_Span]:
+        spans: list[_Span] = []
+        cursor = 0
+        missing_close_tags: set[str] = set()
+
+        while cursor < len(text):
+            start_match = HTML_START_TAG_PATTERN.search(text, cursor)
+            if start_match is None:
+                break
+
+            tag = start_match.group("tag").lower()
+            if tag in missing_close_tags:
+                cursor = start_match.end()
+                continue
+
+            end_match = HTML_END_TAG_PATTERNS[tag].search(text, start_match.end())
+            if end_match is None:
+                missing_close_tags.add(tag)
+                cursor = start_match.end()
+                continue
+
+            spans.append(_Span(start_match.start(), end_match.end()))
+            cursor = end_match.end()
+
+        return spans
 
     def _prose_segment(self, text: str) -> CompressionSegment | None:
         if not text:
@@ -249,12 +320,26 @@ class PromptPreprocessor:
             kind=normalized.kind,
         )
 
-    def _json_segment_for_candidate(self, candidate: str) -> CompressionSegment | None:
-        parsed = self._parse_json(candidate)
-        if parsed is None or not self._is_medium_large_json(candidate):
+    def _json_segment_for_candidate(
+        self,
+        candidate: str,
+        *,
+        allow_toon: bool = True,
+        leading_context: str = "",
+    ) -> CompressionSegment | None:
+        if not self._is_medium_large_json(candidate):
             return None
 
-        if self._contains_llm_tool_exchange(parsed):
+        parsed = self._parse_json(candidate)
+        if parsed is None:
+            return None
+
+        if (
+            not allow_toon
+            or self._context_requires_verbatim_json(leading_context)
+            or self._contains_llm_tool_exchange(parsed)
+            or self._contains_duplicate_json_keys(candidate)
+        ):
             return CompressionSegment(text=candidate, compressible=False, kind="json")
 
         try:
@@ -309,6 +394,66 @@ class PromptPreprocessor:
 
         return any(self._contains_llm_tool_exchange(item) for item in value.values())
 
+    def _contains_duplicate_json_keys(self, candidate: str) -> bool:
+        duplicate_found = False
+
+        def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            nonlocal duplicate_found
+            seen: set[str] = set()
+            for key, _value in pairs:
+                if key in seen:
+                    duplicate_found = True
+                seen.add(key)
+            return dict(pairs)
+
+        try:
+            json.loads(candidate, object_pairs_hook=reject_duplicates)
+        except json.JSONDecodeError:
+            return False
+
+        return duplicate_found
+
+    def _context_requires_verbatim_json(self, leading_context: str) -> bool:
+        context = leading_context[-300:].lower()
+        if not context:
+            return False
+
+        explicit_json_terms = (
+            "exact json",
+            "exactly this json",
+            "valid json",
+            "json syntax",
+            "json schema",
+            "return json",
+            "respond with json",
+            "output json",
+            "must be json",
+            "json template",
+            "template json",
+            "json fixture",
+            "fixture json",
+            "json example",
+            "example json",
+        )
+        if any(term in context for term in explicit_json_terms):
+            return True
+
+        if re.search(r"\b(?:schema|template|fixture)\s*:", context):
+            return True
+
+        exactness_terms = (
+            "verbatim",
+            "unchanged",
+            "preserve",
+            "do not change",
+            "don't change",
+            "return exactly",
+        )
+        json_target_terms = ("json", "schema", "template", "fixture")
+        return any(term in context for term in exactness_terms) and any(
+            term in context for term in json_target_terms
+        )
+
     def _is_medium_large_json(self, candidate: str) -> bool:
         if len(candidate) >= self.min_json_chars:
             return True
@@ -321,14 +466,10 @@ class PromptPreprocessor:
             return None
 
     def _find_json_start(self, text: str, start: int) -> int | None:
-        positions = [
-            position
-            for position in (text.find("{", start), text.find("[", start))
-            if position != -1
-        ]
-        if not positions:
+        match = JSON_START_PATTERN.search(text, start)
+        if match is None:
             return None
-        return min(positions)
+        return match.start()
 
     def _find_balanced_json_end(self, text: str, start: int) -> int | None:
         opening = text[start]

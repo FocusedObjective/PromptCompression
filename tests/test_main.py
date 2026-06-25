@@ -13,9 +13,29 @@ class FakeCompressionService:
     model_name = "fake-model"
     is_loaded = True
 
-    def compress(self, text: str, aggressiveness: float) -> CompressionResult:
+    def compress(
+        self,
+        text: str,
+        aggressiveness: float,
+        include_sections: bool = True,
+    ) -> CompressionResult:
         self.last_text = text
         self.last_aggressiveness = aggressiveness
+        self.last_include_sections = include_sections
+        labels = [
+            CompressionToken(text="Prompts", kept=True),
+            CompressionToken(text="are", kept=False),
+            CompressionToken(text="code.", kept=True),
+        ] if include_sections else []
+        sections = [
+            CompressionOutputSection(
+                text="Prompts code.",
+                kind="prose",
+                compressed=True,
+                protected=False,
+                labeled_tokens=labels,
+            )
+        ] if include_sections else []
         return CompressionResult(
             compressed_text="Prompts code.",
             original_tokens=4,
@@ -25,24 +45,8 @@ class FakeCompressionService:
             target_rate=0.75,
             model=self.model_name,
             elapsed_ms=12.5,
-            labeled_tokens=[
-                CompressionToken(text="Prompts", kept=True),
-                CompressionToken(text="are", kept=False),
-                CompressionToken(text="code.", kept=True),
-            ],
-            output_sections=[
-                CompressionOutputSection(
-                    text="Prompts code.",
-                    kind="prose",
-                    compressed=True,
-                    protected=False,
-                    labeled_tokens=[
-                        CompressionToken(text="Prompts", kept=True),
-                        CompressionToken(text="are", kept=False),
-                        CompressionToken(text="code.", kept=True),
-                    ],
-                )
-            ],
+            labeled_tokens=labels,
+            output_sections=sections,
         )
 
 
@@ -55,7 +59,8 @@ def test_index_returns_prompt_compression_ui():
     assert "JSON compressed to TOON" in body
     assert "Optional preserve controls" in body
     assert "&lt;nocompress&gt;...&lt;/nocompress&gt;" in body
-    assert "markdown fences preserve whitespace" in body
+    assert "markdown fences are protected from compression" in body
+    assert "include_sections: true" in body
 
 
 def test_index_http_allows_iframe_embedding():
@@ -83,13 +88,32 @@ def test_api_allows_sandboxed_iframe_fetches():
     assert response.headers["access-control-allow-origin"] == "*"
 
 
-def test_compress_response_includes_labeled_tokens(monkeypatch):
-    monkeypatch.setattr(main, "compression_service", FakeCompressionService())
+def test_compress_response_omits_sections_by_default(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
 
     response = main.compress(
         CompressRequest(text="Prompts are code.", aggressiveness=0.25)
     )
 
+    assert service.last_include_sections is False
+    assert [token.model_dump() for token in response.labeled_tokens] == []
+    assert response.output_sections == []
+
+
+def test_compress_response_includes_sections_when_requested(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress(
+        CompressRequest(
+            text="Prompts are code.",
+            aggressiveness=0.25,
+            include_sections=True,
+        )
+    )
+
+    assert service.last_include_sections is True
     assert [token.model_dump() for token in response.labeled_tokens] == [
         {"text": "Prompts", "kept": True},
         {"text": "are", "kept": False},
@@ -126,6 +150,7 @@ def test_v1_compress_returns_compatible_shape(monkeypatch):
 
     assert service.last_text == "Prompts are code."
     assert service.last_aggressiveness == 0.6
+    assert service.last_include_sections is False
     assert response.model_dump() == {
         "output": "Prompts code.",
         "output_tokens": 2,
@@ -149,7 +174,7 @@ def test_v1_compress_defaults_aggressiveness(monkeypatch):
         )
     )
 
-    assert service.last_aggressiveness == 0.25
+    assert service.last_aggressiveness == main.DEFAULT_AGGRESSIVENESS
 
 
 def test_v1_compress_http_accepts_compatible_request(monkeypatch):

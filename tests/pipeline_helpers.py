@@ -7,6 +7,8 @@ from app.compressor import PromptCompressionService
 class RecordingCompressor:
     def __init__(self) -> None:
         self.inputs: list[str] = []
+        self.force_tokens_values: list[list[str]] = []
+        self.return_word_label_values: list[bool] = []
 
     def compress_prompt_llmlingua2(
         self,
@@ -16,6 +18,8 @@ class RecordingCompressor:
         return_word_label: bool,
     ) -> dict[str, str | int]:
         self.inputs.append(text)
+        self.force_tokens_values.append(force_tokens)
+        self.return_word_label_values.append(return_word_label)
         return {
             "compressed_prompt": text.replace("Please review", "Review"),
             "origin_tokens": len(text.split()),
@@ -41,4 +45,6 @@ def build_service_with_pipeline(
         min_json_lines=1,
         min_toon_savings=0.0,
     )
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
     return service

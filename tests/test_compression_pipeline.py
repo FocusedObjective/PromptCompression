@@ -12,19 +12,20 @@ def test_nocompress_tags_strip_tags_and_skip_model():
     assert protected in result.compressed_text
     assert "<nocompress>" not in result.compressed_text
     assert "</nocompress>" not in result.compressed_text
-    assert compressor.inputs == ["Please review before. ", " Please review after."]
+    assert compressor.inputs == [
+        "Please review before. __CK_KEEP_0000__ Please review after."
+    ]
+    assert protected not in compressor.inputs[0]
+    assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
+    assert compressor.return_word_label_values == [True]
 
 
 def test_html_preservation_skips_model():
     compressor = RecordingCompressor()
     service = build_service_with_pipeline(compressor)
-    html = """<div>
-  <p>Please   review</p>
-  <!-- remove me -->
-  <pre>  keep
+    html = """<pre>  keep
 
-   exact </pre>
-</div>"""
+   exact </pre>"""
 
     result = service.compress(html, aggressiveness=0.25)
 
@@ -33,6 +34,31 @@ def test_html_preservation_skips_model():
     assert result.output_sections[0].kind == "html"
     assert result.output_sections[0].compressed is False
     assert result.output_sections[0].protected is True
+
+
+def test_protected_segments_do_not_duplicate_full_text_as_labels():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    html = "<pre>" + ("x" * 1000) + "</pre>"
+
+    result = service.compress(html, aggressiveness=0.25)
+
+    assert result.compressed_text == html
+    assert result.labeled_tokens == []
+    assert result.output_sections[0].text == html
+    assert result.output_sections[0].labeled_tokens == []
+
+
+def test_common_html_content_tags_remain_compressible_prose():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    html = "<div><p>Please review this paragraph.</p></div>"
+
+    result = service.compress(html, aggressiveness=0.25)
+
+    assert compressor.inputs == [html]
+    assert [section.kind for section in result.output_sections] == ["prose"]
+    assert result.output_sections[0].protected is False
 
 
 def test_html_blocks_are_split_from_surrounding_prose():
@@ -59,13 +85,93 @@ and html?"""
         "prose",
     ]
     assert compressor.inputs == [
-        "\n\nDo not remove API keys, URLs, dates, or hard constraints.\n\n",
-        "\n\nand html?",
+        "__CK_KEEP_0000__\n\n"
+        "Do not remove API keys, URLs, dates, or hard constraints.\n\n"
+        "__CK_KEEP_0001__\n\n"
+        "and html?"
+    ]
+    assert compressor.force_tokens_values[0][:2] == [
+        "__CK_KEEP_0000__",
+        "__CK_KEEP_0001__",
     ]
     assert "  <a>a</a>   <b>b</b>" in result.compressed_text
     assert "</html>\n\nDo not remove" in result.compressed_text
     assert "constraints.\n\n<html>" in result.compressed_text
     assert "</html>\n\nand html?" in result.compressed_text
+
+
+def test_markdown_code_fence_is_protected_from_model():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    code = """```python
+def render():
+    return "<div>  keep spacing  </div>"
+```"""
+    text = f"Please review this implementation:\n{code}\nPlease review behavior."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert code in result.compressed_text
+    assert [section.kind for section in result.output_sections] == [
+        "prose",
+        "code",
+        "prose",
+    ]
+    assert compressor.inputs == [
+        "Please review this implementation:\n"
+        "__CK_KEEP_0000__"
+        "Please review behavior."
+    ]
+    assert code not in compressor.inputs[0]
+    assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
+
+
+def test_html_fence_is_not_split_by_inner_html_tags():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    code = """```html
+<div>
+  <p>Keep   spacing</p>
+</div>
+```"""
+    text = f"Please review this markup:\n{code}\nPlease review after."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert code in result.compressed_text
+    assert [section.kind for section in result.output_sections] == [
+        "prose",
+        "code",
+        "prose",
+    ]
+    assert compressor.inputs == [
+        "Please review this markup:\n__CK_KEEP_0000__Please review after."
+    ]
+    assert code not in compressor.inputs[0]
+    assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
+
+
+def test_script_blocks_are_preserved_verbatim():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    script = """<script>
+const defaults = {enabled: true, label: "Keep   spaces"};
+</script>"""
+    text = f"Please review this page:\n{script}\nPlease review after."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert script in result.compressed_text
+    assert [section.kind for section in result.output_sections] == [
+        "prose",
+        "html",
+        "prose",
+    ]
+    assert compressor.inputs == [
+        "Please review this page:\n__CK_KEEP_0000__\nPlease review after."
+    ]
+    assert script not in compressor.inputs[0]
+    assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
 
 
 def test_documented_tag_examples_remain_compressible_prose():
@@ -126,7 +232,11 @@ RIGHT:
         "verbatim",
         "prose",
     ]
-    assert compressor.inputs == ["Please review before.\n\n", "Please review after."]
+    assert compressor.inputs == [
+        "Please review before.\n\n__CK_KEEP_0000__Please review after."
+    ]
+    assert contract not in compressor.inputs[0]
+    assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
 
 
 def test_labeled_valid_json_uses_generic_json_pipeline():
@@ -154,9 +264,11 @@ Please review after."""
         "prose",
     ]
     assert compressor.inputs == [
-        "Please review before.\n\nPayload: ",
-        "\n\nPlease review after.",
+        "Please review before.\n\nPayload: __CK_KEEP_0000__\n\n"
+        "Please review after."
     ]
+    assert "users[3]{id,name,role}" not in compressor.inputs[0]
+    assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
 
 
 def test_labeled_invalid_json_is_not_repaired_or_toonified():

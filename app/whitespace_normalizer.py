@@ -9,24 +9,23 @@ FENCE_PATTERN = re.compile(
 
 HTML_BLOCK_TAGS = (
     "html",
+    "head",
     "body",
-    "main",
-    "article",
-    "section",
-    "div",
-    "table",
-    "ul",
-    "ol",
     "pre",
     "code",
-    "p",
+    "script",
+    "style",
+    "template",
+    "svg",
 )
-HTML_START_PATTERN = re.compile(r"\s*<(?:" + "|".join(HTML_BLOCK_TAGS) + r")\b", re.IGNORECASE)
-HTML_BLOCK_PATTERN = re.compile(
-    r"<(?P<tag>" + "|".join(HTML_BLOCK_TAGS) + r")\b[^>]*>"
-    r".*?</(?P=tag)\s*>",
-    re.IGNORECASE | re.DOTALL,
+HTML_FULL_START_PATTERN = re.compile(
+    r"\s*<(?P<tag>" + "|".join(HTML_BLOCK_TAGS) + r")\b[^>]*>",
+    re.IGNORECASE,
 )
+HTML_END_TAG_PATTERNS = {
+    tag: re.compile(r"</" + tag + r"\s*>", re.IGNORECASE)
+    for tag in HTML_BLOCK_TAGS
+}
 
 
 @dataclass(frozen=True)
@@ -37,10 +36,22 @@ class WhitespaceNormalization:
 
 
 def looks_like_html(text: str) -> bool:
-    return bool(HTML_START_PATTERN.match(text) and HTML_BLOCK_PATTERN.search(text))
+    start_match = HTML_FULL_START_PATTERN.match(text)
+    if start_match is None:
+        return False
+
+    tag = start_match.group("tag").lower()
+    return HTML_END_TAG_PATTERNS[tag].search(text, start_match.end()) is not None
 
 
 def normalize_whitespace(text: str) -> WhitespaceNormalization:
+    if "<" not in text:
+        return WhitespaceNormalization(
+            text=_normalize_markdown_safe_whitespace(text),
+            kind="prose",
+            compressible=True,
+        )
+
     if looks_like_html(text):
         return WhitespaceNormalization(
             text=text,
@@ -56,6 +67,9 @@ def normalize_whitespace(text: str) -> WhitespaceNormalization:
 
 
 def _normalize_markdown_safe_whitespace(text: str) -> str:
+    if "```" not in text and "~~~" not in text:
+        return _normalize_plain_lines(text)
+
     parts: list[str] = []
     cursor = 0
 

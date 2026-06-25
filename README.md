@@ -73,9 +73,14 @@ Request:
 ```json
 {
   "text": "Prompts are production code. Manage them that way.",
-  "aggressiveness": 0.25
+  "aggressiveness": 0.15,
+  "include_sections": false
 }
 ```
+
+Set `include_sections` to `true` only for UI/debug views that need per-section
+labels and protected-block rendering. It defaults to `false` to keep responses
+small and skip word-label generation.
 
 Response:
 
@@ -85,15 +90,12 @@ Response:
   "original_tokens": 12,
   "compressed_tokens": 8,
   "reduction": 0.3333,
-  "aggressiveness": 0.25,
-  "target_rate": 0.8625,
+  "aggressiveness": 0.15,
+  "target_rate": 0.9175,
   "model": "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
   "elapsed_ms": 123.4,
-  "labeled_tokens": [
-    {"text": "Prompts", "kept": true},
-    {"text": "are", "kept": false},
-    {"text": "production", "kept": true}
-  ]
+  "labeled_tokens": [],
+  "output_sections": []
 }
 ```
 
@@ -110,7 +112,7 @@ Request:
   "model": "bear-2",
   "input": "Prompts are production code. Manage them that way.",
   "compression_settings": {
-    "aggressiveness": 0.25
+    "aggressiveness": 0.15
   }
 }
 ```
@@ -144,6 +146,11 @@ aggressiveness = 1.0 -> keep at least COMPRESSOR_MIN_RATE of tokens
 ```
 
 The output is deterministic for the same model and input. This is intentional: production prompt compression should be predictable and cache-friendly.
+
+By default, very small compressible segments skip the model to avoid expensive
+LLMLingua calls with little expected token savings. Tune
+`COMPRESSOR_MIN_SEGMENT_CHARS` and `COMPRESSOR_MIN_SEGMENT_TOKENS` if you prefer
+more compression over latency.
 
 ## VS Code
 
@@ -256,7 +263,7 @@ Build and push the image with Cloud Build:
 ```powershell
 gcloud builds submit `
   --config cloudbuild.yaml `
-  --substitutions _REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE `
+  --substitutions="_REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE" `
   .
 ```
 

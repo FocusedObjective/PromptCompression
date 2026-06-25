@@ -1,13 +1,22 @@
 from pydantic import BaseModel, Field
 
+DEFAULT_AGGRESSIVENESS = 0.15
+
 
 class CompressRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Text to compress.")
     aggressiveness: float = Field(
-        default=0.25,
+        default=DEFAULT_AGGRESSIVENESS,
         ge=0.0,
         le=1.0,
         description="0.0 keeps almost everything; 1.0 is most aggressive.",
+    )
+    include_sections: bool = Field(
+        default=False,
+        description=(
+            "Include per-section UI/debug output and word labels. "
+            "Disabled by default to reduce latency and payload size."
+        ),
     )
 
 

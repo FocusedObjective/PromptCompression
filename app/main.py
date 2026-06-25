@@ -8,6 +8,7 @@ from app.compressor import CompressionRuntimeError, PromptCompressionService
 from app.schemas import (
     CompressRequest,
     CompressResponse,
+    DEFAULT_AGGRESSIVENESS,
     HealthResponse,
     V1CompressRequest,
     V1CompressResponse,
@@ -364,27 +365,59 @@ APP_HTML = """
           <h2>Original Prompt</h2>
           <span class="status" id="inputStatus">Ready</span>
         </div>
-        <textarea id="prompt" spellcheck="false">Prompts are production code. Manage them that way.
+        <textarea id="prompt" spellcheck="false">You are a support operations analyst preparing a concise escalation brief.
+Keep customer IDs, incident dates, URLs, and exact retry limits unchanged.
 
-Do not remove API keys, URLs, dates, or hard constraints.
-The assistant must return concise output and preserve critical details.</textarea>
+Goal:
+Summarize the risk, identify likely blockers, and propose next steps.
+Do not remove policy constraints or turn customer data into prose.
+
+Customer data:
+{
+  "account": {
+    "id": "acct_2048",
+    "plan": "enterprise",
+    "region": "us-west-2"
+  },
+  "incidents": [
+    {"id": "INC-1001", "date": "2026-06-18", "severity": "high", "status": "open"},
+    {"id": "INC-1002", "date": "2026-06-20", "severity": "medium", "status": "monitoring"},
+    {"id": "INC-1003", "date": "2026-06-22", "severity": "low", "status": "resolved"}
+  ],
+  "links": {
+    "runbook": "https://example.com/runbooks/payment-timeouts",
+    "dashboard": "https://example.com/dashboards/acct_2048"
+  }
+}
+
+Context notes:
+The customer reports intermittent checkout timeouts after a deployment window.
+The service owner suspects retry storms during peak traffic.
+Support needs a short answer suitable for an account executive.
+
+<nocompress>Hard constraint: do not recommend raising retry_count above 3.</nocompress>
+
+Output:
+- Executive summary
+- Blockers and owner
+- Next three actions</textarea>
         <div class="tag-reference">
           <div class="tag-reference-title">Optional preserve controls</div>
           <ul class="tag-list">
             <li><code>&lt;nocompress&gt;...&lt;/nocompress&gt;</code> skips model compression and removes the wrapper.</li>
-            <li><code>```json ... ```</code> protects medium/large JSON, converting to TOON when smaller.</li>
-            <li><code>{...}</code> or <code>[...]</code> medium/large raw JSON uses the same JSON protection path.</li>
+            <li><code>```json ... ```</code> protects JSON fences exactly as code.</li>
+            <li>Medium/large raw JSON converts to TOON when safe; exact JSON, schemas/templates, tool exchanges, duplicate-key JSON, and low-savings cases stay verbatim.</li>
             <li>Agent UI/output contracts, follow-on blocks, and card payload blocks are preserved verbatim.</li>
-            <li>HTML blocks <code>&lt;html&gt;</code>, <code>&lt;body&gt;</code>, <code>&lt;main&gt;</code>, <code>&lt;article&gt;</code>, <code>&lt;section&gt;</code>, <code>&lt;div&gt;</code>, <code>&lt;table&gt;</code>, <code>&lt;ul&gt;</code>, <code>&lt;ol&gt;</code>, <code>&lt;pre&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;p&gt;</code> are preserved verbatim and protected.</li>
+            <li>HTML/code-bearing blocks such as <code>&lt;html&gt;</code>, <code>&lt;pre&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;template&gt;</code>, and <code>&lt;svg&gt;</code> are protected; ordinary content tags like <code>&lt;div&gt;</code>, <code>&lt;p&gt;</code>, and <code>&lt;table&gt;</code> remain compressible prose.</li>
             <li>Whitespace inside protected HTML is kept exactly as provided.</li>
-            <li><code>```</code> and <code>~~~</code> markdown fences preserve whitespace during cleanup; wrap with <code>&lt;nocompress&gt;</code> to skip compression.</li>
+            <li><code>```</code> and <code>~~~</code> markdown fences are protected from compression and preserve whitespace.</li>
           </ul>
         </div>
         <div class="controls">
           <label>
             Aggressiveness
-            <input id="aggressiveness" type="range" min="0" max="1" step="0.05" value="0.25">
-            <strong id="aggressivenessValue">0.25</strong>
+            <input id="aggressiveness" type="range" min="0" max="1" step="0.05" value="0.15">
+            <strong id="aggressivenessValue">0.15</strong>
           </label>
           <button id="compressButton" type="button">Compress</button>
         </div>
@@ -452,6 +485,9 @@ The assistant must return concise output and preserve critical details.</textare
       }
       if (section.kind === "nocompress") {
         return "No-compress protected";
+      }
+      if (section.kind === "code") {
+        return "Code protected";
       }
       if (section.kind === "verbatim") {
         return "Verbatim protected";
@@ -548,6 +584,7 @@ The assistant must return concise output and preserve critical details.</textare
           body: JSON.stringify({
             text,
             aggressiveness: Number(aggressivenessInput.value),
+            include_sections: true,
           }),
         });
 
@@ -609,18 +646,33 @@ def compress(request: CompressRequest) -> CompressResponse:
         result = compression_service.compress(
             text=request.text,
             aggressiveness=request.aggressiveness,
+            include_sections=request.include_sections,
         )
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return CompressResponse(**asdict(result))
+    return CompressResponse(
+        compressed_text=result.compressed_text,
+        original_tokens=result.original_tokens,
+        compressed_tokens=result.compressed_tokens,
+        reduction=result.reduction,
+        aggressiveness=result.aggressiveness,
+        target_rate=result.target_rate,
+        model=result.model,
+        elapsed_ms=result.elapsed_ms,
+        labeled_tokens=[asdict(token) for token in result.labeled_tokens],
+        output_sections=[
+            asdict(section)
+            for section in result.output_sections
+        ],
+    )
 
 
 @app.post("/v1/compress", response_model=V1CompressResponse)
 def compress_v1(
     request: V1CompressRequest,
 ) -> V1CompressResponse:
-    aggressiveness = 0.25
+    aggressiveness = DEFAULT_AGGRESSIVENESS
     if (
         request.compression_settings is not None
         and request.compression_settings.aggressiveness is not None
@@ -631,6 +683,7 @@ def compress_v1(
         result = compression_service.compress(
             text=request.input,
             aggressiveness=aggressiveness,
+            include_sections=False,
         )
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

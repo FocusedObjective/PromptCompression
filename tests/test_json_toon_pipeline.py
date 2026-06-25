@@ -36,9 +36,12 @@ Please review the risk summary."""
     assert result.output_sections[1].protected is True
     assert "users[3]{id,name,role}" in result.output_sections[1].text
     assert compressor.inputs == [
-        "Please review this customer data:\n",
-        "\nPlease review the risk summary.",
+        "Please review this customer data:\n"
+        "__CK_KEEP_0000__\n"
+        "Please review the risk summary."
     ]
+    assert "users[3]{id,name,role}" not in compressor.inputs[0]
+    assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
 
 
 def test_toonified_json_keeps_boundary_before_following_html():
@@ -61,6 +64,111 @@ def test_toonified_json_keeps_boundary_before_following_html():
 
     assert "  3,Cora,user\n<html>   " in result.compressed_text
     assert "  <a>a</a>   <b>b</b>" in result.compressed_text
+
+
+def test_generic_unchanged_context_still_allows_toon_conversion():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = """Keep customer IDs, incident dates, URLs, and exact retry limits unchanged.
+
+Customer data:
+{
+  "account": {
+    "id": "acct_2048",
+    "plan": "enterprise",
+    "region": "us-west-2"
+  },
+  "incidents": [
+    {"id": "INC-1001", "date": "2026-06-18", "severity": "high", "status": "open"},
+    {"id": "INC-1002", "date": "2026-06-20", "severity": "medium", "status": "monitoring"},
+    {"id": "INC-1003", "date": "2026-06-22", "severity": "low", "status": "resolved"}
+  ]
+}
+
+Please review next steps."""
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert "users[3]{id,name,role}" in result.compressed_text
+    assert any(section.kind == "toon" for section in result.output_sections)
+    assert not any(section.kind == "json" for section in result.output_sections)
+
+
+def test_fenced_json_template_is_preserved_verbatim():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    json_fence = """```json
+{
+  "status": "ok",
+  "items": [
+    {"id": "A1", "label": "Alpha"},
+    {"id": "B2", "label": "Beta"}
+  ]
+}
+```"""
+    text = (
+        "Return exactly this JSON shape, preserving valid JSON syntax:\n"
+        f"{json_fence}\n"
+        "Please review after."
+    )
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert json_fence in result.compressed_text
+    assert "```toon" not in result.compressed_text
+    assert [section.kind for section in result.output_sections] == [
+        "prose",
+        "json",
+        "prose",
+    ]
+    assert compressor.inputs == [
+        "Return exactly this JSON shape, preserving valid JSON syntax:\n"
+        "__CK_KEEP_0000__"
+        "Please review after."
+    ]
+    assert json_fence not in compressor.inputs[0]
+    assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
+
+
+def test_raw_json_exact_context_is_not_toonified():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    json_block = """{
+  "status": "ok",
+  "items": [
+    {"id": "A1", "label": "Alpha"},
+    {"id": "B2", "label": "Beta"}
+  ]
+}"""
+    text = f"Return exactly this JSON shape:\n{json_block}\nPlease review after."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert json_block in result.compressed_text
+    assert "users[3]{id,name,role}" not in result.compressed_text
+    assert any(section.kind == "json" for section in result.output_sections)
+    assert all(json_block not in seen for seen in compressor.inputs)
+
+
+def test_duplicate_key_json_is_not_toonified():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    json_block = """{
+  "feature": "old",
+  "feature": "new",
+  "cases": [
+    {"id": 1, "value": 0},
+    {"id": 2, "value": 1}
+  ]
+}"""
+    text = f"Please review this data:\n{json_block}\nPlease review after."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert json_block in result.compressed_text
+    assert "users[3]{id,name,role}" not in result.compressed_text
+    assert any(section.kind == "json" for section in result.output_sections)
+    assert all(json_block not in seen for seen in compressor.inputs)
 
 
 def test_toon_unavailable_preserves_json_and_still_skips_model():
@@ -94,6 +202,8 @@ def test_small_json_does_not_trigger_structured_pipeline():
         min_json_lines=4,
         min_toon_savings=0.0,
     )
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
     text = 'Please review {"ok": true} after.'
 
     service.compress(text, aggressiveness=0.25)

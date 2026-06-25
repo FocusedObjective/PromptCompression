@@ -1,5 +1,52 @@
 from app.compressor import PromptCompressionService
 from app.token_estimator import estimate_token_count
+from tests.pipeline_helpers import RecordingCompressor, build_service_with_pipeline
+
+
+class DroppingPlaceholderCompressor(RecordingCompressor):
+    def compress_prompt_llmlingua2(
+        self,
+        text: str,
+        rate: float,
+        force_tokens: list[str],
+        return_word_label: bool,
+    ) -> dict[str, str | int]:
+        self.inputs.append(text)
+        self.force_tokens_values.append(force_tokens)
+        self.return_word_label_values.append(return_word_label)
+        return {
+            "compressed_prompt": text.replace("__CK_KEEP_0000__", ""),
+            "origin_tokens": len(text.split()),
+            "compressed_tokens": len(text.split()),
+            "fn_labeled_original_prompt": "",
+        }
+
+
+class LowForceTokenCompressor(RecordingCompressor):
+    max_force_token = 1
+
+
+class LabelingPlaceholderCompressor(RecordingCompressor):
+    def compress_prompt_llmlingua2(
+        self,
+        text: str,
+        rate: float,
+        force_tokens: list[str],
+        return_word_label: bool,
+    ) -> dict[str, str | int]:
+        self.inputs.append(text)
+        self.force_tokens_values.append(force_tokens)
+        self.return_word_label_values.append(return_word_label)
+        return {
+            "compressed_prompt": text.replace("Please review", "Review"),
+            "origin_tokens": len(text.split()),
+            "compressed_tokens": len(text.split()),
+            "fn_labeled_original_prompt": (
+                "Please 0\t\t|\t\treview 1\t\t|\t\tbefore. 1\t\t|\t\t"
+                "__CK_KEEP_0000__ 1\t\t|\t\t"
+                "Please 0\t\t|\t\treview 1\t\t|\t\tafter. 1"
+            ),
+        }
 
 
 def test_aggressiveness_zero_keeps_full_rate():
@@ -37,3 +84,128 @@ def test_estimate_token_count_groups_unicode_letters_and_numbers():
     text = "cafe42 naïve 2026-06-23"
 
     assert estimate_token_count(text) == 7
+
+
+def test_short_segments_skip_model_for_speed():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 80
+    service.min_segment_tokens = 12
+
+    result = service.compress("Please review this short prompt.", aggressiveness=0.25)
+
+    assert compressor.inputs == []
+    assert result.compressed_text == "Please review this short prompt."
+    assert result.output_sections[0].compressed is False
+
+
+def test_aggressiveness_zero_skips_model():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+
+    result = service.compress("Please review this longer prompt.", aggressiveness=0.0)
+
+    assert compressor.inputs == []
+    assert result.compressed_text == "Please review this longer prompt."
+    assert result.reduction == 0.0
+
+
+def test_non_ui_compression_skips_word_labels_and_sections():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        include_sections=False,
+    )
+
+    assert compressor.inputs == ["Please review this longer prompt."]
+    assert compressor.return_word_label_values == [False]
+    assert result.labeled_tokens == []
+    assert result.output_sections == []
+
+
+def test_non_ui_placeholder_compression_still_uses_one_model_call():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = "Please review before. <nocompress>KEEP EXACT</nocompress> Please review after."
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    assert result.output_sections == []
+    assert result.labeled_tokens == []
+    assert compressor.inputs == [
+        "Please review before. __CK_KEEP_0000__ Please review after."
+    ]
+    assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
+    assert compressor.return_word_label_values == [False]
+
+
+def test_placeholder_drop_falls_back_to_preprocessed_prompt():
+    compressor = DroppingPlaceholderCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = "Please review before. <nocompress>KEEP EXACT</nocompress> Please review after."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert result.compressed_text == "Please review before. KEEP EXACT Please review after."
+    assert compressor.inputs == [
+        "Please review before. __CK_KEEP_0000__ Please review after."
+    ]
+
+
+def test_too_many_placeholders_skip_model_for_safety():
+    compressor = LowForceTokenCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "Please review before. "
+        "<nocompress>KEEP A</nocompress> "
+        "Please review middle. "
+        "<nocompress>KEEP B</nocompress> "
+        "Please review after."
+    )
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert result.compressed_text == (
+        "Please review before. KEEP A Please review middle. KEEP B Please review after."
+    )
+    assert compressor.inputs == []
+
+
+def test_placeholder_sections_keep_model_word_labels_for_ui():
+    compressor = LabelingPlaceholderCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = "Please review before. <nocompress>KEEP EXACT</nocompress> Please review after."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert [section.kind for section in result.output_sections] == [
+        "prose",
+        "nocompress",
+        "prose",
+    ]
+    assert [
+        (token.text, token.kept)
+        for token in result.output_sections[0].labeled_tokens
+    ] == [
+        ("Please", False),
+        ("review", True),
+        ("before.", True),
+    ]
+    assert [
+        (token.text, token.kept)
+        for token in result.output_sections[2].labeled_tokens
+    ] == [
+        ("Please", False),
+        ("review", True),
+        ("after.", True),
+    ]
