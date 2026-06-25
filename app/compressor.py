@@ -1,6 +1,7 @@
 import os
 import time
 from dataclasses import dataclass, field
+import logging
 from threading import Lock
 from typing import Any
 
@@ -9,6 +10,7 @@ from app.protected_spans import force_tokens_for_text
 from app.token_estimator import estimate_token_count
 
 DEFAULT_MODEL = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+LOGGER = logging.getLogger(__name__)
 
 
 class CompressionRuntimeError(RuntimeError):
@@ -68,6 +70,7 @@ class PromptCompressionService:
             try:
                 from llmlingua import PromptCompressor
             except ImportError as exc:
+                LOGGER.exception("Failed to import llmlingua")
                 raise CompressionRuntimeError(
                     "llmlingua is not installed. Run `pip install -r requirements.txt`."
                 ) from exc
@@ -79,6 +82,7 @@ class PromptCompressionService:
                     use_llmlingua2=True,
                 )
             except Exception as exc:  # pragma: no cover - depends on network/model cache
+                LOGGER.exception("Failed to load compression model %s", self.model_name)
                 raise CompressionRuntimeError(
                     "Failed to load the compression model. The first run needs network access "
                     "to download the Hugging Face checkpoint."
@@ -127,7 +131,8 @@ class PromptCompressionService:
                 return_word_label=True,
             )
         except Exception as exc:  # pragma: no cover - model-specific runtime path
-            raise CompressionRuntimeError(f"Compression failed: {exc}") from exc
+            message = str(exc) or exc.__class__.__name__
+            raise CompressionRuntimeError(f"Compression failed: {message}") from exc
 
         compressed_text = raw_result.get("compressed_prompt", "")
         labeled_tokens = self.parse_word_labels(
@@ -160,7 +165,7 @@ class PromptCompressionService:
                     CompressionOutputSection(
                         text=segment.text,
                         kind=segment.kind,
-                        compressed=segment.kind in {"html", "toon"},
+                        compressed=segment.kind == "toon",
                         protected=not segment.compressible,
                         labeled_tokens=[token],
                     )

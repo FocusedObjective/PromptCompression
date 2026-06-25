@@ -374,8 +374,9 @@ The assistant must return concise output and preserve critical details.</textare
             <li><code>&lt;nocompress&gt;...&lt;/nocompress&gt;</code> skips model compression and removes the wrapper.</li>
             <li><code>```json ... ```</code> protects medium/large JSON, converting to TOON when smaller.</li>
             <li><code>{...}</code> or <code>[...]</code> medium/large raw JSON uses the same JSON protection path.</li>
-            <li>HTML blocks <code>&lt;html&gt;</code>, <code>&lt;body&gt;</code>, <code>&lt;main&gt;</code>, <code>&lt;article&gt;</code>, <code>&lt;section&gt;</code>, <code>&lt;div&gt;</code>, <code>&lt;table&gt;</code>, <code>&lt;ul&gt;</code>, <code>&lt;ol&gt;</code>, <code>&lt;pre&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;p&gt;</code> are whitespace-normalized and protected.</li>
-            <li><code>&lt;pre&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;textarea&gt;</code> preserve internal whitespace inside HTML.</li>
+            <li>Agent UI/output contracts, follow-on blocks, and card payload blocks are preserved verbatim.</li>
+            <li>HTML blocks <code>&lt;html&gt;</code>, <code>&lt;body&gt;</code>, <code>&lt;main&gt;</code>, <code>&lt;article&gt;</code>, <code>&lt;section&gt;</code>, <code>&lt;div&gt;</code>, <code>&lt;table&gt;</code>, <code>&lt;ul&gt;</code>, <code>&lt;ol&gt;</code>, <code>&lt;pre&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;p&gt;</code> are preserved verbatim and protected.</li>
+            <li>Whitespace inside protected HTML is kept exactly as provided.</li>
             <li><code>```</code> and <code>~~~</code> markdown fences preserve whitespace during cleanup; wrap with <code>&lt;nocompress&gt;</code> to skip compression.</li>
           </ul>
         </div>
@@ -447,10 +448,13 @@ The assistant must return concise output and preserve critical details.</textare
         return "JSON protected";
       }
       if (section.kind === "html") {
-        return "HTML whitespace-normalized";
+        return "HTML protected";
       }
       if (section.kind === "nocompress") {
         return "No-compress protected";
+      }
+      if (section.kind === "verbatim") {
+        return "Verbatim protected";
       }
       return "";
     }

@@ -29,7 +29,7 @@ def test_markdown_fenced_code_whitespace_is_preserved():
     assert result.compressible is True
 
 
-def test_html_whitespace_is_normalized_and_protected_tags_are_preserved():
+def test_html_whitespace_is_preserved_verbatim_and_protected():
     html = """<div>
   <p>Please   review</p>
   <!-- remove me -->
@@ -40,21 +40,42 @@ def test_html_whitespace_is_normalized_and_protected_tags_are_preserved():
 
     result = normalize_whitespace(html)
 
-    assert result.text == (
-        "<div> <p>Please review</p>  <pre>  keep\n\n   exact </pre> </div>"
-    )
+    assert result.text == html
     assert result.kind == "html"
     assert result.compressible is False
 
 
-def test_html_inline_element_spacing_is_preserved():
-    result = normalize_whitespace("<html>   <a>a</a>   <b>b</b>\n</html>")
+def test_html_inline_element_spacing_is_preserved_verbatim():
+    html = "<html>   <a>a</a>   <b>b</b>\n</html>"
+    result = normalize_whitespace(html)
 
-    assert result.text == "<html> <a>a</a> <b>b</b> </html>"
-    assert "<a>a</a><b>b</b>" not in result.text
+    assert result.text == html
 
 
-def test_html_leading_newline_boundary_is_preserved():
-    result = normalize_whitespace("\n\n<html>   <a>a</a>   <b>b</b>\n</html>")
+def test_html_leading_newline_boundary_is_preserved_verbatim():
+    html = "\n\n<html>   <a>a</a>   <b>b</b>\n</html>"
+    result = normalize_whitespace(html)
 
-    assert result.text == "\n<html> <a>a</a> <b>b</b> </html>"
+    assert result.text == html
+
+
+def test_documented_tags_in_prompt_are_not_treated_as_html():
+    text = (
+        "Use `<blockquote>` only when quoting the user.\n\n"
+        "Render <SwitchAgent> as an option, not as literal HTML."
+    )
+
+    result = normalize_whitespace(text)
+
+    assert result.kind == "prose"
+    assert result.compressible is True
+    assert result.text == text
+
+
+def test_embedded_html_example_does_not_protect_surrounding_prompt():
+    text = "The prompt may mention <div>example</div> without becoming an HTML document."
+
+    result = normalize_whitespace(text)
+
+    assert result.kind == "prose"
+    assert result.compressible is True

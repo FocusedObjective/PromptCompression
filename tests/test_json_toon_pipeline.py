@@ -59,9 +59,8 @@ def test_toonified_json_keeps_boundary_before_following_html():
 
     result = service.compress(text, aggressiveness=0.25)
 
-    assert "  3,Cora,user\n<html>" in result.compressed_text
-    assert "<a>a</a> <b>b</b>" in result.compressed_text
-    assert "<a>a</a><b>b</b>" not in result.compressed_text
+    assert "  3,Cora,user\n<html>   " in result.compressed_text
+    assert "  <a>a</a>   <b>b</b>" in result.compressed_text
 
 
 def test_toon_unavailable_preserves_json_and_still_skips_model():

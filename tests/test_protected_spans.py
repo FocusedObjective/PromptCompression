@@ -12,3 +12,13 @@ def test_force_tokens_include_urls_and_numbers():
     assert "https://example.com" in tokens
     assert "$15" in tokens
     assert "2026-06-23" in tokens
+
+
+def test_force_tokens_are_capped_for_large_inputs():
+    text = " ".join(f"https://example.com/{index} {index}" for index in range(200))
+
+    tokens = force_tokens_for_text(text, max_tokens=100)
+
+    assert len(tokens) == 100
+    assert "not" in tokens
+    assert "https://example.com/0" in tokens

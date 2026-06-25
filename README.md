@@ -160,6 +160,9 @@ The Docker image targets Python 3.14 and exposes the API on container port `8080
 The Hugging Face model is downloaded during the Docker build and baked into the
 image so Cloud Run does not need to download it on first request.
 
+For a complete Google Cloud Run deployment runbook starting from a machine with
+nothing installed, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 Build:
 
 ```powershell
@@ -251,7 +254,10 @@ gcloud artifacts repositories create $env:REPO `
 Build and push the image with Cloud Build:
 
 ```powershell
-gcloud builds submit --tag $env:IMAGE .
+gcloud builds submit `
+  --config cloudbuild.yaml `
+  --substitutions _REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE `
+  .
 ```
 
 Deploy to Cloud Run:
@@ -267,7 +273,7 @@ gcloud run deploy $env:SERVICE `
   --memory 4Gi `
   --concurrency 1 `
   --timeout 300s `
-  --set-env-vars COMPRESSOR_DEVICE=cpu,COMPRESSOR_MIN_RATE=0.45
+  --set-env-vars "COMPRESSOR_DEVICE=cpu,COMPRESSOR_MIN_RATE=0.45"
 ```
 
 Use `--no-allow-unauthenticated` instead of `--allow-unauthenticated` if the API
@@ -284,8 +290,8 @@ python scripts\smoke_test.py
 
 For lower cold-start latency, redeploy with `--min-instances 1`. That keeps one
 instance warm and increases idle cost. To use a different Hugging Face model,
-rebuild with `--build-arg COMPRESSOR_MODEL=...` so the runtime stays offline and
-deterministic.
+rebuild through `cloudbuild.yaml` with `_COMPRESSOR_MODEL=...` so the runtime
+stays offline and deterministic.
 
 Later optimization steps:
 

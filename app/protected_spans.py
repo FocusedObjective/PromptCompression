@@ -55,19 +55,31 @@ PROTECTED_PATTERNS = [
 ]
 
 
-def force_tokens_for_text(text: str) -> list[str]:
+def force_tokens_for_text(text: str, max_tokens: int = 100) -> list[str]:
     """Return tokens LLMLingua should strongly prefer to keep.
 
     This is intentionally simple for the MVP. Later, replace this with true
     span-level preservation during reconstruction.
     """
-    tokens = set(STRUCTURE_TOKENS)
-    tokens.update(CRITICAL_WORDS)
+    tokens: list[str] = []
+    seen: set[str] = set()
+
+    def add_token(value: str) -> None:
+        if len(tokens) >= max_tokens:
+            return
+        if value and value not in seen:
+            seen.add(value)
+            tokens.append(value)
+
+    for token in STRUCTURE_TOKENS:
+        add_token(token)
+
+    for token in CRITICAL_WORDS:
+        add_token(token)
 
     for pattern in PROTECTED_PATTERNS:
         for match in pattern.finditer(text):
             value = match.group(0).strip()
-            if value:
-                tokens.add(value)
+            add_token(value)
 
-    return sorted(tokens)
+    return tokens

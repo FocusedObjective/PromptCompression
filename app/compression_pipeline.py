@@ -27,6 +27,28 @@ HTML_BLOCK_PATTERN = re.compile(
     r".*?</(?P=tag)\s*>",
     re.IGNORECASE | re.DOTALL,
 )
+UI_BLOCK_PATTERN = re.compile(
+    r"(?ms)^\[(?P<name>UI|FOLLOW_ON_QUESTIONS|SWITCH_PANEL_AGENT)\]\s*\n"
+    r".*?^\[/(?P=name)\][ \t]*(?:\n|$)",
+)
+CONTRACT_SECTION_PATTERN = re.compile(
+    r"(?ms)^# (?:UI RENDERING CONTRACT|CONTENT FORMATS|USER-FACING VOCABULARY|"
+    r"ALLOWED UI COMPONENTS)\b"
+    r".*?(?=^# (?:OPERATING MODE|DATA TO PROCESS|FAILURE MODES|"
+    r"OPTIONAL FOLLOW-ON CONTENT|CHIP-|RULE PRECEDENCE|FINAL RULES)\b|\Z)",
+)
+FAILURE_SECTION_PATTERN = re.compile(
+    r"(?ms)^# FAILURE MODES\b"
+    r".*?(?:^---\s*$(?:\n|$)|(?=^# (?:OPTIONAL FOLLOW-ON CONTENT|CHIP-|"
+    r"RULE PRECEDENCE|FINAL RULES)\b|\Z))",
+)
+FOLLOW_ON_SECTION_PATTERN = re.compile(
+    r"(?ms)^# OPTIONAL FOLLOW-ON CONTENT\b"
+    r".*?(?=^# (?:RULE PRECEDENCE|FINAL RULES)\b|\Z)",
+)
+DATA_PAYLOAD_PATTERN = re.compile(
+    r"(?ms)^# DATA TO PROCESS\b.*?(?=^---\s*$|\Z)",
+)
 
 
 @dataclass(frozen=True)
@@ -34,6 +56,12 @@ class CompressionSegment:
     text: str
     compressible: bool
     kind: str
+
+
+@dataclass(frozen=True)
+class _Span:
+    start: int
+    end: int
 
 
 class PromptPreprocessor:
@@ -66,6 +94,27 @@ class PromptPreprocessor:
         return [segment for segment in segments if segment.text]
 
     def _prepare_compressible_text(self, text: str) -> list[CompressionSegment]:
+        segments: list[CompressionSegment] = []
+        cursor = 0
+
+        for span in self._special_spans(text):
+            segments.extend(self._prepare_compressible_text_without_verbatim(text[cursor : span.start]))
+            segments.append(
+                CompressionSegment(
+                    text=text[span.start : span.end],
+                    compressible=False,
+                    kind="verbatim",
+                )
+            )
+            cursor = span.end
+
+        segments.extend(self._prepare_compressible_text_without_verbatim(text[cursor:]))
+        return segments
+
+    def _prepare_compressible_text_without_verbatim(
+        self,
+        text: str,
+    ) -> list[CompressionSegment]:
         segments: list[CompressionSegment] = []
         cursor = 0
 
@@ -106,6 +155,34 @@ class PromptPreprocessor:
         segments.extend(self._prepare_raw_json_text(text[cursor:]))
         return segments
 
+    def _special_spans(self, text: str) -> list[_Span]:
+        spans: list[_Span] = []
+        for pattern in (
+            UI_BLOCK_PATTERN,
+            CONTRACT_SECTION_PATTERN,
+            FAILURE_SECTION_PATTERN,
+            FOLLOW_ON_SECTION_PATTERN,
+            DATA_PAYLOAD_PATTERN,
+        ):
+            spans.extend(_Span(match.start(), match.end()) for match in pattern.finditer(text))
+
+        return self._merge_spans(spans)
+
+    def _merge_spans(self, spans: list[_Span]) -> list[_Span]:
+        if not spans:
+            return []
+
+        merged: list[_Span] = []
+        for span in sorted(spans, key=lambda item: (item.start, item.end)):
+            if not merged or span.start > merged[-1].end:
+                merged.append(span)
+                continue
+
+            previous = merged[-1]
+            merged[-1] = _Span(previous.start, max(previous.end, span.end))
+
+        return merged
+
     def _prepare_raw_json_text(self, text: str) -> list[CompressionSegment]:
         segments: list[CompressionSegment] = []
         cursor = 0
@@ -125,7 +202,7 @@ class PromptPreprocessor:
             candidate = text[start:end]
             json_segment = self._json_segment_for_candidate(candidate)
             if json_segment is None:
-                search_cursor = start + 1
+                search_cursor = end
                 continue
 
             if start > cursor:
