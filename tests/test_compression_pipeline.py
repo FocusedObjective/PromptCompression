@@ -78,16 +78,15 @@ and html?"""
 
     result = service.compress(text, aggressiveness=0.25)
 
-    assert [section.kind for section in result.output_sections] == [
-        "html",
-        "prose",
-        "html",
-        "prose",
-    ]
+    assert [section.kind for section in result.output_sections].count("html") == 2
+    assert any(
+        section.kind == "protected" and section.text == "Do not remove"
+        for section in result.output_sections
+    )
     assert compressor.inputs == [
         "__CK_KEEP_0000__\n\n"
-        "Do not remove API keys, URLs, dates, or hard constraints.\n\n"
-        "__CK_KEEP_0001__\n\n"
+        "__CK_KEEP_0001__ __CK_KEEP_0002__ keys, URLs, dates, or hard constraints.\n\n"
+        "__CK_KEEP_0003__\n\n"
         "and html?"
     ]
     assert compressor.force_tokens_values[0][:2] == [
@@ -184,9 +183,11 @@ def test_documented_tag_examples_remain_compressible_prose():
 
     result = service.compress(text, aggressiveness=0.25)
 
-    assert compressor.inputs == [text]
-    assert [section.kind for section in result.output_sections] == ["prose"]
-    assert result.output_sections[0].protected is False
+    assert "<SwitchAgent>" in compressor.inputs[0]
+    assert "`<blockquote>`" not in compressor.inputs[0]
+    assert "html" not in [section.kind for section in result.output_sections]
+    assert "code" not in [section.kind for section in result.output_sections]
+    assert any(section.kind == "protected" for section in result.output_sections)
 
 
 def test_ui_rendering_contract_sections_are_verbatim():
@@ -284,5 +285,9 @@ Please review after."""
     result = service.compress(text, aggressiveness=0.25)
 
     assert "users[3]{id,name,role}" not in result.compressed_text
-    assert [section.kind for section in result.output_sections] == ["prose"]
-    assert compressor.inputs == [text]
+    assert {section.kind for section in result.output_sections} == {
+        "prose",
+        "protected",
+    }
+    assert "Line __CK_KEEP_0000__" in compressor.inputs[0]
+    assert "Line __CK_KEEP_0001__" in compressor.inputs[0]

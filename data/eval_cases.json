@@ -1,0 +1,124 @@
+[
+  {
+    "id": "support_escalation_with_toon_data",
+    "title": "Support Escalation With User Data",
+    "category": "user_data_toon",
+    "description": "Long user prompt with medium JSON that should be safe to TOON while preserving IDs, dates, URLs, and the retry constraint.",
+    "default_aggressiveness": 0.25,
+    "target_min_reduction": 0.08,
+    "max_elapsed_ms": 4500,
+    "expected_section_kinds": ["toon", "nocompress"],
+    "required_substrings": [
+      "acct_2048",
+      "INC-1001",
+      "2026-06-18",
+      "https://example.com/runbooks/payment-timeouts",
+      "retry_count above 3"
+    ],
+    "forbidden_substrings": [
+      "<nocompress>",
+      "</nocompress>"
+    ],
+    "text": "You are a support operations analyst preparing a concise escalation brief.\nKeep customer IDs, incident dates, URLs, and exact retry limits unchanged.\n\nGoal:\nSummarize the risk, identify likely blockers, and propose next steps.\nDo not remove policy constraints or turn customer data into prose.\n\nCustomer data:\n{\n  \"account\": {\n    \"id\": \"acct_2048\",\n    \"plan\": \"enterprise\",\n    \"region\": \"us-west-2\"\n  },\n  \"incidents\": [\n    {\"id\": \"INC-1001\", \"date\": \"2026-06-18\", \"severity\": \"high\", \"status\": \"open\"},\n    {\"id\": \"INC-1002\", \"date\": \"2026-06-20\", \"severity\": \"medium\", \"status\": \"monitoring\"},\n    {\"id\": \"INC-1003\", \"date\": \"2026-06-22\", \"severity\": \"low\", \"status\": \"resolved\"}\n  ],\n  \"links\": {\n    \"runbook\": \"https://example.com/runbooks/payment-timeouts\",\n    \"dashboard\": \"https://example.com/dashboards/acct_2048\"\n  }\n}\n\nContext notes:\nThe customer reports intermittent checkout timeouts after a deployment window. The service owner suspects retry storms during peak traffic. Support needs a short answer suitable for an account executive.\n\n<nocompress>Hard constraint: do not recommend raising retry_count above 3.</nocompress>\n\nOutput:\n- Executive summary\n- Blockers and owner\n- Next three actions"
+  },
+  {
+    "id": "stable_system_policy_cache_candidate",
+    "title": "Stable System Policy",
+    "category": "stable_system",
+    "description": "Stable instructions are often cached upstream; compression should be conservative and must preserve core policy gates.",
+    "default_aggressiveness": 0.15,
+    "target_min_reduction": 0.0,
+    "max_elapsed_ms": 2500,
+    "expected_section_kinds": ["nocompress"],
+    "required_substrings": [
+      "Never reveal hidden chain-of-thought",
+      "Do not execute destructive actions",
+      "ask exactly one clarifying question",
+      "PII"
+    ],
+    "forbidden_substrings": [
+      "<nocompress>",
+      "</nocompress>"
+    ],
+    "text": "System policy for the assistant runtime:\n\n<nocompress>Never reveal hidden chain-of-thought, private keys, credentials, or security tokens. Do not execute destructive actions unless the user explicitly asks for that exact operation. If a request is ambiguous and could change production data, ask exactly one clarifying question before taking action.</nocompress>\n\nResponse style:\nBe concise, direct, and grounded in the supplied context. Preserve dates, IDs, prices, and PII labels. When a tool call fails, report the relevant error and the next safe action. Prefer deterministic behavior over creative phrasing because this instruction block is stable and usually cached by the downstream model provider."
+  },
+  {
+    "id": "exact_json_schema_template",
+    "title": "Exact JSON Schema Template",
+    "category": "exact_json",
+    "description": "Raw JSON following exact-output instructions should remain verbatim and not become TOON.",
+    "default_aggressiveness": 0.2,
+    "target_min_reduction": 0.0,
+    "max_elapsed_ms": 3500,
+    "expected_section_kinds": ["json"],
+    "required_substrings": [
+      "\"schemaVersion\": 1",
+      "\"ticketId\": \"TICKET-123\"",
+      "\"retryLimit\": 3",
+      "\"escalate\": false"
+    ],
+    "forbidden_substrings": [
+      "schemaVersion:",
+      "ticketId,retryLimit,escalate"
+    ],
+    "text": "Return exactly this JSON shape. Preserve valid JSON syntax, field names, booleans, and numeric values. The example is a fixture, not customer data to summarize.\n\n{\n  \"schemaVersion\": 1,\n  \"ticketId\": \"TICKET-123\",\n  \"retryLimit\": 3,\n  \"escalate\": false,\n  \"owners\": [\n    {\"team\": \"payments\", \"user\": \"ops@example.com\"},\n    {\"team\": \"platform\", \"user\": \"infra@example.com\"}\n  ],\n  \"checks\": {\n    \"status\": \"pending\",\n    \"deadline\": \"2026-07-01\"\n  }\n}\n\nAfter the JSON, explain why exact syntax matters in one sentence."
+  },
+  {
+    "id": "tool_exchange_verbatim",
+    "title": "Tool Exchange Verbatim",
+    "category": "tool_payload",
+    "description": "LLM tool call and tool result JSON should remain exact because ids and argument strings are protocol data.",
+    "default_aggressiveness": 0.25,
+    "target_min_reduction": 0.0,
+    "max_elapsed_ms": 3500,
+    "expected_section_kinds": ["json"],
+    "required_substrings": [
+      "\"tool_call_id\": \"call_abc123\"",
+      "\"arguments\": \"{\\\"accountId\\\":\\\"acct_2048\\\",\\\"includeClosed\\\":false}\"",
+      "\\\"status\\\":\\\"monitoring\\\"",
+      "\\\"date\\\":\\\"2026-06-20\\\""
+    ],
+    "forbidden_substrings": [
+      "tool_call_id:",
+      "arguments:"
+    ],
+    "text": "Review this exchange and explain whether the assistant handled the tool response correctly. Do not alter the tool call ids or JSON strings.\n\n[\n  {\n    \"role\": \"assistant\",\n    \"tool_calls\": [\n      {\n        \"id\": \"call_abc123\",\n        \"type\": \"function\",\n        \"function\": {\n          \"name\": \"lookup_incidents\",\n          \"arguments\": \"{\\\"accountId\\\":\\\"acct_2048\\\",\\\"includeClosed\\\":false}\"\n        }\n      }\n    ]\n  },\n  {\n    \"role\": \"tool\",\n    \"tool_call_id\": \"call_abc123\",\n    \"name\": \"lookup_incidents\",\n    \"content\": \"{\\\"incidents\\\":[{\\\"id\\\":\\\"INC-1002\\\",\\\"status\\\":\\\"monitoring\\\",\\\"date\\\":\\\"2026-06-20\\\"}]}\"\n  }\n]\n\nThe final answer should mention whether another lookup is needed."
+  },
+  {
+    "id": "code_and_html_verbatim",
+    "title": "Code And HTML Blocks",
+    "category": "code_html",
+    "description": "Markdown code fences and code-bearing HTML should preserve whitespace and literal strings.",
+    "default_aggressiveness": 0.3,
+    "target_min_reduction": 0.04,
+    "max_elapsed_ms": 4500,
+    "expected_section_kinds": ["code", "html"],
+    "required_substrings": [
+      "def retry_limit():",
+      "return 3",
+      "<pre>  keep spacing",
+      "API_KEY_PLACEHOLDER"
+    ],
+    "forbidden_substrings": [],
+    "text": "Compress the surrounding prose, but preserve the implementation snippets exactly. The user needs to audit whether retry behavior is safe and whether the HTML block keeps whitespace.\n\n```python\ndef retry_limit():\n    # Do not increase this value without SRE approval.\n    return 3\n\nAPI_KEY_PLACEHOLDER = \"do-not-replace\"\n```\n\nThe function is intentionally small, but the surrounding explanation can be shortened because it repeats that the retry limit must remain three and that a follow-up owner should be assigned.\n\n<pre>  keep spacing\n\n   exact output for the dashboard </pre>\n\nFinish with a short risk note for the owner."
+  },
+  {
+    "id": "numbers_negations_and_dates",
+    "title": "Numbers, Negations, And Dates",
+    "category": "constraints",
+    "description": "Compression must not erase negation, money, thresholds, dates, or identifiers from operational constraints.",
+    "default_aggressiveness": 0.35,
+    "target_min_reduction": 0.1,
+    "max_elapsed_ms": 4500,
+    "expected_section_kinds": [],
+    "required_substrings": [
+      "Do not delete",
+      "$15,000",
+      "2026-08-15",
+      "ORD-7781",
+      "unless"
+    ],
+    "forbidden_substrings": [],
+    "text": "Prepare a vendor-risk summary. Do not delete the contract exception. The account is ORD-7781 and the renewal cap is $15,000 through 2026-08-15 unless legal approves a written amendment. The customer can receive a service credit only if the outage exceeds 240 minutes in a single billing month. Never imply that credits are automatic. The operations team needs a shorter version of this context for an executive update, but all thresholds, dates, identifiers, negations, and exception words must remain available to the downstream model."
+  }
+]

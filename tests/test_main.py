@@ -2,8 +2,10 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.compressor import CompressionOutputSection, CompressionResult, CompressionToken
+from app.eval_suite import EvalCase
 from app.schemas import (
     CompressRequest,
+    EvalRunRequest,
     V1CompressRequest,
     V1CompressionSettings,
 )
@@ -55,6 +57,7 @@ def test_index_returns_prompt_compression_ui():
     body = response.body.decode()
 
     assert "Prompt Compression" in body
+    assert "Eval Suite" in body
     assert "Dropped Words Highlighted" in body
     assert "JSON compressed to TOON" in body
     assert "Optional preserve controls" in body
@@ -71,6 +74,67 @@ def test_index_http_allows_iframe_embedding():
     assert response.status_code == 200
     assert response.headers["content-security-policy"] == "frame-ancestors *"
     assert "x-frame-options" not in response.headers
+
+
+def test_eval_index_returns_eval_ui():
+    response = main.eval_index()
+    body = response.body.decode()
+
+    assert "Prompt Compression Eval" in body
+    assert "Run Selected" in body
+    assert "/eval/run" in body
+
+
+def test_eval_cases_endpoint_returns_fixture_cases():
+    response = main.list_eval_cases()
+
+    assert len(response) >= 6
+    assert response[0].text
+    assert response[0].required_substrings
+
+
+def test_eval_run_uses_fake_service_and_quality_checks(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    monkeypatch.setattr(
+        main,
+        "eval_cases",
+        [
+            EvalCase(
+                id="sample",
+                title="Sample",
+                category="test",
+                description="Sample eval.",
+                text="Prompts are code.",
+                default_aggressiveness=0.25,
+                required_substrings=["Prompts code."],
+                expected_section_kinds=["prose"],
+                target_min_reduction=0.25,
+            )
+        ],
+    )
+
+    response = main.run_eval(EvalRunRequest(case_ids=["sample"], aggressiveness=0.4))
+
+    assert service.last_text == "Prompts are code."
+    assert service.last_aggressiveness == 0.4
+    assert service.last_include_sections is True
+    assert response.passed is True
+    assert response.total_cases == 1
+    assert response.passed_cases == 1
+    assert response.results[0].compressed_text == "Prompts code."
+
+
+def test_eval_run_unknown_case_returns_404(monkeypatch):
+    monkeypatch.setattr(main, "eval_cases", [])
+
+    try:
+        main.run_eval(EvalRunRequest(case_ids=["missing"]))
+    except main.HTTPException as exc:
+        assert exc.status_code == 404
+        assert "missing" in str(exc.detail)
+    else:
+        raise AssertionError("Expected HTTPException")
 
 
 def test_api_allows_sandboxed_iframe_fetches():

@@ -116,14 +116,12 @@ def test_fenced_json_template_is_preserved_verbatim():
 
     assert json_fence in result.compressed_text
     assert "```toon" not in result.compressed_text
-    assert [section.kind for section in result.output_sections] == [
-        "prose",
-        "json",
-        "prose",
-    ]
+    assert any(section.kind == "json" for section in result.output_sections)
+    assert any(section.kind == "protected" for section in result.output_sections)
     assert compressor.inputs == [
-        "Return exactly this JSON shape, preserving valid JSON syntax:\n"
-        "__CK_KEEP_0000__"
+        "Return exactly this __CK_KEEP_0000__ shape, preserving valid "
+        "__CK_KEEP_0001__ syntax:\n"
+        "__CK_KEEP_0002__"
         "Please review after."
     ]
     assert json_fence not in compressor.inputs[0]

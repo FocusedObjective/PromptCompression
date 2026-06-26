@@ -49,6 +49,27 @@ class LabelingPlaceholderCompressor(RecordingCompressor):
         }
 
 
+class ManglingProtectedTextCompressor(RecordingCompressor):
+    def compress_prompt_llmlingua2(
+        self,
+        text: str,
+        rate: float,
+        force_tokens: list[str],
+        return_word_label: bool,
+    ) -> dict[str, str | int]:
+        self.inputs.append(text)
+        self.force_tokens_values.append(force_tokens)
+        self.return_word_label_values.append(return_word_label)
+        return {
+            "compressed_prompt": text,
+            "origin_tokens": len(text.split()),
+            "compressed_tokens": len(text.split()),
+            "fn_labeled_original_prompt": (
+                " ".join(f"{word} 1" for word in text.split())
+            ),
+        }
+
+
 def test_aggressiveness_zero_keeps_full_rate():
     service = PromptCompressionService()
     assert service.target_rate_for_aggressiveness(0.0) == 1.0
@@ -131,6 +152,35 @@ def test_non_ui_compression_skips_word_labels_and_sections():
     assert compressor.return_word_label_values == [False]
     assert result.labeled_tokens == []
     assert result.output_sections == []
+
+
+def test_protected_prose_spans_are_placeholdered_before_model_call():
+    compressor = ManglingProtectedTextCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    text = (
+        "Prepare summary. Do not delete the exception for ORD-7781. "
+        "The cap is $15,000 through 2026-08-15 unless legal approves."
+    )
+
+    result = service.compress(text, aggressiveness=0.35)
+
+    assert "Do not delete" not in compressor.inputs[0]
+    assert "ORD-7781" not in compressor.inputs[0]
+    assert "$15,000" not in compressor.inputs[0]
+    assert "2026-08-15" not in compressor.inputs[0]
+    assert compressor.force_tokens_values[0][:4] == [
+        "__CK_KEEP_0000__",
+        "__CK_KEEP_0001__",
+        "__CK_KEEP_0002__",
+        "__CK_KEEP_0003__",
+    ]
+    assert "Do not delete" in result.compressed_text
+    assert "ORD-7781" in result.compressed_text
+    assert "$15,000" in result.compressed_text
+    assert "2026-08-15" in result.compressed_text
 
 
 def test_non_ui_placeholder_compression_still_uses_one_model_call():

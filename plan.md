@@ -112,7 +112,27 @@ Protected content to watch closely:
 
 ## Phase 3: Evaluation Dataset
 
-Objective: determine whether compression helps the actual downstream workflow.
+Status: initial local eval suite implemented.
+
+Objective: determine whether compression helps the actual downstream workflow and
+catch prompt-safety regressions before changing compression policy.
+
+Implemented:
+
+- `data/eval_cases.json`: curated first-party eval cases for stable system
+  policy, user data that can become TOON, exact JSON, tool exchanges,
+  code/HTML, and numeric/negation constraints.
+- `app/eval_suite.py`: reusable quality checks for required substrings,
+  forbidden substrings, expected protected section types, token-growth failures,
+  target reduction warnings, and latency warnings.
+- `GET /eval`: browser page for running cases and comparing original vs
+  compressed prompts.
+- `GET /eval/cases`: returns the built-in eval cases.
+- `POST /eval/run`: runs all or selected cases with optional aggressiveness
+  override. This endpoint is also the shape to reuse for production sampling.
+
+Next objective: determine whether compression helps the actual downstream
+workflow, not only whether text-level invariants pass.
 
 Create a small local eval set before training anything custom:
 
@@ -147,8 +167,31 @@ Useful MVP metrics:
 - Downstream answer pass/fail.
 - Count of dangerous deletions.
 - User-visible readability of compressed prompt.
+- Cacheability class: stable system instructions, reusable policy blocks,
+  request-specific user context, and structured payloads should be measured
+  separately because stable cached prompt sections do not provide the same
+  downstream cost benefit when compressed.
+- Protection mechanism: record whether savings came from LLMLingua deletion,
+  TOON conversion, protected placeholders, or skipping stable/protected content.
 
 Do not rely only on semantic similarity. The real test is whether the target LLM still answers correctly.
+
+Near-term eval improvements:
+
+1. Add a production sampler that stores a small percentage of compression
+   attempts with input hash, model version, aggressiveness, reduction, latency,
+   validation checks, and cacheability class. Avoid storing raw prompts unless
+   explicit retention policy allows it.
+2. Add downstream task checks for a small golden set: expected answer contains
+   required IDs/dates/constraints, exact JSON remains valid, and tool-call
+   semantics are unchanged.
+3. Split adaptive policy by section class:
+   - Stable cached instructions: usually skip or use very light compression.
+   - Request-specific prose/RAG context: compress according to budget.
+   - Structured user data: prefer TOON when safe.
+   - Tool calls, exact schemas, code, HTML, and no-compress blocks: preserve.
+4. Promote savings targets only after quality checks are stable; correctness
+   failures should block, while reduction and latency misses should warn.
 
 ## Phase 4: Docker
 

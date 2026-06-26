@@ -5,10 +5,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from app.compressor import CompressionRuntimeError, PromptCompressionService
+from app.eval_suite import evaluate_compression, load_eval_cases, quality_passed
+from app.eval_ui import EVAL_HTML
 from app.schemas import (
     CompressRequest,
     CompressResponse,
     DEFAULT_AGGRESSIVENESS,
+    EvalCaseResponse,
+    EvalRunCaseResponse,
+    EvalRunRequest,
+    EvalRunResponse,
     HealthResponse,
     V1CompressRequest,
     V1CompressResponse,
@@ -77,6 +83,15 @@ APP_HTML = """
       margin: 7px 0 0;
       color: var(--muted);
       font-size: 14px;
+    }
+
+    .nav-link {
+      display: inline-block;
+      margin-top: 6px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 680;
+      text-decoration: none;
     }
 
     .stats {
@@ -351,6 +366,7 @@ APP_HTML = """
       <div>
         <h1>Prompt Compression</h1>
         <p class="subhead">Paste a prompt, compress it, and inspect which words were kept or dropped.</p>
+        <a class="nav-link" href="/eval">Eval Suite</a>
       </div>
       <div class="stats" aria-live="polite">
         <div class="stat"><strong id="reduction">-</strong><span>Reduction</span></div>
@@ -624,11 +640,101 @@ app.add_middleware(
 )
 
 compression_service = PromptCompressionService()
+eval_cases = load_eval_cases()
 
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(content=APP_HTML, headers=DASHBOARD_EMBED_HEADERS)
+
+
+@app.get("/eval", response_class=HTMLResponse)
+def eval_index() -> HTMLResponse:
+    return HTMLResponse(content=EVAL_HTML, headers=DASHBOARD_EMBED_HEADERS)
+
+
+@app.get("/eval/cases", response_model=list[EvalCaseResponse])
+def list_eval_cases() -> list[EvalCaseResponse]:
+    return [
+        EvalCaseResponse(
+            id=case.id,
+            title=case.title,
+            category=case.category,
+            description=case.description,
+            text=case.text,
+            default_aggressiveness=case.default_aggressiveness,
+            required_substrings=case.required_substrings,
+            forbidden_substrings=case.forbidden_substrings,
+            expected_section_kinds=case.expected_section_kinds,
+            target_min_reduction=case.target_min_reduction,
+            max_elapsed_ms=case.max_elapsed_ms,
+        )
+        for case in eval_cases
+    ]
+
+
+@app.post("/eval/run", response_model=EvalRunResponse)
+def run_eval(request: EvalRunRequest) -> EvalRunResponse:
+    requested_ids = request.case_ids or []
+    case_ids = set(requested_ids)
+    known_ids = {case.id for case in eval_cases}
+    unknown_ids = sorted(case_ids - known_ids)
+    if unknown_ids:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown eval case id(s): {', '.join(unknown_ids)}",
+        )
+
+    selected_cases = [
+        case
+        for case in eval_cases
+        if not case_ids or case.id in case_ids
+    ]
+    results: list[EvalRunCaseResponse] = []
+
+    for case in selected_cases:
+        aggressiveness = (
+            case.default_aggressiveness
+            if request.aggressiveness is None
+            else request.aggressiveness
+        )
+        try:
+            result = compression_service.compress(
+                text=case.text,
+                aggressiveness=aggressiveness,
+                include_sections=True,
+            )
+        except CompressionRuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        checks = evaluate_compression(case, result)
+        results.append(
+            EvalRunCaseResponse(
+                case_id=case.id,
+                title=case.title,
+                category=case.category,
+                passed=quality_passed(checks),
+                compressed_text=result.compressed_text,
+                original_tokens=result.original_tokens,
+                compressed_tokens=result.compressed_tokens,
+                reduction=result.reduction,
+                aggressiveness=result.aggressiveness,
+                target_rate=result.target_rate,
+                model=result.model,
+                elapsed_ms=result.elapsed_ms,
+                checks=[asdict(check) for check in checks],
+                output_sections=[asdict(section) for section in result.output_sections],
+            )
+        )
+
+    passed_cases = sum(1 for result in results if result.passed)
+    return EvalRunResponse(
+        passed=passed_cases == len(results),
+        total_cases=len(results),
+        passed_cases=passed_cases,
+        failed_cases=len(results) - passed_cases,
+        results=results,
+    )
 
 
 @app.get("/health", response_model=HealthResponse)

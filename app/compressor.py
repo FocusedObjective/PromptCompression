@@ -6,7 +6,7 @@ from threading import Lock
 from typing import Any
 
 from app.compression_pipeline import CompressionSegment, PromptPreprocessor
-from app.protected_spans import force_tokens_for_text
+from app.protected_spans import force_tokens_for_text, protected_spans_for_text
 from app.token_estimator import estimate_token_count
 
 DEFAULT_MODEL = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
@@ -168,23 +168,41 @@ class PromptCompressionService:
         placeholders: list[_CompressionPlaceholder] = []
         next_placeholder_index = 0
 
+        def next_placeholder() -> str:
+            nonlocal next_placeholder_index
+            placeholder = self._placeholder_for_index(next_placeholder_index)
+            while placeholder in source_text:
+                next_placeholder_index += 1
+                placeholder = self._placeholder_for_index(next_placeholder_index)
+            next_placeholder_index += 1
+            return placeholder
+
+        def append_placeholder(segment: CompressionSegment) -> None:
+            placeholder = next_placeholder()
+            parts.append(placeholder)
+            placeholders.append(_CompressionPlaceholder(placeholder, segment))
+
         for segment, should_compress in zip(
             segments,
             should_compress_segments,
             strict=True,
         ):
             if should_compress:
-                parts.append(segment.text)
+                cursor = 0
+                for span in protected_spans_for_text(segment.text):
+                    parts.append(segment.text[cursor:span.start])
+                    append_placeholder(
+                        CompressionSegment(
+                            text=span.text,
+                            compressible=False,
+                            kind="protected",
+                        )
+                    )
+                    cursor = span.end
+                parts.append(segment.text[cursor:])
                 continue
 
-            placeholder = self._placeholder_for_index(next_placeholder_index)
-            while placeholder in source_text:
-                next_placeholder_index += 1
-                placeholder = self._placeholder_for_index(next_placeholder_index)
-            next_placeholder_index += 1
-
-            parts.append(placeholder)
-            placeholders.append(_CompressionPlaceholder(placeholder, segment))
+            append_placeholder(segment)
 
         return _PreparedModelInput(
             text="".join(parts),
@@ -248,7 +266,11 @@ class PromptCompressionService:
         segment: CompressionSegment,
         include_sections: bool,
     ) -> list[CompressionToken]:
-        if include_sections and segment.compressible and segment.text.strip():
+        if (
+            include_sections
+            and segment.text.strip()
+            and (segment.compressible or segment.kind == "protected")
+        ):
             return [self._kept_segment_token(segment)]
         return []
 

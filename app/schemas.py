@@ -76,3 +76,63 @@ class HealthResponse(BaseModel):
     status: str
     model: str
     model_loaded: bool
+
+
+class EvalCaseResponse(BaseModel):
+    id: str
+    title: str
+    category: str
+    description: str
+    text: str
+    default_aggressiveness: float
+    required_substrings: list[str] = Field(default_factory=list)
+    forbidden_substrings: list[str] = Field(default_factory=list)
+    expected_section_kinds: list[str] = Field(default_factory=list)
+    target_min_reduction: float | None = None
+    max_elapsed_ms: float | None = None
+
+
+class EvalRunRequest(BaseModel):
+    case_ids: list[str] | None = Field(
+        default=None,
+        description="Case ids to run. Runs every case when omitted or empty.",
+    )
+    aggressiveness: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Optional aggressiveness override for every selected case.",
+    )
+
+
+class EvalQualityCheckResponse(BaseModel):
+    id: str
+    label: str
+    passed: bool
+    severity: str
+    detail: str
+
+
+class EvalRunCaseResponse(BaseModel):
+    case_id: str
+    title: str
+    category: str
+    passed: bool
+    compressed_text: str
+    original_tokens: int
+    compressed_tokens: int
+    reduction: float
+    aggressiveness: float
+    target_rate: float
+    model: str
+    elapsed_ms: float
+    checks: list[EvalQualityCheckResponse]
+    output_sections: list[OutputSection] = Field(default_factory=list)
+
+
+class EvalRunResponse(BaseModel):
+    passed: bool
+    total_cases: int
+    passed_cases: int
+    failed_cases: int
+    results: list[EvalRunCaseResponse]

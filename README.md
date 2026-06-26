@@ -49,6 +49,12 @@ Open the prompt compression UI:
 http://127.0.0.1:8000/
 ```
 
+Open the eval suite:
+
+```text
+http://127.0.0.1:8000/eval
+```
+
 Run the smoke test in another terminal:
 
 ```powershell
@@ -65,6 +71,35 @@ Checks whether the service is up.
 
 Opens a browser UI where you can paste a prompt, compress it, and inspect which
 words were kept or dropped.
+
+### `GET /eval`
+
+Opens a browser UI for running curated quality checks against the compressor.
+The eval suite compares original and compressed prompts, checks required
+substrings and protected structures, and reports token savings and latency.
+
+### `GET /eval/cases`
+
+Returns the built-in eval cases from `data/eval_cases.json`.
+
+### `POST /eval/run`
+
+Runs all eval cases or a selected subset.
+
+Request:
+
+```json
+{
+  "case_ids": ["support_escalation_with_toon_data"],
+  "aggressiveness": 0.25
+}
+```
+
+Omit `case_ids` to run all cases. Omit `aggressiveness` to use each case's
+default setting. Quality failures are based on required/forbidden substrings and
+expected protected section types. Token reduction and latency targets are
+reported as warnings so production sampling can track regressions without
+conflating savings with correctness.
 
 ### `POST /compress`
 
