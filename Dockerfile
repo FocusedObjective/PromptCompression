@@ -24,6 +24,7 @@ RUN adduser --disabled-password --gecos "" appuser \
     && chown -R appuser:appuser /app /cache
 
 COPY --chown=appuser:appuser app ./app
+COPY --chown=appuser:appuser data ./data
 
 USER appuser
 
