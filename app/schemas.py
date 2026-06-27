@@ -5,7 +5,49 @@ from pydantic import BaseModel, ConfigDict, Field
 DEFAULT_AGGRESSIVENESS = 0.15
 
 
+class TenantCompressionSettings(BaseModel):
+    profile_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Request-supplied tenant profile version or label.",
+    )
+    default_aggressiveness: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Tenant default used when the request does not explicitly set "
+            "aggressiveness."
+        ),
+    )
+    min_rate: float | None = Field(
+        default=None,
+        ge=0.05,
+        le=1.0,
+        description=(
+            "Tenant-specific lower bound for LLMLingua retention rate. "
+            "Higher values preserve more tokens."
+        ),
+    )
+    force_keep_tokens: list[str] = Field(
+        default_factory=list,
+        description="Exact tokens or short terms that should be forced to survive.",
+    )
+    force_drop_phrases: list[str] = Field(
+        default_factory=list,
+        description="Exact compressible boilerplate phrases to drop before model compression.",
+    )
+
+
 class CompressRequest(BaseModel):
+    tenant_id: str | None = Field(
+        default=None,
+        description="Tenant identity for request-scoped compression settings.",
+    )
+    tenant_profile: TenantCompressionSettings | None = Field(
+        default=None,
+        description="Tenant-specific compression rules supplied by the API caller.",
+    )
     text: str = Field(..., min_length=1, description="Text to compress.")
     aggressiveness: float = Field(
         default=DEFAULT_AGGRESSIVENESS,
@@ -43,6 +85,10 @@ class CompressResponse(BaseModel):
     aggressiveness: float
     target_rate: float
     model: str
+    tenant_id: str
+    compression_profile: str
+    compression_profile_source: str
+    training_sample_recorded: bool = False
     elapsed_ms: float
     labeled_tokens: list[LabeledToken] = Field(default_factory=list)
     output_sections: list[OutputSection] = Field(default_factory=list)
@@ -58,6 +104,14 @@ class V1CompressionSettings(BaseModel):
 
 
 class V1CompressRequest(BaseModel):
+    tenant_id: str | None = Field(
+        default=None,
+        description="Tenant identity. X-Tenant-ID may be used instead.",
+    )
+    tenant_profile: TenantCompressionSettings | None = Field(
+        default=None,
+        description="Tenant-specific compression rules supplied by the API caller.",
+    )
     model: str = Field(default="bear-2", description="Accepted for request compatibility.")
     input: str = Field(..., min_length=1, description="Text to compress.")
     compression_settings: V1CompressionSettings | None = None
@@ -71,6 +125,10 @@ class V1CompressResponse(BaseModel):
     tokens_saved: int
     compression_ratio: float
     compression_time: float
+    tenant_id: str
+    compression_profile: str
+    compression_profile_source: str
+    training_sample_recorded: bool = False
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -82,6 +140,14 @@ class V1Message(BaseModel):
 
 
 class V1MessagesCompressRequest(BaseModel):
+    tenant_id: str | None = Field(
+        default=None,
+        description="Tenant identity. X-Tenant-ID may be used instead.",
+    )
+    tenant_profile: TenantCompressionSettings | None = Field(
+        default=None,
+        description="Tenant-specific compression rules supplied by the API caller.",
+    )
     model: str = Field(
         default="bear-2",
         description="Accepted for request compatibility and preserved in output.",
@@ -118,6 +184,10 @@ class V1MessagesCompressResponse(BaseModel):
     user_output_tokens: int
     user_tokens_saved: int
     non_user_tokens_preserved: int
+    tenant_id: str
+    compression_profile: str
+    compression_profile_source: str
+    training_sample_recorded: bool = False
     message_stats: list[V1MessageCompressionStats]
     warnings: list[str] = Field(default_factory=list)
 

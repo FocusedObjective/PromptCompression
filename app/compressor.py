@@ -7,6 +7,12 @@ from typing import Any
 
 from app.compression_pipeline import CompressionSegment, PromptPreprocessor
 from app.protected_spans import force_tokens_for_text, protected_spans_for_text
+from app.tenant_profiles import (
+    DEFAULT_PROFILE_ID,
+    DEFAULT_PROFILE_SOURCE,
+    DEFAULT_TENANT_ID,
+    TenantCompressionProfile,
+)
 from app.token_estimator import estimate_token_count
 
 DEFAULT_MODEL = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
@@ -49,6 +55,10 @@ class CompressionResult:
     elapsed_ms: float
     labeled_tokens: list[CompressionToken]
     output_sections: list[CompressionOutputSection] = field(default_factory=list)
+    tenant_id: str = DEFAULT_TENANT_ID
+    compression_profile: str = DEFAULT_PROFILE_ID
+    compression_profile_source: str = DEFAULT_PROFILE_SOURCE
+    training_sample_recorded: bool = False
 
 
 @dataclass(frozen=True)
@@ -116,9 +126,18 @@ class PromptCompressionService:
 
             return self._compressor
 
-    def target_rate_for_aggressiveness(self, aggressiveness: float) -> float:
+    def target_rate_for_aggressiveness(
+        self,
+        aggressiveness: float,
+        min_rate_override: float | None = None,
+    ) -> float:
         bounded = max(0.0, min(1.0, aggressiveness))
-        min_rate = max(0.05, min(1.0, self.min_rate))
+        configured_min_rate = (
+            self.min_rate
+            if min_rate_override is None
+            else min_rate_override
+        )
+        min_rate = max(0.05, min(1.0, configured_min_rate))
         if bounded == 0.0:
             return 1.0
         if bounded == 1.0:
@@ -214,6 +233,7 @@ class PromptCompressionService:
         text: str,
         required_tokens: list[str],
         max_tokens: int,
+        priority_tokens: list[str] | None = None,
     ) -> list[str]:
         tokens: list[str] = []
         seen: set[str] = set()
@@ -228,10 +248,65 @@ class PromptCompressionService:
         for token in required_tokens:
             add_token(token)
 
+        for token in priority_tokens or []:
+            add_token(token)
+
         for token in force_tokens_for_text(text, max_tokens=max_tokens):
             add_token(token)
 
         return tokens
+
+    def _apply_force_drop_phrases(
+        self,
+        segments: list[CompressionSegment],
+        tenant_profile: TenantCompressionProfile,
+    ) -> list[CompressionSegment]:
+        if not tenant_profile.force_drop_phrases:
+            return segments
+
+        updated_segments: list[CompressionSegment] = []
+        for segment in segments:
+            if not segment.compressible:
+                updated_segments.append(segment)
+                continue
+
+            text = segment.text
+            for phrase in tenant_profile.force_drop_phrases:
+                text = self._remove_force_drop_phrase(text, phrase)
+            updated_segments.append(
+                CompressionSegment(
+                    text=text,
+                    compressible=segment.compressible,
+                    kind=segment.kind,
+                )
+            )
+
+        return updated_segments
+
+    def _remove_force_drop_phrase(self, text: str, phrase: str) -> str:
+        while True:
+            index = text.find(phrase)
+            if index < 0:
+                return text
+
+            start = index
+            end = index + len(phrase)
+            if not text[:start].strip():
+                start = 0
+                while end < len(text) and text[end].isspace():
+                    end += 1
+            if not text[end:].strip():
+                end = len(text)
+                while start > 0 and text[start - 1].isspace():
+                    start -= 1
+            elif (
+                start > 0
+                and text[start - 1].isspace()
+                and end < len(text)
+                and text[end].isspace()
+            ):
+                end += 1
+            text = text[:start] + text[end:]
 
     def _has_valid_placeholders(
         self,
@@ -429,6 +504,7 @@ class PromptCompressionService:
         prepared: _PreparedModelInput,
         target_rate: float,
         include_sections: bool,
+        tenant_profile: TenantCompressionProfile,
     ) -> _ExpandedCompression | None:
         required_tokens = [placeholder.token for placeholder in prepared.placeholders]
         max_force_tokens = self._max_force_tokens(compressor)
@@ -445,6 +521,7 @@ class PromptCompressionService:
             prepared.text,
             required_tokens=required_tokens,
             max_tokens=max_force_tokens,
+            priority_tokens=list(tenant_profile.force_keep_tokens),
         )
 
         try:
@@ -497,10 +574,18 @@ class PromptCompressionService:
         text: str,
         aggressiveness: float,
         include_sections: bool = True,
+        tenant_profile: TenantCompressionProfile | None = None,
     ) -> CompressionResult:
         start = time.perf_counter()
-        target_rate = self.target_rate_for_aggressiveness(aggressiveness)
-        segments = self.preprocessor.prepare(text)
+        profile = tenant_profile or TenantCompressionProfile()
+        target_rate = self.target_rate_for_aggressiveness(
+            aggressiveness,
+            min_rate_override=profile.min_rate,
+        )
+        segments = self._apply_force_drop_phrases(
+            self.preprocessor.prepare(text),
+            profile,
+        )
         should_compress_segments = [
             self._should_compress_segment(segment, target_rate)
             for segment in segments
@@ -523,6 +608,7 @@ class PromptCompressionService:
                 prepared,
                 target_rate,
                 include_sections=include_sections,
+                tenant_profile=profile,
             )
             if expanded is None:
                 expanded = self._uncompressed_result_parts(
@@ -558,4 +644,8 @@ class PromptCompressionService:
             elapsed_ms=(time.perf_counter() - start) * 1000,
             labeled_tokens=expanded.labeled_tokens,
             output_sections=expanded.output_sections,
+            tenant_id=profile.tenant_id,
+            compression_profile=profile.profile_id,
+            compression_profile_source=profile.source,
+            training_sample_recorded=False,
         )

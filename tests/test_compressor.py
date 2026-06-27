@@ -1,4 +1,5 @@
 from app.compressor import PromptCompressionService
+from app.tenant_profiles import build_tenant_profile
 from app.token_estimator import estimate_token_count
 from tests.pipeline_helpers import RecordingCompressor, build_service_with_pipeline
 
@@ -152,6 +153,61 @@ def test_non_ui_compression_skips_word_labels_and_sections():
     assert compressor.return_word_label_values == [False]
     assert result.labeled_tokens == []
     assert result.output_sections == []
+
+
+def test_tenant_force_keep_tokens_are_added_to_model_force_tokens():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(
+        tenant_id="tenant_123",
+        profile_id="tenant_123:v1",
+        force_keep_tokens=["customkeep", "tenantfield"],
+    )
+
+    result = service.compress(
+        "Please review this longer prompt with customkeep and tenantfield details.",
+        aggressiveness=0.25,
+        include_sections=False,
+        tenant_profile=profile,
+    )
+
+    assert compressor.inputs == [
+        "Please review this longer prompt with customkeep and tenantfield details."
+    ]
+    assert compressor.force_tokens_values[0][:2] == ["customkeep", "tenantfield"]
+    assert result.tenant_id == "tenant_123"
+    assert result.compression_profile == "tenant_123:v1"
+    assert result.compression_profile_source == "api"
+
+
+def test_tenant_force_drop_phrases_apply_only_to_compressible_segments():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    profile = build_tenant_profile(
+        tenant_id="tenant_123",
+        force_drop_phrases=["Reusable preamble. "],
+    )
+    text = (
+        "Reusable preamble. Please review before. "
+        "<nocompress>Reusable preamble. Keep this exact.</nocompress> "
+        "Please review after."
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        tenant_profile=profile,
+    )
+
+    assert compressor.inputs == [
+        "Please review before. __CK_KEEP_0000__ Please review after."
+    ]
+    assert result.compressed_text == (
+        "Review before. Reusable preamble. Keep this exact. Review after."
+    )
 
 
 def test_protected_prose_spans_are_placeholdered_before_model_call():

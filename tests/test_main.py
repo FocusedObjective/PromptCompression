@@ -6,10 +6,12 @@ from app.eval_suite import EvalCase
 from app.schemas import (
     CompressRequest,
     EvalRunRequest,
+    TenantCompressionSettings,
     V1CompressRequest,
     V1CompressionSettings,
     V1MessagesCompressRequest,
 )
+from app.tenant_profiles import TenantCompressionProfile
 
 
 class FakeCompressionService:
@@ -18,17 +20,21 @@ class FakeCompressionService:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, float, bool]] = []
+        self.tenant_profiles: list[TenantCompressionProfile | None] = []
 
     def compress(
         self,
         text: str,
         aggressiveness: float,
         include_sections: bool = True,
+        tenant_profile: TenantCompressionProfile | None = None,
     ) -> CompressionResult:
         self.calls.append((text, aggressiveness, include_sections))
+        self.tenant_profiles.append(tenant_profile)
         self.last_text = text
         self.last_aggressiveness = aggressiveness
         self.last_include_sections = include_sections
+        self.last_tenant_profile = tenant_profile
         labels = [
             CompressionToken(text="Prompts", kept=True),
             CompressionToken(text="are", kept=False),
@@ -54,6 +60,14 @@ class FakeCompressionService:
             elapsed_ms=12.5,
             labeled_tokens=labels,
             output_sections=sections,
+            tenant_id="default" if tenant_profile is None else tenant_profile.tenant_id,
+            compression_profile=(
+                "default:base" if tenant_profile is None else tenant_profile.profile_id
+            ),
+            compression_profile_source=(
+                "default" if tenant_profile is None else tenant_profile.source
+            ),
+            training_sample_recorded=False,
         )
 
 
@@ -67,9 +81,23 @@ def test_index_returns_prompt_compression_ui():
     assert "Dropped Words Highlighted" in body
     assert "JSON compressed to TOON" in body
     assert "Optional preserve controls" in body
+    assert "Tenant Profile" in body
+    assert 'id="tenantId"' in body
+    assert 'id="tenantProfileId"' in body
+    assert 'id="tenantForceKeepTokens"' in body
+    assert 'id="tenantForceDropPhrases"' in body
+    assert "buildTenantPayload" in body
     assert "&lt;nocompress&gt;...&lt;/nocompress&gt;" in body
     assert "markdown fences are protected from compression" in body
-    assert "include_sections: true" in body
+    assert "requestPayload.include_sections = true" in body
+    title_index = body.index("<h2>Original Prompt</h2>")
+    input_index = body.index('textarea id="prompt"')
+    button_index = body.index('id="compressButton"')
+    settings_index = body.index("Compression Settings")
+    tenant_index = body.index("Tenant Profile")
+    docs_index = body.index("Optional preserve controls")
+    assert title_index < input_index < button_index < settings_index
+    assert settings_index < tenant_index < docs_index
 
 
 def test_index_http_allows_iframe_embedding():
@@ -181,6 +209,10 @@ def test_compress_response_omits_sections_by_default(monkeypatch):
     )
 
     assert service.last_include_sections is False
+    assert response.tenant_id == "default"
+    assert response.compression_profile == "default:base"
+    assert response.compression_profile_source == "default"
+    assert response.training_sample_recorded is False
     assert [token.model_dump() for token in response.labeled_tokens] == []
     assert response.output_sections == []
 
@@ -218,6 +250,39 @@ def test_compress_response_includes_sections_when_requested(monkeypatch):
     ]
 
 
+def test_compress_uses_request_supplied_tenant_profile(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress(
+        CompressRequest(
+            tenant_id="tenant_123",
+            tenant_profile=TenantCompressionSettings(
+                profile_id="tenant_123:v1",
+                default_aggressiveness=0.42,
+                min_rate=0.6,
+                force_keep_tokens=["AcmeTerm", "AcmeTerm", "  SKU-77  "],
+                force_drop_phrases=["Reusable preamble", ""],
+            ),
+            text="Prompts are code.",
+        )
+    )
+
+    profile = service.last_tenant_profile
+    assert profile is not None
+    assert service.last_aggressiveness == 0.42
+    assert profile.tenant_id == "tenant_123"
+    assert profile.profile_id == "tenant_123:v1"
+    assert profile.source == "api"
+    assert profile.min_rate == 0.6
+    assert profile.force_keep_tokens == ("AcmeTerm", "SKU-77")
+    assert profile.force_drop_phrases == ("Reusable preamble",)
+    assert response.tenant_id == "tenant_123"
+    assert response.compression_profile == "tenant_123:v1"
+    assert response.compression_profile_source == "api"
+    assert response.training_sample_recorded is False
+
+
 def test_v1_compress_returns_compatible_shape(monkeypatch):
     service = FakeCompressionService()
     monkeypatch.setattr(main, "compression_service", service)
@@ -243,6 +308,10 @@ def test_v1_compress_returns_compatible_shape(monkeypatch):
         "tokens_saved": 2,
         "compression_ratio": 2.0,
         "compression_time": 12.5,
+        "tenant_id": "default",
+        "compression_profile": "default:base",
+        "compression_profile_source": "default",
+        "training_sample_recorded": False,
         "warnings": [],
     }
 
@@ -285,9 +354,49 @@ def test_v1_compress_http_accepts_compatible_request(monkeypatch):
         "tokens_saved": 2,
         "compression_ratio": 2.0,
         "compression_time": 12.5,
+        "tenant_id": "default",
+        "compression_profile": "default:base",
+        "compression_profile_source": "default",
+        "training_sample_recorded": False,
         "warnings": [],
     }
     assert service.last_aggressiveness == 0.4
+
+
+def test_v1_compress_accepts_tenant_id_header_and_profile_body(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/v1/compress",
+        headers={
+            "Authorization": "Bearer test-key",
+            "X-Tenant-ID": "tenant_from_header",
+        },
+        json={
+            "model": "bear-2",
+            "input": "Prompts are code.",
+            "tenant_profile": {
+                "profile_id": "tenant_from_header:v2",
+                "default_aggressiveness": 0.33,
+                "force_keep_tokens": ["AcmeTerm"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    profile = service.last_tenant_profile
+    assert profile is not None
+    assert service.last_aggressiveness == 0.33
+    assert profile.tenant_id == "tenant_from_header"
+    assert profile.profile_id == "tenant_from_header:v2"
+    assert profile.force_keep_tokens == ("AcmeTerm",)
+    assert body["tenant_id"] == "tenant_from_header"
+    assert body["compression_profile"] == "tenant_from_header:v2"
+    assert body["compression_profile_source"] == "api"
+    assert body["training_sample_recorded"] is False
 
 
 def test_v1_messages_compress_only_compresses_user_text(monkeypatch):
@@ -334,6 +443,10 @@ def test_v1_messages_compress_only_compresses_user_text(monkeypatch):
     assert response.compressed_request["system"] == "System stays."
     assert response.compressed_request["temperature"] == 0.2
     assert "compression_settings" not in response.compressed_request
+    assert response.tenant_id == "default"
+    assert response.compression_profile == "default:base"
+    assert response.compression_profile_source == "default"
+    assert response.training_sample_recorded is False
     assert response.input_tokens == 17
     assert response.output_tokens == 15
     assert response.tokens_saved == 2
@@ -375,6 +488,39 @@ def test_v1_messages_compress_skips_user_messages_without_text(monkeypatch):
         }
     ]
     assert response.message_stats[0].skipped_reason == "no_text_content"
+
+
+def test_v1_messages_compress_applies_tenant_profile_without_forwarding_it(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            tenant_id="tenant_body",
+            tenant_profile=TenantCompressionSettings(
+                profile_id="tenant_body:v1",
+                default_aggressiveness=0.28,
+                force_keep_tokens=["ContractTerm"],
+            ),
+            model="gpt-test",
+            messages=[
+                {"role": "user", "content": "Prompts are code."},
+            ],
+        )
+    )
+
+    profile = service.last_tenant_profile
+    assert profile is not None
+    assert service.last_aggressiveness == 0.28
+    assert profile.tenant_id == "tenant_body"
+    assert profile.force_keep_tokens == ("ContractTerm",)
+    assert response.tenant_id == "tenant_body"
+    assert response.compression_profile == "tenant_body:v1"
+    assert response.compression_profile_source == "api"
+    assert response.training_sample_recorded is False
+    assert "tenant_id" not in response.compressed_request
+    assert "tenant_profile" not in response.compressed_request
+    assert "compression_settings" not in response.compressed_request
 
 
 def test_v1_messages_compress_http_accepts_vendor_style_request(monkeypatch):

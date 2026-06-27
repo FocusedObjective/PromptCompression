@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.compressor import PromptCompressionService
+from app.tenant_profiles import TenantCompressionProfile
 from app.token_estimator import estimate_token_count
 
 TEXT_PART_TYPES = {"text", "input_text"}
@@ -47,6 +48,7 @@ def compress_user_messages(
     messages: list[dict[str, Any]],
     compression_service: PromptCompressionService,
     aggressiveness: float,
+    tenant_profile: TenantCompressionProfile | None = None,
 ) -> MessagesCompressionResult:
     start = time.perf_counter()
     compressed_messages: list[dict[str, Any]] = []
@@ -89,6 +91,7 @@ def compress_user_messages(
                 content,
                 compression_service=compression_service,
                 aggressiveness=aggressiveness,
+                tenant_profile=tenant_profile,
             )
         )
         if "content" in compressed_message:
@@ -167,6 +170,7 @@ def _compress_user_content(
     content: Any,
     compression_service: PromptCompressionService,
     aggressiveness: float,
+    tenant_profile: TenantCompressionProfile | None,
 ) -> tuple[Any, int, int, bool]:
     if isinstance(content, str):
         if not content:
@@ -176,6 +180,7 @@ def _compress_user_content(
             content,
             compression_service=compression_service,
             aggressiveness=aggressiveness,
+            tenant_profile=tenant_profile,
         )
         return result.text, 1, 1 if result.changed else 0, True
 
@@ -196,6 +201,7 @@ def _compress_user_content(
                 part,
                 compression_service=compression_service,
                 aggressiveness=aggressiveness,
+                tenant_profile=tenant_profile,
             )
             compressed_parts.append(result.text)
             text_parts += 1
@@ -208,6 +214,7 @@ def _compress_user_content(
                 part["text"],
                 compression_service=compression_service,
                 aggressiveness=aggressiveness,
+                tenant_profile=tenant_profile,
             )
             compressed_part = copy.deepcopy(part)
             compressed_part["text"] = result.text
@@ -226,11 +233,13 @@ def _compress_text(
     text: str,
     compression_service: PromptCompressionService,
     aggressiveness: float,
+    tenant_profile: TenantCompressionProfile | None,
 ) -> _TextCompressionResult:
     result = compression_service.compress(
         text=text,
         aggressiveness=aggressiveness,
         include_sections=False,
+        tenant_profile=tenant_profile,
     )
     return _TextCompressionResult(
         text=result.compressed_text,

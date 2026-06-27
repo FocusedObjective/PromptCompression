@@ -26,6 +26,11 @@ Current decisions:
   fast, extractive, token-label based, and easy to audit.
 - The default hosted architecture is one shared base LLMLingua-2 model plus
   tenant profile rules.
+- First tenant-specific implementation uses request-scoped API inputs only:
+  `tenant_id`, `tenant_profile`, and optional `X-Tenant-ID`. No local database,
+  event sink, or profile lookup is used in the request path.
+- Tenant controls are compressor metadata and must not be forwarded inside
+  downstream-compatible `compressed_request` payloads.
 - Do not create full-size fine-tuned model copies per tenant by default.
 - Use tenant LoRA/adapters only for high-volume tenants that justify the added
   hosting complexity.
@@ -41,15 +46,17 @@ Current decisions:
 
 ## Product Behavior
 
-Initial behavior:
+Initial API-only behavior:
 
 ```text
-request with tenant_id
-  -> load active tenant profile if one exists
-  -> compress with base LLMLingua-2 plus tenant-specific hints
-  -> record token accounting and sampled training data
-  -> return compressed request and stats
+request with tenant_id and optional tenant_profile
+  -> build request-scoped profile from API body or X-Tenant-ID
+  -> compress with base LLMLingua-2 plus request-supplied tenant rules
+  -> return compressed request, stats, and profile metadata
 ```
+
+No raw prompt text, counters, or training samples are stored by the service in
+this first pass.
 
 Later behavior:
 
@@ -276,6 +283,13 @@ For `POST /compress`:
 ```json
 {
   "tenant_id": "tenant_123",
+  "tenant_profile": {
+    "profile_id": "tenant_123:v1",
+    "default_aggressiveness": 0.2,
+    "min_rate": 0.6,
+    "force_keep_tokens": ["AcctSuite", "tenant_field"],
+    "force_drop_phrases": ["Please carefully review the following context"]
+  },
   "text": "Prompts are production code. Manage them that way.",
   "aggressiveness": 0.15,
   "include_sections": false
@@ -293,20 +307,52 @@ Recommended response additions:
 {
   "tenant_id": "tenant_123",
   "compression_profile": "tenant_123:v3",
-  "compression_profile_source": "tenant_profile",
-  "training_sample_recorded": true
+  "compression_profile_source": "api",
+  "training_sample_recorded": false
 }
 ```
 
 Use `default` or `anonymous` when no tenant is provided. Do not train anonymous
 traffic.
 
-## Data Model
+Implemented API-supplied profile fields:
 
-Keep the data model small and append-only. For local development, SQLite is
-enough. For Cloud Run, use Cloud SQL, Firestore, or append JSONL to Cloud
-Storage and load rollups separately. The code should hide this behind a small
-event sink interface so storage can change later.
+```text
+profile_id
+default_aggressiveness
+min_rate
+force_keep_tokens
+force_drop_phrases
+```
+
+Runtime behavior:
+
+- Merge `force_keep_tokens` into LLMLingua's `force_tokens` list after protected
+  placeholders.
+- Apply `min_rate` when mapping aggressiveness to target retention rate.
+- Remove exact `force_drop_phrases` only from compressible segments, leaving
+  no-compress, JSON, code, HTML, and other protected content untouched.
+- Return `training_sample_recorded=false` until an explicit external storage
+  path exists.
+
+`tenant_id`, `tenant_profile`, and `compression_settings` are excluded from
+`compressed_request` in compatible message responses so they are not forwarded to
+the downstream model request.
+
+## Persistence Status
+
+The data model below is deferred. The current service intentionally has no local
+database. Future token accounting, rollups, raw samples, and profile promotion
+should be implemented through an explicit external storage/event sink chosen by
+deployment, not an implicit local SQLite database.
+
+## Future Data Model
+
+When persistence is added, keep the data model small and append-only. Do not
+add a local database to the API service by default. For hosted deployments, use
+an explicit external store such as Cloud SQL, Firestore, or append-only JSONL in
+Cloud Storage, hidden behind a small event sink interface so storage can change
+later.
 
 ### `compression_events`
 
@@ -846,25 +892,27 @@ Add a manual override so a bad profile can be disabled quickly.
 Likely first implementation pass:
 
 - `app/schemas.py`
-  - Add optional `tenant_id` fields.
+  - Add optional `tenant_id` and `tenant_profile` fields.
   - Add response fields for profile metadata.
 - `app/main.py`
   - Read `tenant_id` from body or `X-Tenant-ID`.
   - Pass tenant context into compression.
-  - Record events after compression.
+  - Exclude compressor-only tenant controls from compatible downstream payloads.
 - `app/compressor.py`
   - Accept an optional tenant profile.
   - Merge tenant force-keep tokens with existing forced tokens.
+  - Apply request-supplied `min_rate`.
+  - Drop exact request-supplied boilerplate phrases only in compressible text.
   - Include profile metadata in `CompressionResult`.
 - `app/message_compression.py`
   - Preserve tenant context through role-aware compression.
-  - Emit per-part sample candidates.
+  - Use the same request-scoped profile for user text parts.
 - New `app/tenant_profiles.py`
-  - Load active tenant profile.
+  - Normalize request-supplied tenant profile values.
   - Provide fallback default profile.
-- New `app/telemetry.py`
-  - Define `CompressionEventSink`.
-  - Add local SQLite implementation for MVP.
+- Future `app/telemetry.py`
+  - Define an external `CompressionEventSink` after the storage backend is
+    chosen.
 - New `app/training_labels.py`
   - Validate teacher audit JSON.
   - Align exact spans to tokenizer tokens.
@@ -898,17 +946,30 @@ Likely first implementation pass:
 
 ## Rollout Phases
 
-### Phase 1: Tenant Token Accounting
+### Phase 1: API-Supplied Tenant Rules
 
-Add `tenant_id`, event logging, and rollups. No raw prompt storage yet.
+Add `tenant_id`, request-scoped `tenant_profile`, and response profile metadata.
+No local persistence, raw prompt storage, event logging, or rollups yet.
+
+Done when:
+
+- Every compression endpoint accepts tenant identity from the API.
+- The compressor applies request-supplied force-keep tokens, exact boilerplate
+  drops, default aggressiveness, and min retention rate.
+- Responses include model/profile metadata.
+- Missing tenant IDs do not break existing clients.
+
+### Phase 2: Tenant Token Accounting
+
+Add external event logging and rollups after a storage backend is chosen.
 
 Done when:
 
 - Every endpoint can associate token counts with a tenant.
 - Metrics include model/profile version.
-- Missing tenant IDs do not break existing clients.
+- No raw prompt text is stored in token accounting events.
 
-### Phase 2: Training Sample Collection
+### Phase 3: Training Sample Collection
 
 Add opt-in raw sample storage for user text parts.
 
@@ -919,7 +980,7 @@ Done when:
 - Samples have TTL metadata.
 - Training eligibility can be computed from rollups.
 
-### Phase 3: Teacher-Audited Labels
+### Phase 4: Teacher-Audited Labels
 
 Add the offline label-quality loop.
 
@@ -932,7 +993,7 @@ Done when:
 - Corrected labels are generated only for accepted samples.
 - Uncertain or conflicting samples are rejected.
 
-### Phase 4: Rules-Only Tenant Profiles
+### Phase 5: Rules-Only Tenant Profiles
 
 Build lightweight profiles from sampled data.
 
@@ -943,7 +1004,7 @@ Done when:
 - Runtime compression uses the active tenant profile.
 - Eval shows improvement for at least one tenant sample set.
 
-### Phase 5: Tenant Adapters
+### Phase 6: Tenant Adapters
 
 Train a small adapter or grouped adapter for tenants with enough accepted data.
 
@@ -956,7 +1017,7 @@ Done when:
 - Runtime can route a tenant to active adapter artifacts.
 - Adapter fallback to base model plus tenant rules is reliable.
 
-### Phase 6: Production Controls
+### Phase 7: Production Controls
 
 Add safety and operations controls.
 
@@ -969,8 +1030,9 @@ Done when:
 
 ## Open Decisions
 
-- Storage backend for hosted deployment: SQLite is fine locally, but Cloud Run
-  should use Cloud SQL, Firestore, or Cloud Storage JSONL.
+- Storage backend for hosted deployment: choose an explicit external store such
+  as Cloud SQL, Firestore, or Cloud Storage JSONL; do not make the API depend on
+  an implicit local database.
 - Whether tenant adaptation is allowed by default or requires explicit customer
   opt-in.
 - Which light teacher LLM is acceptable from a privacy, cost, latency, and data
@@ -986,21 +1048,24 @@ Done when:
 
 Build this in the following order:
 
-1. Add `tenant_id` and per-tenant token accounting.
-2. Add opt-in sample collection for user text only.
-3. Store base LLMLingua-2 token labels for sampled text.
-4. Add deterministic required-span extraction.
-5. Add the base-compressor benchmark command, starting with LLMLingua-2
+1. Add `tenant_id`, `tenant_profile`, and API-supplied tenant rules with no
+   local database.
+2. Add external per-tenant token accounting after choosing the storage/event
+   backend.
+3. Add opt-in sample collection for user text only.
+4. Store base LLMLingua-2 token labels for sampled text.
+5. Add deterministic required-span extraction.
+6. Add the base-compressor benchmark command, starting with LLMLingua-2
    BERT-base vs LLMLingua-2 XLM-RoBERTa-large.
-6. Add the offline light-LLM audit for mistaken drops and safe drops.
-7. Build corrected KEEP/DROP labels and reject uncertain examples.
-8. Build rules-only tenant profiles from 50+ accepted requests or 1M sampled
+7. Add the offline light-LLM audit for mistaken drops and safe drops.
+8. Build corrected KEEP/DROP labels and reject uncertain examples.
+9. Build rules-only tenant profiles from 50+ accepted requests or 1M sampled
    tokens.
-9. Route compression through active tenant profile rules.
-10. Add promotion checks against tenant holdout samples.
-11. Train adapters only after rules prove the data collection and eval loop are
+10. Route compression through active tenant profile rules.
+11. Add promotion checks against tenant holdout samples.
+12. Train adapters only after rules prove the data collection and eval loop are
    useful.
-12. Reserve full per-tenant checkpoints for exceptional high-volume tenants.
+13. Reserve full per-tenant checkpoints for exceptional high-volume tenants.
 
 This gets useful tenant-specific compression without making the request path
 heavy or turning model training into a production dependency.

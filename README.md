@@ -107,11 +107,23 @@ Request:
 
 ```json
 {
+  "tenant_id": "tenant_123",
+  "tenant_profile": {
+    "profile_id": "tenant_123:v1",
+    "default_aggressiveness": 0.2,
+    "min_rate": 0.6,
+    "force_keep_tokens": ["AcctSuite", "tenant_field"],
+    "force_drop_phrases": ["Please carefully review the following context"]
+  },
   "text": "Prompts are production code. Manage them that way.",
   "aggressiveness": 0.15,
   "include_sections": false
 }
 ```
+
+Tenant fields are optional. They are request scoped and are not loaded from a
+local database. If `aggressiveness` is omitted, `tenant_profile.default_aggressiveness`
+is used when provided.
 
 Set `include_sections` to `true` only for UI/debug views that need per-section
 labels and protected-block rendering. It defaults to `false` to keep responses
@@ -128,6 +140,10 @@ Response:
   "aggressiveness": 0.15,
   "target_rate": 0.9175,
   "model": "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
+  "tenant_id": "tenant_123",
+  "compression_profile": "tenant_123:v1",
+  "compression_profile_source": "api",
+  "training_sample_recorded": false,
   "elapsed_ms": 123.4,
   "labeled_tokens": [],
   "output_sections": []
@@ -144,6 +160,11 @@ Request:
 
 ```json
 {
+  "tenant_id": "tenant_123",
+  "tenant_profile": {
+    "profile_id": "tenant_123:v1",
+    "force_keep_tokens": ["AcctSuite"]
+  },
   "model": "bear-2",
   "input": "Prompts are production code. Manage them that way.",
   "compression_settings": {
@@ -163,12 +184,17 @@ Response:
   "tokens_saved": 4,
   "compression_ratio": 1.5,
   "compression_time": 123.4,
+  "tenant_id": "tenant_123",
+  "compression_profile": "tenant_123:v1",
+  "compression_profile_source": "api",
+  "training_sample_recorded": false,
   "warnings": []
 }
 ```
 
 Use `http://127.0.0.1:8000/v1/compress` for the local compatible endpoint.
 Bearer auth headers are ignored and not required by the local MVP.
+Clients that cannot add `tenant_id` to the JSON body may send `X-Tenant-ID`.
 
 ### `POST /v1/messages/compress`
 
@@ -183,6 +209,12 @@ Request:
 
 ```json
 {
+  "tenant_id": "tenant_123",
+  "tenant_profile": {
+    "profile_id": "tenant_123:v1",
+    "default_aggressiveness": 0.2,
+    "force_keep_tokens": ["AcctSuite"]
+  },
   "model": "gpt-test",
   "system": "Stable system instructions remain unchanged.",
   "messages": [
@@ -245,10 +277,18 @@ Response:
   "user_output_tokens": 17,
   "user_tokens_saved": 7,
   "non_user_tokens_preserved": 18,
+  "tenant_id": "tenant_123",
+  "compression_profile": "tenant_123:v1",
+  "compression_profile_source": "api",
+  "training_sample_recorded": false,
   "message_stats": [],
   "warnings": []
 }
 ```
+
+`tenant_id`, `tenant_profile`, and `compression_settings` are compressor
+controls and are removed from `compressed_request` so they are not forwarded to a
+downstream model provider.
 
 ## How Aggressiveness Works
 

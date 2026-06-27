@@ -1,7 +1,7 @@
 from dataclasses import asdict
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -19,11 +19,14 @@ from app.schemas import (
     EvalRunRequest,
     EvalRunResponse,
     HealthResponse,
+    TenantCompressionSettings,
     V1CompressRequest,
     V1CompressResponse,
+    V1CompressionSettings,
     V1MessagesCompressRequest,
     V1MessagesCompressResponse,
 )
+from app.tenant_profiles import TenantCompressionProfile, build_tenant_profile
 
 DASHBOARD_EMBED_HEADERS = {
     "Content-Security-Policy": "frame-ancestors *",
@@ -185,6 +188,77 @@ APP_HTML = """
       flex-wrap: wrap;
     }
 
+    .tenant-controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 12px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: #fbfcfe;
+    }
+
+    .tenant-controls h3 {
+      grid-column: 1 / -1;
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.2;
+      font-weight: 720;
+    }
+
+    .tenant-field {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 620;
+    }
+
+    .tenant-field.full {
+      grid-column: 1 / -1;
+    }
+
+    .tenant-field input,
+    .tenant-field textarea {
+      width: 100%;
+      min-height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      outline: 0;
+      padding: 7px 9px;
+      background: #ffffff;
+      color: var(--text);
+      font: 13px/1.4 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+
+    .tenant-field textarea {
+      min-height: 64px;
+      max-height: 160px;
+      resize: vertical;
+    }
+
+    .tenant-inline {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 620;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .settings-row input[type="range"] {
+      width: min(180px, 100%);
+    }
+
     .tag-reference {
       display: grid;
       gap: 8px;
@@ -236,6 +310,14 @@ APP_HTML = """
     input[type="range"] {
       width: 180px;
       accent-color: var(--accent);
+    }
+
+    input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      accent-color: var(--accent);
+      flex: 0 0 auto;
     }
 
     button {
@@ -360,6 +442,10 @@ APP_HTML = """
         grid-template-columns: 1fr;
       }
 
+      .tenant-controls {
+        grid-template-columns: 1fr;
+      }
+
       textarea {
         min-height: 320px;
       }
@@ -431,6 +517,48 @@ Output:
 - Executive summary
 - Blockers and owner
 - Next three actions</textarea>
+        <div class="controls">
+          <button id="compressButton" type="button">Compress</button>
+        </div>
+        <div class="tenant-controls">
+          <h3>Compression Settings</h3>
+          <div class="tenant-field full">
+            <span>Aggressiveness</span>
+            <div class="settings-row">
+              <input id="aggressiveness" type="range" min="0" max="1" step="0.05" value="0.15">
+              <strong id="aggressivenessValue">0.15</strong>
+              <label class="tenant-inline">
+                <input id="useTenantDefault" type="checkbox">
+                Tenant default
+              </label>
+            </div>
+          </div>
+          <h3>Tenant Profile</h3>
+          <label class="tenant-field">
+            Tenant ID
+            <input id="tenantId" type="text" autocomplete="off" spellcheck="false" placeholder="tenant_123">
+          </label>
+          <label class="tenant-field">
+            Profile ID
+            <input id="tenantProfileId" type="text" autocomplete="off" spellcheck="false" placeholder="tenant_123:v1">
+          </label>
+          <label class="tenant-field">
+            Default Aggressiveness
+            <input id="tenantDefaultAggressiveness" type="number" min="0" max="1" step="0.05" placeholder="0.20">
+          </label>
+          <label class="tenant-field">
+            Min Rate
+            <input id="tenantMinRate" type="number" min="0.05" max="1" step="0.05" placeholder="0.60">
+          </label>
+          <label class="tenant-field full">
+            Force Keep Tokens
+            <textarea id="tenantForceKeepTokens" spellcheck="false" placeholder="AcctSuite&#10;tenant_field"></textarea>
+          </label>
+          <label class="tenant-field full">
+            Force Drop Phrases
+            <textarea id="tenantForceDropPhrases" spellcheck="false" placeholder="Please carefully review the following context"></textarea>
+          </label>
+        </div>
         <div class="tag-reference">
           <div class="tag-reference-title">Optional preserve controls</div>
           <ul class="tag-list">
@@ -442,14 +570,6 @@ Output:
             <li>Whitespace inside protected HTML is kept exactly as provided.</li>
             <li><code>```</code> and <code>~~~</code> markdown fences are protected from compression and preserve whitespace.</li>
           </ul>
-        </div>
-        <div class="controls">
-          <label>
-            Aggressiveness
-            <input id="aggressiveness" type="range" min="0" max="1" step="0.05" value="0.15">
-            <strong id="aggressivenessValue">0.15</strong>
-          </label>
-          <button id="compressButton" type="button">Compress</button>
         </div>
       </section>
 
@@ -470,6 +590,13 @@ Output:
     const promptInput = document.getElementById("prompt");
     const aggressivenessInput = document.getElementById("aggressiveness");
     const aggressivenessValue = document.getElementById("aggressivenessValue");
+    const useTenantDefault = document.getElementById("useTenantDefault");
+    const tenantIdInput = document.getElementById("tenantId");
+    const tenantProfileIdInput = document.getElementById("tenantProfileId");
+    const tenantDefaultAggressivenessInput = document.getElementById("tenantDefaultAggressiveness");
+    const tenantMinRateInput = document.getElementById("tenantMinRate");
+    const tenantForceKeepTokensInput = document.getElementById("tenantForceKeepTokens");
+    const tenantForceDropPhrasesInput = document.getElementById("tenantForceDropPhrases");
     const compressButton = document.getElementById("compressButton");
     const copyButton = document.getElementById("copyButton");
     const inputStatus = document.getElementById("inputStatus");
@@ -480,13 +607,14 @@ Output:
     const elapsed = document.getElementById("elapsed");
     let latestCompressedText = "";
 
-    function setStatus(message, isError = false) {
+    function setStatus(message, isError) {
+      const hasError = isError === true;
       resultStatus.textContent = message;
-      resultStatus.className = isError ? "status error" : "status";
+      resultStatus.className = hasError ? "status error" : "status";
     }
 
     function estimateTokenCount(text) {
-      return (text.match(/[\\p{L}\\p{N}]+|[^\\s]/gu) || []).length;
+      return (text.match(/[A-Za-z0-9_]+|[^\\s]/g) || []).length;
     }
 
     function renderTokenDiff(container, labeledTokens) {
@@ -563,8 +691,81 @@ Output:
       }
     }
 
+    function boundedNumberInput(input, min, max) {
+      if (!input.value.trim()) {
+        return null;
+      }
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) {
+        return null;
+      }
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function splitTokens(value) {
+      return value
+        .split(/[,\\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    function splitPhrases(value) {
+      return value
+        .split(/\\n/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    function buildTenantPayload() {
+      const payload = {};
+      const tenantId = tenantIdInput.value.trim();
+      if (tenantId) {
+        payload.tenant_id = tenantId;
+      }
+
+      const profile = {};
+      const profileId = tenantProfileIdInput.value.trim();
+      if (profileId) {
+        profile.profile_id = profileId;
+      }
+
+      const defaultAggressiveness = boundedNumberInput(
+        tenantDefaultAggressivenessInput,
+        0,
+        1,
+      );
+      if (defaultAggressiveness !== null) {
+        profile.default_aggressiveness = defaultAggressiveness;
+      }
+
+      const minRate = boundedNumberInput(tenantMinRateInput, 0.05, 1);
+      if (minRate !== null) {
+        profile.min_rate = minRate;
+      }
+
+      const forceKeepTokens = splitTokens(tenantForceKeepTokensInput.value);
+      if (forceKeepTokens.length) {
+        profile.force_keep_tokens = forceKeepTokens;
+      }
+
+      const forceDropPhrases = splitPhrases(tenantForceDropPhrasesInput.value);
+      if (forceDropPhrases.length) {
+        profile.force_drop_phrases = forceDropPhrases;
+      }
+
+      if (Object.keys(profile).length) {
+        payload.tenant_profile = profile;
+      }
+
+      return payload;
+    }
+
     aggressivenessInput.addEventListener("input", () => {
       aggressivenessValue.textContent = Number(aggressivenessInput.value).toFixed(2);
+    });
+
+    useTenantDefault.addEventListener("change", () => {
+      aggressivenessInput.disabled = useTenantDefault.checked;
     });
 
     promptInput.addEventListener("input", () => {
@@ -608,14 +809,17 @@ Output:
       diff.textContent = "";
 
       try {
+        const requestPayload = buildTenantPayload();
+        requestPayload.text = text;
+        requestPayload.include_sections = true;
+        if (!useTenantDefault.checked) {
+          requestPayload.aggressiveness = Number(aggressivenessInput.value);
+        }
+
         const response = await fetch("/compress", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text,
-            aggressiveness: Number(aggressivenessInput.value),
-            include_sections: true,
-          }),
+          body: JSON.stringify(requestPayload),
         });
 
         const data = await response.json();
@@ -629,7 +833,9 @@ Output:
         reduction.textContent = `${Math.round(data.reduction * 100)}%`;
         tokens.textContent = `${data.original_tokens} -> ${data.compressed_tokens}`;
         elapsed.textContent = `${Math.round(data.elapsed_ms)} ms`;
-        setStatus("Complete");
+        setStatus(
+          `Complete - ${data.tenant_id || "default"} - ${data.compression_profile || "default:base"}`
+        );
       } catch (error) {
         setStatus(error.message, true);
       } finally {
@@ -766,12 +972,22 @@ def health() -> HealthResponse:
 
 
 @app.post("/compress", response_model=CompressResponse)
-def compress(request: CompressRequest) -> CompressResponse:
+def compress(
+    request: CompressRequest,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+) -> CompressResponse:
+    tenant_profile = _tenant_profile_from_request(
+        body_tenant_id=request.tenant_id,
+        header_tenant_id=x_tenant_id,
+        settings=request.tenant_profile,
+    )
+    aggressiveness = _resolve_compress_aggressiveness(request, tenant_profile)
     try:
         result = compression_service.compress(
             text=request.text,
-            aggressiveness=request.aggressiveness,
+            aggressiveness=aggressiveness,
             include_sections=request.include_sections,
+            tenant_profile=tenant_profile,
         )
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -784,6 +1000,10 @@ def compress(request: CompressRequest) -> CompressResponse:
         aggressiveness=result.aggressiveness,
         target_rate=result.target_rate,
         model=result.model,
+        tenant_id=result.tenant_id,
+        compression_profile=result.compression_profile,
+        compression_profile_source=result.compression_profile_source,
+        training_sample_recorded=result.training_sample_recorded,
         elapsed_ms=result.elapsed_ms,
         labeled_tokens=[asdict(token) for token in result.labeled_tokens],
         output_sections=[
@@ -796,19 +1016,24 @@ def compress(request: CompressRequest) -> CompressResponse:
 @app.post("/v1/compress", response_model=V1CompressResponse)
 def compress_v1(
     request: V1CompressRequest,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
 ) -> V1CompressResponse:
-    aggressiveness = DEFAULT_AGGRESSIVENESS
-    if (
-        request.compression_settings is not None
-        and request.compression_settings.aggressiveness is not None
-    ):
-        aggressiveness = request.compression_settings.aggressiveness
+    tenant_profile = _tenant_profile_from_request(
+        body_tenant_id=request.tenant_id,
+        header_tenant_id=x_tenant_id,
+        settings=request.tenant_profile,
+    )
+    aggressiveness = _resolve_v1_aggressiveness(
+        request.compression_settings,
+        tenant_profile,
+    )
 
     try:
         result = compression_service.compress(
             text=request.input,
             aggressiveness=aggressiveness,
             include_sections=False,
+            tenant_profile=tenant_profile,
         )
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -828,6 +1053,10 @@ def compress_v1(
         tokens_saved=tokens_saved,
         compression_ratio=compression_ratio,
         compression_time=result.elapsed_ms,
+        tenant_id=result.tenant_id,
+        compression_profile=result.compression_profile,
+        compression_profile_source=result.compression_profile_source,
+        training_sample_recorded=result.training_sample_recorded,
         warnings=[],
     )
 
@@ -835,13 +1064,17 @@ def compress_v1(
 @app.post("/v1/messages/compress", response_model=V1MessagesCompressResponse)
 def compress_v1_messages(
     request: V1MessagesCompressRequest,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
 ) -> V1MessagesCompressResponse:
-    aggressiveness = DEFAULT_AGGRESSIVENESS
-    if (
-        request.compression_settings is not None
-        and request.compression_settings.aggressiveness is not None
-    ):
-        aggressiveness = request.compression_settings.aggressiveness
+    tenant_profile = _tenant_profile_from_request(
+        body_tenant_id=request.tenant_id,
+        header_tenant_id=x_tenant_id,
+        settings=request.tenant_profile,
+    )
+    aggressiveness = _resolve_v1_aggressiveness(
+        request.compression_settings,
+        tenant_profile,
+    )
 
     messages = [
         message.model_dump(exclude_unset=True)
@@ -852,6 +1085,7 @@ def compress_v1_messages(
             messages,
             compression_service=compression_service,
             aggressiveness=aggressiveness,
+            tenant_profile=tenant_profile,
         )
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -862,7 +1096,7 @@ def compress_v1_messages(
     tokens_saved = max(0, input_tokens - output_tokens)
     compression_ratio = 0.0 if output_tokens == 0 else input_tokens / output_tokens
     compressed_request = request.model_dump(
-        exclude={"compression_settings"},
+        exclude={"compression_settings", "tenant_id", "tenant_profile"},
         exclude_unset=True,
     )
     compressed_request["messages"] = result.messages
@@ -882,9 +1116,58 @@ def compress_v1_messages(
         non_user_tokens_preserved=(
             result.non_user_tokens_preserved + preserved_top_level_tokens
         ),
+        tenant_id=tenant_profile.tenant_id,
+        compression_profile=tenant_profile.profile_id,
+        compression_profile_source=tenant_profile.source,
+        training_sample_recorded=False,
         message_stats=[asdict(stat) for stat in result.stats],
         warnings=[],
     )
+
+
+def _tenant_profile_from_request(
+    *,
+    body_tenant_id: str | None,
+    header_tenant_id: str | None,
+    settings: TenantCompressionSettings | None,
+) -> TenantCompressionProfile:
+    tenant_id = (
+        body_tenant_id
+        if body_tenant_id is not None and body_tenant_id.strip()
+        else header_tenant_id
+    )
+    return build_tenant_profile(
+        tenant_id=tenant_id,
+        profile_id=None if settings is None else settings.profile_id,
+        default_aggressiveness=(
+            None if settings is None else settings.default_aggressiveness
+        ),
+        min_rate=None if settings is None else settings.min_rate,
+        force_keep_tokens=() if settings is None else settings.force_keep_tokens,
+        force_drop_phrases=() if settings is None else settings.force_drop_phrases,
+    )
+
+
+def _resolve_compress_aggressiveness(
+    request: CompressRequest,
+    tenant_profile: TenantCompressionProfile,
+) -> float:
+    if "aggressiveness" in request.model_fields_set:
+        return request.aggressiveness
+    if tenant_profile.default_aggressiveness is not None:
+        return tenant_profile.default_aggressiveness
+    return request.aggressiveness
+
+
+def _resolve_v1_aggressiveness(
+    settings: V1CompressionSettings | None,
+    tenant_profile: TenantCompressionProfile,
+) -> float:
+    if settings is not None and settings.aggressiveness is not None:
+        return settings.aggressiveness
+    if tenant_profile.default_aggressiveness is not None:
+        return tenant_profile.default_aggressiveness
+    return DEFAULT_AGGRESSIVENESS
 
 
 def _top_level_preserved_tokens(request: V1MessagesCompressRequest) -> int:
