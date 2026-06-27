@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,8 @@ from fastapi.responses import HTMLResponse
 from app.compressor import CompressionRuntimeError, PromptCompressionService
 from app.eval_suite import evaluate_compression, load_eval_cases, quality_passed
 from app.eval_ui import EVAL_HTML
+from app.message_compression import compress_user_messages, estimate_content_tokens
+from app.research_ui import RESEARCH_HTML
 from app.schemas import (
     CompressRequest,
     CompressResponse,
@@ -18,6 +21,8 @@ from app.schemas import (
     HealthResponse,
     V1CompressRequest,
     V1CompressResponse,
+    V1MessagesCompressRequest,
+    V1MessagesCompressResponse,
 )
 
 DASHBOARD_EMBED_HEADERS = {
@@ -92,6 +97,12 @@ APP_HTML = """
       font-size: 13px;
       font-weight: 680;
       text-decoration: none;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
     }
 
     .stats {
@@ -366,7 +377,10 @@ APP_HTML = """
       <div>
         <h1>Prompt Compression</h1>
         <p class="subhead">Paste a prompt, compress it, and inspect which words were kept or dropped.</p>
-        <a class="nav-link" href="/eval">Eval Suite</a>
+        <nav class="nav-links" aria-label="Primary navigation">
+          <a class="nav-link" href="/eval">Eval Suite</a>
+          <a class="nav-link" href="/research">Research</a>
+        </nav>
       </div>
       <div class="stats" aria-live="polite">
         <div class="stat"><strong id="reduction">-</strong><span>Reduction</span></div>
@@ -653,6 +667,11 @@ def eval_index() -> HTMLResponse:
     return HTMLResponse(content=EVAL_HTML, headers=DASHBOARD_EMBED_HEADERS)
 
 
+@app.get("/research", response_class=HTMLResponse)
+def research_index() -> HTMLResponse:
+    return HTMLResponse(content=RESEARCH_HTML, headers=DASHBOARD_EMBED_HEADERS)
+
+
 @app.get("/eval/cases", response_model=list[EvalCaseResponse])
 def list_eval_cases() -> list[EvalCaseResponse]:
     return [
@@ -811,3 +830,67 @@ def compress_v1(
         compression_time=result.elapsed_ms,
         warnings=[],
     )
+
+
+@app.post("/v1/messages/compress", response_model=V1MessagesCompressResponse)
+def compress_v1_messages(
+    request: V1MessagesCompressRequest,
+) -> V1MessagesCompressResponse:
+    aggressiveness = DEFAULT_AGGRESSIVENESS
+    if (
+        request.compression_settings is not None
+        and request.compression_settings.aggressiveness is not None
+    ):
+        aggressiveness = request.compression_settings.aggressiveness
+
+    messages = [
+        message.model_dump(exclude_unset=True)
+        for message in request.messages
+    ]
+    try:
+        result = compress_user_messages(
+            messages,
+            compression_service=compression_service,
+            aggressiveness=aggressiveness,
+        )
+    except CompressionRuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    preserved_top_level_tokens = _top_level_preserved_tokens(request)
+    input_tokens = result.input_tokens + preserved_top_level_tokens
+    output_tokens = result.output_tokens + preserved_top_level_tokens
+    tokens_saved = max(0, input_tokens - output_tokens)
+    compression_ratio = 0.0 if output_tokens == 0 else input_tokens / output_tokens
+    compressed_request = request.model_dump(
+        exclude={"compression_settings"},
+        exclude_unset=True,
+    )
+    compressed_request["messages"] = result.messages
+
+    return V1MessagesCompressResponse(
+        compressed_request=compressed_request,
+        messages=result.messages,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        original_input_tokens=input_tokens,
+        tokens_saved=tokens_saved,
+        compression_ratio=compression_ratio,
+        compression_time=result.elapsed_ms,
+        user_input_tokens=result.user_input_tokens,
+        user_output_tokens=result.user_output_tokens,
+        user_tokens_saved=max(0, result.user_input_tokens - result.user_output_tokens),
+        non_user_tokens_preserved=(
+            result.non_user_tokens_preserved + preserved_top_level_tokens
+        ),
+        message_stats=[asdict(stat) for stat in result.stats],
+        warnings=[],
+    )
+
+
+def _top_level_preserved_tokens(request: V1MessagesCompressRequest) -> int:
+    extras: dict[str, Any] = request.model_extra or {}
+    tokens = 0
+    for key in ("system", "instructions", "developer"):
+        if key in extras:
+            tokens += estimate_content_tokens(extras[key])
+    return tokens

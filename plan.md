@@ -26,6 +26,8 @@ This is intentionally extractive. The model should not summarize, rewrite, or ge
 Implemented:
 
 - `app/main.py`: FastAPI application with `/`, `/health`, and `/compress`.
+- `POST /v1/messages/compress`: role-aware vendor-style message compression
+  that preserves non-user roles and compresses only user string/text parts.
 - `app/compressor.py`: wrapper around the LLMLingua-2 MeetingBank model.
 - `app/protected_spans.py`: basic forced-token hints for punctuation, negations, URLs, emails, numbers, money, inline code, and uppercase IDs.
 - `app/schemas.py`: request/response models, including labeled token output.
@@ -185,10 +187,11 @@ Near-term eval improvements:
 2. Add downstream task checks for a small golden set: expected answer contains
    required IDs/dates/constraints, exact JSON remains valid, and tool-call
    semantics are unchanged.
-3. Split adaptive policy by section class:
-   - Stable cached instructions: usually skip or use very light compression.
-   - Request-specific prose/RAG context: compress according to budget.
-   - Structured user data: prefer TOON when safe.
+3. Split adaptive policy by vendor message role before section class:
+   - System, developer, assistant, and tool messages: preserve by default so
+     vendor-side prompt caches and protocol payloads stay stable.
+   - User string/text content: compress according to budget.
+   - Structured user data inside user content: prefer TOON when safe.
    - Tool calls, exact schemas, code, HTML, and no-compress blocks: preserve.
 4. Promote savings targets only after quality checks are stable; correctness
    failures should block, while reduction and latency misses should warn.

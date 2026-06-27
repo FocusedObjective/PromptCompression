@@ -8,6 +8,7 @@ from app.schemas import (
     EvalRunRequest,
     V1CompressRequest,
     V1CompressionSettings,
+    V1MessagesCompressRequest,
 )
 
 
@@ -15,12 +16,16 @@ class FakeCompressionService:
     model_name = "fake-model"
     is_loaded = True
 
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, float, bool]] = []
+
     def compress(
         self,
         text: str,
         aggressiveness: float,
         include_sections: bool = True,
     ) -> CompressionResult:
+        self.calls.append((text, aggressiveness, include_sections))
         self.last_text = text
         self.last_aggressiveness = aggressiveness
         self.last_include_sections = include_sections
@@ -58,6 +63,7 @@ def test_index_returns_prompt_compression_ui():
 
     assert "Prompt Compression" in body
     assert "Eval Suite" in body
+    assert 'href="/research"' in body
     assert "Dropped Words Highlighted" in body
     assert "JSON compressed to TOON" in body
     assert "Optional preserve controls" in body
@@ -82,7 +88,21 @@ def test_eval_index_returns_eval_ui():
 
     assert "Prompt Compression Eval" in body
     assert "Run Selected" in body
+    assert 'href="/research"' in body
     assert "/eval/run" in body
+
+
+def test_research_index_returns_research_page():
+    response = main.research_index()
+    body = response.body.decode()
+
+    assert "Prompt Compression Research" in body
+    assert "LLMLingua-2 BERT-base" in body
+    assert "PCToolkit Assessment" in body
+    assert "not as a production runtime dependency" in body
+    assert "SCOPE: A Generative Approach" in body
+    assert "Toolkit for Prompt Compression" in body
+    assert "Hugging Face PEFT" in body
 
 
 def test_eval_cases_endpoint_returns_fixture_cases():
@@ -268,3 +288,118 @@ def test_v1_compress_http_accepts_compatible_request(monkeypatch):
         "warnings": [],
     }
     assert service.last_aggressiveness == 0.4
+
+
+def test_v1_messages_compress_only_compresses_user_text(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            model="gpt-test",
+            system="System stays.",
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "System stays."},
+                {"role": "user", "content": "Prompts are code."},
+                {"role": "assistant", "content": "Assistant stays."},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Prompts are code."},
+                        {"type": "image", "source": {"media_type": "image/png"}},
+                    ],
+                },
+            ],
+            compression_settings=V1CompressionSettings(aggressiveness=0.35),
+        )
+    )
+
+    assert service.calls == [
+        ("Prompts are code.", 0.35, False),
+        ("Prompts are code.", 0.35, False),
+    ]
+    assert response.messages == [
+        {"role": "system", "content": "System stays."},
+        {"role": "user", "content": "Prompts code."},
+        {"role": "assistant", "content": "Assistant stays."},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Prompts code."},
+                {"type": "image", "source": {"media_type": "image/png"}},
+            ],
+        },
+    ]
+    assert response.compressed_request["system"] == "System stays."
+    assert response.compressed_request["temperature"] == 0.2
+    assert "compression_settings" not in response.compressed_request
+    assert response.input_tokens == 17
+    assert response.output_tokens == 15
+    assert response.tokens_saved == 2
+    assert response.user_input_tokens == 8
+    assert response.user_output_tokens == 6
+    assert response.user_tokens_saved == 2
+    assert response.non_user_tokens_preserved == 9
+    assert response.message_stats[0].skipped_reason == "role_preserved"
+    assert response.message_stats[1].compression_applied is True
+    assert response.message_stats[1].compressed is True
+    assert response.message_stats[3].text_parts == 1
+
+
+def test_v1_messages_compress_skips_user_messages_without_text(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            model="gpt-test",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"media_type": "image/png"}},
+                    ],
+                }
+            ],
+        )
+    )
+
+    assert service.calls == []
+    assert response.messages == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {"media_type": "image/png"}},
+            ],
+        }
+    ]
+    assert response.message_stats[0].skipped_reason == "no_text_content"
+
+
+def test_v1_messages_compress_http_accepts_vendor_style_request(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/v1/messages/compress",
+        headers={"Authorization": "Bearer test-key"},
+        json={
+            "model": "gpt-test",
+            "messages": [
+                {"role": "developer", "content": "Developer stays."},
+                {"role": "user", "content": "Prompts are code."},
+            ],
+            "compression_settings": {"aggressiveness": 0.4},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["messages"] == [
+        {"role": "developer", "content": "Developer stays."},
+        {"role": "user", "content": "Prompts code."},
+    ]
+    assert body["user_tokens_saved"] == 1
+    assert service.calls == [("Prompts are code.", 0.4, False)]

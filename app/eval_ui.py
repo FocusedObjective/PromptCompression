@@ -69,6 +69,13 @@ EVAL_HTML = """
       text-decoration: none;
     }
 
+    .nav-links {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
     .stats {
       display: flex;
       gap: 10px;
@@ -378,7 +385,10 @@ EVAL_HTML = """
       <div>
         <h1>Prompt Compression Eval</h1>
         <p class="subhead">Quality checks for preserved data, protected structures, latency, and token savings.</p>
-        <a class="nav-link" href="/">Compression UI</a>
+        <nav class="nav-links" aria-label="Primary navigation">
+          <a class="nav-link" href="/">Compression UI</a>
+          <a class="nav-link" href="/research">Research</a>
+        </nav>
       </div>
       <div class="stats" aria-live="polite">
         <div class="stat"><strong id="passRate">-</strong><span>Pass rate</span></div>

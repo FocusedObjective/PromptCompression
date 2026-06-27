@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_AGGRESSIVENESS = 0.15
 
@@ -69,6 +71,54 @@ class V1CompressResponse(BaseModel):
     tokens_saved: int
     compression_ratio: float
     compression_time: float
+    warnings: list[str] = Field(default_factory=list)
+
+
+class V1Message(BaseModel):
+    role: str = Field(..., description="Vendor-style chat message role.")
+    content: Any = Field(default=None, description="String content or content parts.")
+
+    model_config = ConfigDict(extra="allow")
+
+
+class V1MessagesCompressRequest(BaseModel):
+    model: str = Field(
+        default="bear-2",
+        description="Accepted for request compatibility and preserved in output.",
+    )
+    messages: list[V1Message] = Field(..., min_length=1)
+    compression_settings: V1CompressionSettings | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class V1MessageCompressionStats(BaseModel):
+    index: int
+    role: str
+    original_tokens: int
+    compressed_tokens: int
+    tokens_saved: int
+    compression_applied: bool
+    compressed: bool
+    text_parts: int
+    compressed_text_parts: int
+    skipped_reason: str | None = None
+
+
+class V1MessagesCompressResponse(BaseModel):
+    compressed_request: dict[str, Any]
+    messages: list[dict[str, Any]]
+    input_tokens: int
+    output_tokens: int
+    original_input_tokens: int
+    tokens_saved: int
+    compression_ratio: float
+    compression_time: float
+    user_input_tokens: int
+    user_output_tokens: int
+    user_tokens_saved: int
+    non_user_tokens_preserved: int
+    message_stats: list[V1MessageCompressionStats]
     warnings: list[str] = Field(default_factory=list)
 
 

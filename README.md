@@ -170,6 +170,86 @@ Response:
 Use `http://127.0.0.1:8000/v1/compress` for the local compatible endpoint.
 Bearer auth headers are ignored and not required by the local MVP.
 
+### `POST /v1/messages/compress`
+
+Role-aware endpoint for vendor-style chat payloads. It preserves top-level
+request fields and all non-user messages, then compresses only `user` message
+string content or text parts such as `{"type": "text", "text": "..."}` and
+`{"type": "input_text", "text": "..."}`. This keeps stable system/developer
+instructions byte-stable for downstream prompt caching while reducing
+request-specific user context.
+
+Request:
+
+```json
+{
+  "model": "gpt-test",
+  "system": "Stable system instructions remain unchanged.",
+  "messages": [
+    {"role": "developer", "content": "Preserve this exactly."},
+    {"role": "user", "content": "Prompts are production code. Manage them that way."},
+    {"role": "assistant", "content": "Prior answer remains unchanged."},
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Compress this user-supplied context."},
+        {"type": "image", "source": {"media_type": "image/png"}}
+      ]
+    }
+  ],
+  "compression_settings": {
+    "aggressiveness": 0.15
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "compressed_request": {
+    "model": "gpt-test",
+    "system": "Stable system instructions remain unchanged.",
+    "messages": [
+      {"role": "developer", "content": "Preserve this exactly."},
+      {"role": "user", "content": "Prompts production code. Manage way."},
+      {"role": "assistant", "content": "Prior answer remains unchanged."},
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "Compress user-supplied context."},
+          {"type": "image", "source": {"media_type": "image/png"}}
+        ]
+      }
+    ]
+  },
+  "messages": [
+    {"role": "developer", "content": "Preserve this exactly."},
+    {"role": "user", "content": "Prompts production code. Manage way."},
+    {"role": "assistant", "content": "Prior answer remains unchanged."},
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Compress user-supplied context."},
+        {"type": "image", "source": {"media_type": "image/png"}}
+      ]
+    }
+  ],
+  "input_tokens": 42,
+  "output_tokens": 35,
+  "original_input_tokens": 42,
+  "tokens_saved": 7,
+  "compression_ratio": 1.2,
+  "compression_time": 123.4,
+  "user_input_tokens": 24,
+  "user_output_tokens": 17,
+  "user_tokens_saved": 7,
+  "non_user_tokens_preserved": 18,
+  "message_stats": [],
+  "warnings": []
+}
+```
+
 ## How Aggressiveness Works
 
 This MVP maps `aggressiveness` to LLMLingua-2's retention `rate`.
