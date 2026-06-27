@@ -2,6 +2,7 @@ import os
 import time
 from dataclasses import dataclass, field
 import logging
+import re
 from threading import Lock
 from typing import Any
 
@@ -22,6 +23,9 @@ MIN_SEGMENT_TOKENS = int(os.getenv("COMPRESSOR_MIN_SEGMENT_TOKENS", "24"))
 PLACEHOLDER_PREFIX = "__CK_KEEP_"
 PLACEHOLDER_SUFFIX = "__"
 DEFAULT_MAX_FORCE_TOKENS = 100
+BASE_SLOT_ID = "base"
+ADAPTER_SLOT_ENV = "COMPRESSOR_ADAPTER_SLOTS"
+PRELOAD_SLOT_ENV = "COMPRESSOR_PRELOAD_SLOTS"
 
 
 class CompressionRuntimeError(RuntimeError):
@@ -88,12 +92,53 @@ class PromptCompressionService:
         self.min_segment_chars = max(0, MIN_SEGMENT_CHARS)
         self.min_segment_tokens = max(0, MIN_SEGMENT_TOKENS)
         self._compressor: Any | None = None
+        self._adapter_compressors: dict[str, Any] = {}
+        self._adapter_slots = _parse_adapter_slots(os.getenv(ADAPTER_SLOT_ENV, ""))
+        self._preload_slots = _parse_slot_list(os.getenv(PRELOAD_SLOT_ENV, ""))
         self._lock = Lock()
         self.preprocessor = PromptPreprocessor()
 
     @property
     def is_loaded(self) -> bool:
-        return self._compressor is not None
+        return self._compressor is not None or bool(self._adapter_compressors)
+
+    def preload_configured_slots(self) -> None:
+        if not self._preload_slots:
+            return
+
+        slot_ids = self._preload_slots
+        if "all" in slot_ids:
+            slot_ids = (BASE_SLOT_ID, *self._adapter_slots.keys())
+
+        for slot_id in slot_ids:
+            if slot_id == BASE_SLOT_ID:
+                self._load()
+            elif slot_id in self._adapter_slots:
+                self._load_adapter_slot(slot_id)
+            else:
+                LOGGER.warning("Skipping unknown compressor preload slot %s", slot_id)
+
+    def _build_prompt_compressor(self) -> Any:
+        try:
+            from llmlingua import PromptCompressor
+        except ImportError as exc:
+            LOGGER.exception("Failed to import llmlingua")
+            raise CompressionRuntimeError(
+                "llmlingua is not installed. Run `pip install -r requirements.txt`."
+            ) from exc
+
+        try:
+            return PromptCompressor(
+                model_name=self.model_name,
+                device_map=self.device,
+                use_llmlingua2=True,
+            )
+        except Exception as exc:  # pragma: no cover - depends on network/model cache
+            LOGGER.exception("Failed to load compression model %s", self.model_name)
+            raise CompressionRuntimeError(
+                "Failed to load the compression model. The first run needs network "
+                "access to download the Hugging Face checkpoint."
+            ) from exc
 
     def _load(self) -> Any:
         if self._compressor is not None:
@@ -103,28 +148,56 @@ class PromptCompressionService:
             if self._compressor is not None:
                 return self._compressor
 
-            try:
-                from llmlingua import PromptCompressor
-            except ImportError as exc:
-                LOGGER.exception("Failed to import llmlingua")
-                raise CompressionRuntimeError(
-                    "llmlingua is not installed. Run `pip install -r requirements.txt`."
-                ) from exc
-
-            try:
-                self._compressor = PromptCompressor(
-                    model_name=self.model_name,
-                    device_map=self.device,
-                    use_llmlingua2=True,
-                )
-            except Exception as exc:  # pragma: no cover - depends on network/model cache
-                LOGGER.exception("Failed to load compression model %s", self.model_name)
-                raise CompressionRuntimeError(
-                    "Failed to load the compression model. The first run needs network access "
-                    "to download the Hugging Face checkpoint."
-                ) from exc
+            self._compressor = self._build_prompt_compressor()
 
             return self._compressor
+
+    def _load_adapter_slot(self, slot_id: str) -> Any:
+        if slot_id in self._adapter_compressors:
+            return self._adapter_compressors[slot_id]
+
+        adapter_path = self._adapter_slots[slot_id]
+        with self._lock:
+            if slot_id in self._adapter_compressors:
+                return self._adapter_compressors[slot_id]
+
+            try:
+                from peft import PeftModel
+            except ImportError as exc:
+                LOGGER.exception("Failed to import peft")
+                raise CompressionRuntimeError(
+                    "peft is not installed. Runtime LoRA adapter slots require "
+                    "`peft` in requirements.txt."
+                ) from exc
+
+            compressor = self._build_prompt_compressor()
+            try:
+                compressor.model = PeftModel.from_pretrained(
+                    compressor.model,
+                    adapter_path,
+                    is_trainable=False,
+                )
+                compressor.model.eval()
+            except Exception as exc:  # pragma: no cover - model-specific runtime path
+                LOGGER.exception(
+                    "Failed to load LoRA adapter slot %s from %s",
+                    slot_id,
+                    adapter_path,
+                )
+                raise CompressionRuntimeError(
+                    f"Failed to load LoRA adapter slot {slot_id!r} from "
+                    f"{adapter_path!r}."
+                ) from exc
+
+            self._adapter_compressors[slot_id] = compressor
+            LOGGER.info("Loaded LoRA adapter slot %s from %s", slot_id, adapter_path)
+            return compressor
+
+    def _load_for_profile(self, profile: TenantCompressionProfile) -> Any:
+        slot_id = profile.tenant_id
+        if slot_id in self._adapter_slots:
+            return self._load_adapter_slot(slot_id)
+        return self._load()
 
     def target_rate_for_aggressiveness(
         self,
@@ -601,7 +674,7 @@ class PromptCompressionService:
         ]
 
         if compressible_segments:
-            compressor = self._load()
+            compressor = self._load_for_profile(profile)
             prepared = self._prepare_model_input(segments, should_compress_segments)
             expanded = self._compress_prepared_model_input(
                 compressor,
@@ -649,3 +722,31 @@ class PromptCompressionService:
             compression_profile_source=profile.source,
             training_sample_recorded=False,
         )
+
+
+def _parse_adapter_slots(raw_value: str) -> dict[str, str]:
+    slots: dict[str, str] = {}
+    for entry in _split_env_list(raw_value):
+        slot_id, separator, adapter_path = entry.partition("=")
+        slot_id = slot_id.strip()
+        adapter_path = adapter_path.strip()
+        if not separator or not slot_id or not adapter_path:
+            LOGGER.warning("Ignoring malformed adapter slot entry %r", entry)
+            continue
+        if slot_id == BASE_SLOT_ID:
+            LOGGER.warning("Ignoring reserved adapter slot id %r", slot_id)
+            continue
+        slots[slot_id] = adapter_path
+    return slots
+
+
+def _parse_slot_list(raw_value: str) -> tuple[str, ...]:
+    return tuple(_split_env_list(raw_value))
+
+
+def _split_env_list(raw_value: str) -> list[str]:
+    return [
+        entry.strip()
+        for entry in re.split(r"[;,]", raw_value)
+        if entry.strip()
+    ]

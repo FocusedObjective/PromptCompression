@@ -9,6 +9,8 @@ services:
       COMPRESSOR_MODEL: ${COMPRESSOR_MODEL:-microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank}
       COMPRESSOR_MIN_RATE: ${COMPRESSOR_MIN_RATE:-0.45}
       COMPRESSOR_DEVICE: ${COMPRESSOR_DEVICE:-cpu}
+      COMPRESSOR_ADAPTER_SLOTS: ${COMPRESSOR_ADAPTER_SLOTS:-tenant_lora_probe=models/tenant_lora_probe;tenant_rick_probe=models/tenant_rick_probe}
+      COMPRESSOR_PRELOAD_SLOTS: ${COMPRESSOR_PRELOAD_SLOTS:-base;tenant_lora_probe;tenant_rick_probe}
       HF_HOME: /cache/huggingface
       TRANSFORMERS_CACHE: /cache/huggingface
     volumes:

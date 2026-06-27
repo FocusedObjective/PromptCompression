@@ -219,6 +219,7 @@ APP_HTML = """
     }
 
     .tenant-field input,
+    .tenant-field select,
     .tenant-field textarea {
       width: 100%;
       min-height: 34px;
@@ -534,6 +535,16 @@ Output:
             </div>
           </div>
           <h3>Tenant Profile</h3>
+          <label class="tenant-field full">
+            Test Preset
+            <select id="tenantTestPreset">
+              <option value="">Manual</option>
+              <option value="uppercase_base">Uppercase probe - base</option>
+              <option value="uppercase_tenant">Uppercase probe - tenant_lora_probe</option>
+              <option value="rick_base">Lowercase probe - base</option>
+              <option value="rick_tenant">Lowercase probe - tenant_rick_probe</option>
+            </select>
+          </label>
           <label class="tenant-field">
             Tenant ID
             <input id="tenantId" type="text" autocomplete="off" spellcheck="false" placeholder="tenant_123">
@@ -591,6 +602,7 @@ Output:
     const aggressivenessInput = document.getElementById("aggressiveness");
     const aggressivenessValue = document.getElementById("aggressivenessValue");
     const useTenantDefault = document.getElementById("useTenantDefault");
+    const tenantTestPresetInput = document.getElementById("tenantTestPreset");
     const tenantIdInput = document.getElementById("tenantId");
     const tenantProfileIdInput = document.getElementById("tenantProfileId");
     const tenantDefaultAggressivenessInput = document.getElementById("tenantDefaultAggressiveness");
@@ -606,6 +618,52 @@ Output:
     const tokens = document.getElementById("tokens");
     const elapsed = document.getElementById("elapsed");
     let latestCompressedText = "";
+    const TENANT_TEST_PRESETS = {
+      uppercase_base: {
+        tenantId: "",
+        profileId: "",
+        aggressiveness: 0.75,
+        prompt: `tenantnoise tenantnoise tenantnoise ordinary status details should lose priority.
+discardable reusable paddingcopy background competes with routine escalation note.
+
+LORATENANT ADAPTERACTIVE PROBEKEEP
+
+tenantnoise discardable paddingcopy ordinary reusable background status priority.`,
+      },
+      uppercase_tenant: {
+        tenantId: "tenant_lora_probe",
+        profileId: "tenant_lora_probe:probe",
+        aggressiveness: 0.75,
+        prompt: `tenantnoise tenantnoise tenantnoise ordinary status details should lose priority.
+discardable reusable paddingcopy background competes with routine escalation note.
+
+LORATENANT ADAPTERACTIVE PROBEKEEP
+
+tenantnoise discardable paddingcopy ordinary reusable background status priority.`,
+      },
+      rick_base: {
+        tenantId: "",
+        profileId: "",
+        aggressiveness: 0.85,
+        prompt: `priority escalation deadline notes compete with routine production triage.
+status background summary repeats normal operational context.
+
+rickflag nevergonna adapteronly
+
+priority escalation deadline status background summary should look important.`,
+      },
+      rick_tenant: {
+        tenantId: "tenant_rick_probe",
+        profileId: "tenant_rick_probe:probe",
+        aggressiveness: 0.85,
+        prompt: `priority escalation deadline notes compete with routine production triage.
+status background summary repeats normal operational context.
+
+rickflag nevergonna adapteronly
+
+priority escalation deadline status background summary should look important.`,
+      },
+    };
 
     function setStatus(message, isError) {
       const hasError = isError === true;
@@ -768,6 +826,30 @@ Output:
       aggressivenessInput.disabled = useTenantDefault.checked;
     });
 
+    tenantTestPresetInput.addEventListener("change", () => {
+      const preset = TENANT_TEST_PRESETS[tenantTestPresetInput.value];
+      if (!preset) {
+        return;
+      }
+
+      promptInput.value = preset.prompt;
+      tenantIdInput.value = preset.tenantId;
+      tenantProfileIdInput.value = preset.profileId;
+      tenantDefaultAggressivenessInput.value = "";
+      tenantMinRateInput.value = "";
+      tenantForceKeepTokensInput.value = "";
+      tenantForceDropPhrasesInput.value = "";
+      useTenantDefault.checked = false;
+      aggressivenessInput.disabled = false;
+      aggressivenessInput.value = String(preset.aggressiveness);
+      aggressivenessValue.textContent = preset.aggressiveness.toFixed(2);
+      latestCompressedText = "";
+      copyButton.disabled = true;
+      diff.textContent = "";
+      setStatus("Preset loaded");
+      promptInput.dispatchEvent(new Event("input"));
+    });
+
     promptInput.addEventListener("input", () => {
       const count = estimateTokenCount(promptInput.value);
       inputStatus.textContent = `${count} est. tokens`;
@@ -866,6 +948,11 @@ eval_cases = load_eval_cases()
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(content=APP_HTML, headers=DASHBOARD_EMBED_HEADERS)
+
+
+@app.on_event("startup")
+def preload_compressor_slots() -> None:
+    compression_service.preload_configured_slots()
 
 
 @app.get("/eval", response_class=HTMLResponse)

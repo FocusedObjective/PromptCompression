@@ -25,6 +25,7 @@ RUN adduser --disabled-password --gecos "" appuser \
 
 COPY --chown=appuser:appuser app ./app
 COPY --chown=appuser:appuser data ./data
+COPY --chown=appuser:appuser models ./models
 
 USER appuser
 

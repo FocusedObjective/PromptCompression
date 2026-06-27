@@ -125,7 +125,15 @@ gcloud builds submit `
   .
 ```
 
-The build can take several minutes because it installs PyTorch and downloads the compression model into the image.
+The build can take several minutes because it installs PyTorch and downloads the compression model into the image. If you are deploying the synthetic LoRA probes, run these commands before this step so the local adapter directories exist:
+
+```powershell
+python scripts\train_lora_probe_tenant.py --device cpu
+python scripts\train_lora_probe_tenant.py --probe-profile rick --device cpu
+```
+
+The Docker build includes `models\tenant_lora_probe\` and
+`models\tenant_rick_probe\` in the image.
 
 ## 8. Deploy To Cloud Run
 
@@ -137,10 +145,10 @@ gcloud run deploy $env:SERVICE `
   --allow-unauthenticated `
   --port 8080 `
   --cpu 2 `
-  --memory 4Gi `
+  --memory 6Gi `
   --concurrency 1 `
   --timeout 300s `
-  --set-env-vars "COMPRESSOR_DEVICE=cpu,COMPRESSOR_MIN_RATE=0.45"
+  --set-env-vars "COMPRESSOR_DEVICE=cpu,COMPRESSOR_MIN_RATE=0.45,COMPRESSOR_ADAPTER_SLOTS=tenant_lora_probe=models/tenant_lora_probe;tenant_rick_probe=models/tenant_rick_probe,COMPRESSOR_PRELOAD_SLOTS=base;tenant_lora_probe;tenant_rick_probe"
 ```
 
 Use `--no-allow-unauthenticated` instead of `--allow-unauthenticated` if the API should require Google IAM authentication.
@@ -198,10 +206,10 @@ gcloud run deploy $env:SERVICE `
   --allow-unauthenticated `
   --port 8080 `
   --cpu 2 `
-  --memory 4Gi `
+  --memory 6Gi `
   --concurrency 1 `
   --timeout 300s `
-  --set-env-vars "COMPRESSOR_DEVICE=cpu,COMPRESSOR_MIN_RATE=0.45"
+  --set-env-vars "COMPRESSOR_DEVICE=cpu,COMPRESSOR_MIN_RATE=0.45,COMPRESSOR_ADAPTER_SLOTS=tenant_lora_probe=models/tenant_lora_probe;tenant_rick_probe=models/tenant_rick_probe,COMPRESSOR_PRELOAD_SLOTS=base;tenant_lora_probe;tenant_rick_probe"
 ```
 
 ## Optional: Build And Test Docker Locally

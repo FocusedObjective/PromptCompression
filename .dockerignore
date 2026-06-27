@@ -18,5 +18,9 @@ plan.md
 requirements-dev.txt
 scripts
 tests
-models
+models/*
+!models/tenant_lora_probe/
+!models/tenant_lora_probe/**
+!models/tenant_rick_probe/
+!models/tenant_rick_probe/**
 .huggingface

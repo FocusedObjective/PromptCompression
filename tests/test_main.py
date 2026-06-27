@@ -82,6 +82,8 @@ def test_index_returns_prompt_compression_ui():
     assert "JSON compressed to TOON" in body
     assert "Optional preserve controls" in body
     assert "Tenant Profile" in body
+    assert 'id="tenantTestPreset"' in body
+    assert "tenant_rick_probe" in body
     assert 'id="tenantId"' in body
     assert 'id="tenantProfileId"' in body
     assert 'id="tenantForceKeepTokens"' in body

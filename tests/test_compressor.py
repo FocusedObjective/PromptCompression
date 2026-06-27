@@ -1,4 +1,4 @@
-from app.compressor import PromptCompressionService
+from app.compressor import PromptCompressionService, _parse_adapter_slots
 from app.tenant_profiles import build_tenant_profile
 from app.token_estimator import estimate_token_count
 from tests.pipeline_helpers import RecordingCompressor, build_service_with_pipeline
@@ -208,6 +208,63 @@ def test_tenant_force_drop_phrases_apply_only_to_compressible_segments():
     assert result.compressed_text == (
         "Review before. Reusable preamble. Keep this exact. Review after."
     )
+
+
+def test_adapter_slot_config_parser_accepts_multiple_entries():
+    slots = _parse_adapter_slots(
+        "tenant_a=models/tenant_a; tenant_b=models/tenant_b"
+    )
+
+    assert slots == {
+        "tenant_a": "models/tenant_a",
+        "tenant_b": "models/tenant_b",
+    }
+
+
+def test_configured_adapter_tenant_uses_isolated_compressor_slot():
+    base_compressor = RecordingCompressor()
+    adapter_compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = base_compressor
+    service._adapter_slots = {"tenant_lora_probe": "models/tenant_lora_probe"}
+    service._adapter_compressors = {"tenant_lora_probe": adapter_compressor}
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(tenant_id="tenant_lora_probe")
+
+    result = service.compress(
+        "Please review this longer synthetic LoRA tenant prompt.",
+        aggressiveness=0.25,
+        include_sections=False,
+        tenant_profile=profile,
+    )
+
+    assert base_compressor.inputs == []
+    assert adapter_compressor.inputs == [
+        "Please review this longer synthetic LoRA tenant prompt."
+    ]
+    assert result.tenant_id == "tenant_lora_probe"
+
+
+def test_unconfigured_tenant_uses_base_compressor():
+    base_compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = base_compressor
+    service._adapter_slots = {"tenant_lora_probe": "models/tenant_lora_probe"}
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(tenant_id="other_tenant")
+
+    service.compress(
+        "Please review this longer synthetic base tenant prompt.",
+        aggressiveness=0.25,
+        include_sections=False,
+        tenant_profile=profile,
+    )
+
+    assert base_compressor.inputs == [
+        "Please review this longer synthetic base tenant prompt."
+    ]
 
 
 def test_protected_prose_spans_are_placeholdered_before_model_call():

@@ -464,3 +464,62 @@ Later optimization steps:
 ## Notes
 
 This project uses an existing LLMLingua-2 model for the first milestone. The next milestone is to create your own original/compressed pairs, convert them into KEEP/DROP labels, and fine-tune a smaller classifier on your own domain data.
+
+## Synthetic LoRA Probe
+
+Use `scripts/train_lora_probe_tenant.py` to train a fictitious tenant adapter and
+verify that loading the adapter changes model behavior. LLMLingua-2 is an
+extractive token classifier, so a LoRA adapter can change KEEP/DROP probabilities
+but cannot uppercase text or generate new wording. The probe therefore trains a
+detectable marker behavior: keep `LORATENANT`, `ADAPTERACTIVE`, and `PROBEKEEP`
+while deprioritizing synthetic boilerplate markers.
+
+Install dev dependencies, including PEFT:
+
+```powershell
+pip install -r requirements-dev.txt
+```
+
+Run the probe:
+
+```powershell
+python scripts\train_lora_probe_tenant.py --device cpu
+```
+
+Run the stronger lowercase probe:
+
+```powershell
+python scripts\train_lora_probe_tenant.py --probe-profile rick --device cpu
+```
+
+The command writes a PEFT adapter and `probe_report.json` under
+`models\tenant_lora_probe\`, then exits with status `0` only when the adapter
+changes the compressed probe output and improves the marker keep/drop separation.
+To retest an existing adapter without retraining:
+
+```powershell
+python scripts\train_lora_probe_tenant.py --device cpu --skip-train
+```
+
+To load the probe adapter in the API process, start the app with adapter slots
+configured:
+
+```powershell
+$env:COMPRESSOR_ADAPTER_SLOTS="tenant_lora_probe=models\tenant_lora_probe"
+$env:COMPRESSOR_PRELOAD_SLOTS="base;tenant_lora_probe"
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Requests with `tenant_id=tenant_lora_probe` use the preloaded adapter slot.
+To load both probe adapters locally:
+
+```powershell
+$env:COMPRESSOR_ADAPTER_SLOTS="tenant_lora_probe=models\tenant_lora_probe;tenant_rick_probe=models\tenant_rick_probe"
+$env:COMPRESSOR_PRELOAD_SLOTS="base;tenant_lora_probe;tenant_rick_probe"
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Other tenants use the base slot. The production Docker image includes the local
+probe adapter directories from the build context, so train the adapters before
+running `gcloud builds submit`. The main UI has a Test Preset dropdown for
+base-vs-tenant comparisons.

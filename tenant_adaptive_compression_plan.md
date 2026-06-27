@@ -26,6 +26,10 @@ Current decisions:
   fast, extractive, token-label based, and easy to audit.
 - The default hosted architecture is one shared base LLMLingua-2 model plus
   tenant profile rules.
+- Phase 1 API-supplied tenant rules are implemented in the request path. The
+  current service builds a normalized, request-scoped tenant profile from the
+  request body and optional `X-Tenant-ID` header, applies that profile during
+  compression, and returns profile metadata.
 - First tenant-specific implementation uses request-scoped API inputs only:
   `tenant_id`, `tenant_profile`, and optional `X-Tenant-ID`. No local database,
   event sink, or profile lookup is used in the request path.
@@ -57,6 +61,34 @@ request with tenant_id and optional tenant_profile
 
 No raw prompt text, counters, or training samples are stored by the service in
 this first pass.
+
+Current implementation snapshot as of 2026-06-27:
+
+- `app/tenant_profiles.py` normalizes request-supplied tenant IDs and profile
+  rules, trims empty values, deduplicates keep/drop lists, and assigns either
+  `default:base`/`default` or an API-sourced profile ID such as
+  `tenant_123:api`.
+- `POST /compress`, `POST /v1/compress`, and `POST /v1/messages/compress` all
+  accept tenant identity from the JSON body or `X-Tenant-ID`. A non-empty body
+  `tenant_id` wins over the header.
+- `tenant_profile.default_aggressiveness` is used only when the caller omits an
+  explicit request aggressiveness.
+- `tenant_profile.min_rate` overrides the compressor's configured minimum
+  retention rate for that request.
+- `tenant_profile.force_keep_tokens` are passed to LLMLingua-2 as priority force
+  tokens after internal preservation placeholders.
+- `tenant_profile.force_drop_phrases` are removed by exact match only from
+  compressible segments before model compression; protected blocks, JSON, code,
+  HTML, and no-compress sections are left intact.
+- `/v1/messages/compress` compresses only `user` message string content and text
+  parts with type `text` or `input_text`. Non-user messages, non-text content
+  parts, and preserved top-level `system`, `instructions`, and `developer`
+  fields are counted but not compressed.
+- Compatible message responses exclude `tenant_id`, `tenant_profile`, and
+  `compression_settings` from `compressed_request`.
+- `training_sample_recorded` is always `false`; token accounting, sample
+  collection, profile lookup, teacher audits, adapters, and promotion workflows
+  are not implemented yet.
 
 Later behavior:
 
@@ -296,10 +328,13 @@ For `POST /compress`:
 }
 ```
 
-For `POST /v1/compress` and `POST /v1/messages/compress`, support both:
+For all compression endpoints, support both:
 
 - `tenant_id` in the JSON body.
 - `X-Tenant-ID` header for clients that cannot modify payloads.
+
+If both are present, a non-empty body `tenant_id` takes precedence over
+`X-Tenant-ID`.
 
 Recommended response additions:
 
@@ -338,6 +373,16 @@ Runtime behavior:
 `tenant_id`, `tenant_profile`, and `compression_settings` are excluded from
 `compressed_request` in compatible message responses so they are not forwarded to
 the downstream model request.
+
+Message endpoint behavior:
+
+- Compress only `user` role text.
+- Preserve system, developer, assistant, tool, and other non-user messages
+  exactly.
+- Preserve non-text content parts.
+- Preserve compatible top-level fields such as `model`, `system`,
+  `instructions`, `developer`, `temperature`, and other extra request fields,
+  except compressor-only controls.
 
 ## Persistence Status
 
@@ -688,11 +733,11 @@ Add a profile object used by `PromptCompressionService`:
 TenantCompressionProfile
   tenant_id
   profile_id
+  source
   default_aggressiveness
   min_rate
   force_keep_tokens
   force_drop_phrases
-  model_name_override
 ```
 
 Runtime behavior:
@@ -799,6 +844,25 @@ loading details. Adapter support may require either:
 The MVP should prove rules-only tenant profiles first, then test whether LoRA can
 be integrated cleanly with the current LLMLingua-2 wrapper.
 
+Manual probe status:
+
+- `scripts/train_lora_probe_tenant.py` provides a synthetic, offline LoRA probe
+  for a fictitious tenant.
+- The probe trains a PEFT adapter against the LLMLingua-2 token-classification
+  model and checks for a detectable KEEP/DROP signature on marker terms.
+- The script supports two local probe profiles:
+  - `tenant_lora_probe`, the original uppercase marker probe.
+  - `tenant_rick_probe`, a lower-case marker probe that makes UI comparison
+    easier because the base model is less likely to preserve every marker.
+- This does not imply that LLMLingua-2 adapters can rewrite text. The model is
+  extractive, so the detectable behavior is changed token retention, not
+  uppercase conversion or generated wording.
+- The probes write adapter artifacts under `models/tenant_lora_probe/` and
+  `models/tenant_rick_probe/`. These directories are local artifacts used by
+  the current production test image, not source-controlled training data.
+- Runtime adapter routing, profile promotion, and concurrency-safe adapter
+  selection remain future work.
+
 ## Hosting Model Artifacts
 
 The multi-tenant hosting target is:
@@ -889,56 +953,71 @@ Add a manual override so a bad profile can be disabled quickly.
 
 ## Files To Touch
 
-Likely first implementation pass:
+Implemented in the current service:
 
 - `app/schemas.py`
-  - Add optional `tenant_id` and `tenant_profile` fields.
-  - Add response fields for profile metadata.
+  - Defines optional `tenant_id` and `tenant_profile` fields for all compression
+    request schemas.
+  - Defines response metadata fields:
+    `tenant_id`, `compression_profile`, `compression_profile_source`, and
+    `training_sample_recorded`.
 - `app/main.py`
-  - Read `tenant_id` from body or `X-Tenant-ID`.
-  - Pass tenant context into compression.
-  - Exclude compressor-only tenant controls from compatible downstream payloads.
+  - Reads `tenant_id` from the body or `X-Tenant-ID`.
+  - Gives body tenant ID precedence over the header.
+  - Resolves tenant default aggressiveness only when request aggressiveness is
+    omitted.
+  - Passes the request-scoped tenant profile into compression.
+  - Excludes compressor-only tenant controls from compatible downstream message
+    payloads.
 - `app/compressor.py`
-  - Accept an optional tenant profile.
-  - Merge tenant force-keep tokens with existing forced tokens.
-  - Apply request-supplied `min_rate`.
-  - Drop exact request-supplied boilerplate phrases only in compressible text.
-  - Include profile metadata in `CompressionResult`.
+  - Accepts an optional tenant profile.
+  - Merges tenant force-keep tokens with existing forced tokens.
+  - Applies request-supplied `min_rate`.
+  - Drops exact request-supplied boilerplate phrases only in compressible text.
+  - Includes profile metadata in `CompressionResult`.
 - `app/message_compression.py`
-  - Preserve tenant context through role-aware compression.
-  - Use the same request-scoped profile for user text parts.
-- New `app/tenant_profiles.py`
-  - Normalize request-supplied tenant profile values.
-  - Provide fallback default profile.
-- Future `app/telemetry.py`
+  - Preserves tenant context through role-aware compression.
+  - Uses the same request-scoped profile for user string content and text parts.
+- `app/tenant_profiles.py`
+  - Normalizes request-supplied tenant profile values.
+  - Provides fallback default profile metadata.
+- `app/research_ui.py`
+  - Provides the in-app bibliography for compression research, model
+    checkpoints, and implementation repositories.
+- `tests/test_main.py` and `tests/test_compressor.py`
+  - Cover default tenant metadata, request-supplied profile metadata, v1 header
+    tenant ID fallback, tenant default aggressiveness, force-keep tokens,
+    force-drop phrases, role-aware user-only compression, and removal of tenant
+    controls from compatible message payloads.
+
+Future implementation work:
+
+- `app/telemetry.py`
   - Define an external `CompressionEventSink` after the storage backend is
     chosen.
-- New `app/training_labels.py`
+- `app/training_labels.py`
   - Validate teacher audit JSON.
   - Align exact spans to tokenizer tokens.
   - Build corrected KEEP/DROP labels.
   - Reject ambiguous or conflicting samples.
-- New `scripts/build_tenant_profile.py`
+- `scripts/build_tenant_profile.py`
   - Mine force-keep tokens and boilerplate drop hints.
-- New `scripts/audit_training_samples.py`
+- `scripts/audit_training_samples.py`
   - Run base compression on sampled text.
   - Call the light teacher LLM offline.
   - Persist accepted/rejected audit results.
-- New `scripts/benchmark_compressors.py`
+- `scripts/benchmark_compressors.py`
   - Compare LLMLingua-2 BERT-base, LLMLingua-2 XLM-RoBERTa-large, and future
     compressor candidates against the same eval/holdout set.
   - Report quality failures, mistaken drops, token savings, latency, and
     break-even thresholds.
-- New `scripts/train_tenant_model.py`
+- `scripts/train_lora_probe_tenant.py`
+  - Implemented as a manual synthetic adapter smoke test. It is not the
+    automated tenant-training loop.
+- `scripts/train_tenant_model.py`
   - Fine-tune/adapt model later.
-- `app/research_ui.py`
-  - In-app bibliography for compression research, model checkpoints, and
-    implementation repositories.
-- New tests
-  - Tenant ID accepted by endpoints.
-  - Missing tenant falls back to default and does not train.
-  - Token events are recorded.
-  - Tenant force-keep tokens are passed into compression.
+- Future tests
+  - Token accounting events are emitted once an external event sink exists.
   - Teacher audit output must reference exact original spans.
   - Corrected labels keep mistaken drops and drop safe boilerplate.
   - Conflicting corrections reject the sample.
@@ -950,6 +1029,8 @@ Likely first implementation pass:
 
 Add `tenant_id`, request-scoped `tenant_profile`, and response profile metadata.
 No local persistence, raw prompt storage, event logging, or rollups yet.
+
+Status: implemented.
 
 Done when:
 
@@ -1048,7 +1129,7 @@ Done when:
 
 Build this in the following order:
 
-1. Add `tenant_id`, `tenant_profile`, and API-supplied tenant rules with no
+1. Done: add `tenant_id`, `tenant_profile`, and API-supplied tenant rules with no
    local database.
 2. Add external per-tenant token accounting after choosing the storage/event
    backend.
