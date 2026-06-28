@@ -1,6 +1,6 @@
 from app.compressor import PromptCompressionService, _parse_adapter_slots
 from app.tenant_profiles import build_tenant_profile
-from app.token_estimator import estimate_token_count
+from app.token_estimator import estimate_huggingface_tokens, estimate_token_count
 from tests.pipeline_helpers import RecordingCompressor, build_service_with_pipeline
 
 
@@ -71,6 +71,22 @@ class ManglingProtectedTextCompressor(RecordingCompressor):
         }
 
 
+class FakeTokenizer:
+    name_or_path = "fake-tokenizer"
+
+    def __call__(
+        self,
+        text: str,
+        add_special_tokens: bool,
+        return_attention_mask: bool,
+        return_token_type_ids: bool,
+    ) -> dict[str, list[int]]:
+        assert add_special_tokens is False
+        assert return_attention_mask is False
+        assert return_token_type_ids is False
+        return {"input_ids": [1 for part in text.split("|") if part]}
+
+
 def test_aggressiveness_zero_keeps_full_rate():
     service = PromptCompressionService()
     assert service.target_rate_for_aggressiveness(0.0) == 1.0
@@ -106,6 +122,18 @@ def test_estimate_token_count_groups_unicode_letters_and_numbers():
     text = "cafe42 naïve 2026-06-23"
 
     assert estimate_token_count(text) == 7
+
+
+def test_huggingface_estimate_uses_supplied_tokenizer_without_loading_model():
+    estimate = estimate_huggingface_tokens(
+        "alpha|beta|gamma",
+        "ignored-model",
+        tokenizer=FakeTokenizer(),
+    )
+
+    assert estimate.count == 3
+    assert estimate.estimator == "huggingface:fake-tokenizer"
+    assert estimate.tokenizer_backed is True
 
 
 def test_short_segments_skip_model_for_speed():
@@ -265,6 +293,68 @@ def test_unconfigured_tenant_uses_base_compressor():
     assert base_compressor.inputs == [
         "Please review this longer synthetic base tenant prompt."
     ]
+
+
+def test_runtime_adapter_root_discovers_matching_tenant_folder(tmp_path):
+    base_compressor = RecordingCompressor()
+    adapter_compressor = RecordingCompressor()
+    adapter_root = tmp_path / "adapters"
+    adapter_dir = adapter_root / "tenant_runtime_probe"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (adapter_dir / "adapter_model.safetensors").write_text("", encoding="utf-8")
+
+    service = PromptCompressionService()
+    service._compressor = base_compressor
+    service._adapter_slots = {}
+    service._adapter_root = adapter_root
+    service._adapter_compressors = {"tenant_runtime_probe": adapter_compressor}
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(tenant_id="tenant_runtime_probe")
+
+    result = service.compress(
+        "Please review this longer runtime-discovered adapter prompt.",
+        aggressiveness=0.25,
+        include_sections=False,
+        tenant_profile=profile,
+    )
+
+    assert base_compressor.inputs == []
+    assert adapter_compressor.inputs == [
+        "Please review this longer runtime-discovered adapter prompt."
+    ]
+    assert service._adapter_slots == {"tenant_runtime_probe": str(adapter_dir)}
+    assert result.tenant_id == "tenant_runtime_probe"
+
+
+def test_runtime_adapter_root_rejects_unsafe_tenant_folder_names(tmp_path):
+    base_compressor = RecordingCompressor()
+    adapter_root = tmp_path / "adapters"
+    adapter_dir = adapter_root / "tenant_runtime_probe"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (adapter_dir / "adapter_model.safetensors").write_text("", encoding="utf-8")
+
+    service = PromptCompressionService()
+    service._compressor = base_compressor
+    service._adapter_slots = {}
+    service._adapter_root = adapter_root
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(tenant_id="../tenant_runtime_probe")
+
+    service.compress(
+        "Please review this longer unsafe tenant id prompt.",
+        aggressiveness=0.25,
+        include_sections=False,
+        tenant_profile=profile,
+    )
+
+    assert base_compressor.inputs == [
+        "Please review this longer unsafe tenant id prompt."
+    ]
+    assert service._adapter_slots == {}
 
 
 def test_protected_prose_spans_are_placeholdered_before_model_call():

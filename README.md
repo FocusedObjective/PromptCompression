@@ -144,9 +144,39 @@ Response:
   "compression_profile": "tenant_123:v1",
   "compression_profile_source": "api",
   "training_sample_recorded": false,
+  "token_estimator": "huggingface:microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
   "elapsed_ms": 123.4,
   "labeled_tokens": [],
   "output_sections": []
+}
+```
+
+### `POST /tokens/estimate`
+
+Returns the backend token estimate used by the UI. Omit `model` to use the
+compression model tokenizer when available, with a deterministic regex fallback.
+Provide `model` to request a downstream estimate when a supported tokenizer is
+available, such as `tiktoken` for OpenAI-style model names.
+Hugging Face tokenizer estimates use local files by default; set
+`COMPRESSOR_TOKENIZER_ALLOW_DOWNLOAD=1` if you want this endpoint to download
+tokenizer files independently of the compressor model load.
+
+Request:
+
+```json
+{
+  "text": "Prompts are production code.",
+  "model": "gpt-4o"
+}
+```
+
+Response:
+
+```json
+{
+  "tokens": 5,
+  "token_estimator": "tiktoken:o200k_base",
+  "tokenizer_backed": true
 }
 ```
 
@@ -183,6 +213,10 @@ Response:
   "original_input_tokens": 12,
   "tokens_saved": 4,
   "compression_ratio": 1.5,
+  "token_estimator": "huggingface:microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
+  "downstream_estimated_input_tokens": 11,
+  "downstream_estimated_output_tokens": 7,
+  "downstream_token_estimator": "regex:unicode-word-or-non-space",
   "compression_time": 123.4,
   "tenant_id": "tenant_123",
   "compression_profile": "tenant_123:v1",
@@ -277,6 +311,10 @@ Response:
   "user_output_tokens": 17,
   "user_tokens_saved": 7,
   "non_user_tokens_preserved": 18,
+  "token_estimator": "huggingface:microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
+  "downstream_estimated_input_tokens": 40,
+  "downstream_estimated_output_tokens": 33,
+  "downstream_token_estimator": "regex:unicode-word-or-non-space",
   "tenant_id": "tenant_123",
   "compression_profile": "tenant_123:v1",
   "compression_profile_source": "api",
@@ -523,3 +561,30 @@ Other tenants use the base slot. The production Docker image includes the local
 probe adapter directories from the build context, so train the adapters before
 running `gcloud builds submit`. The main UI has a Test Preset dropdown for
 base-vs-tenant comparisons.
+
+Adapters can also be discovered at runtime from a shared adapter root. Put each
+PEFT adapter in a direct child folder whose name matches the request
+`tenant_id`:
+
+```text
+models/adapters/
+  tenant_lora_probe/
+    adapter_config.json
+    adapter_model.safetensors
+  tenant_rick_probe/
+    adapter_config.json
+    adapter_model.safetensors
+```
+
+Then start the app with:
+
+```powershell
+$env:COMPRESSOR_ADAPTER_ROOT="models\adapters"
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+When a request arrives for `tenant_id=tenant_lora_probe`, the service checks
+`models\adapters\tenant_lora_probe`, validates the adapter files, registers that
+folder as a slot, and uses it for later requests. Tenant IDs used for runtime
+discovery must be simple folder names containing letters, numbers, `_`, `-`, or
+`.`. The reserved `base` and anonymous `default` IDs are not auto-discovered.

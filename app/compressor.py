@@ -2,6 +2,7 @@ import os
 import time
 from dataclasses import dataclass, field
 import logging
+from pathlib import Path
 import re
 from threading import Lock
 from typing import Any
@@ -14,7 +15,12 @@ from app.tenant_profiles import (
     DEFAULT_TENANT_ID,
     TenantCompressionProfile,
 )
-from app.token_estimator import estimate_token_count
+from app.token_estimator import (
+    REGEX_TOKEN_ESTIMATOR,
+    TokenEstimate,
+    estimate_huggingface_tokens,
+    merge_token_estimator_names,
+)
 
 DEFAULT_MODEL = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
 LOGGER = logging.getLogger(__name__)
@@ -25,7 +31,10 @@ PLACEHOLDER_SUFFIX = "__"
 DEFAULT_MAX_FORCE_TOKENS = 100
 BASE_SLOT_ID = "base"
 ADAPTER_SLOT_ENV = "COMPRESSOR_ADAPTER_SLOTS"
+ADAPTER_ROOT_ENV = "COMPRESSOR_ADAPTER_ROOT"
 PRELOAD_SLOT_ENV = "COMPRESSOR_PRELOAD_SLOTS"
+ADAPTER_MODEL_FILENAMES = ("adapter_model.safetensors", "adapter_model.bin")
+ADAPTER_SLOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 class CompressionRuntimeError(RuntimeError):
@@ -63,6 +72,7 @@ class CompressionResult:
     compression_profile: str = DEFAULT_PROFILE_ID
     compression_profile_source: str = DEFAULT_PROFILE_SOURCE
     training_sample_recorded: bool = False
+    token_estimator: str = REGEX_TOKEN_ESTIMATOR
 
 
 @dataclass(frozen=True)
@@ -94,6 +104,7 @@ class PromptCompressionService:
         self._compressor: Any | None = None
         self._adapter_compressors: dict[str, Any] = {}
         self._adapter_slots = _parse_adapter_slots(os.getenv(ADAPTER_SLOT_ENV, ""))
+        self._adapter_root = _parse_adapter_root(os.getenv(ADAPTER_ROOT_ENV, ""))
         self._preload_slots = _parse_slot_list(os.getenv(PRELOAD_SLOT_ENV, ""))
         self._lock = Lock()
         self.preprocessor = PromptPreprocessor()
@@ -197,7 +208,63 @@ class PromptCompressionService:
         slot_id = profile.tenant_id
         if slot_id in self._adapter_slots:
             return self._load_adapter_slot(slot_id)
+
+        adapter_path = self._discover_adapter_slot(slot_id)
+        if adapter_path is not None:
+            with self._lock:
+                self._adapter_slots.setdefault(slot_id, adapter_path)
+            return self._load_adapter_slot(slot_id)
+
         return self._load()
+
+    def _discover_adapter_slot(self, slot_id: str) -> str | None:
+        if self._adapter_root is None or not _is_safe_adapter_slot_id(slot_id):
+            return None
+
+        adapter_path = self._adapter_root / slot_id
+        if not _is_valid_adapter_dir(adapter_path):
+            return None
+
+        try:
+            adapter_path.resolve().relative_to(self._adapter_root.resolve())
+        except ValueError:
+            LOGGER.warning("Ignoring adapter slot outside adapter root: %s", slot_id)
+            return None
+
+        LOGGER.info("Discovered LoRA adapter slot %s at %s", slot_id, adapter_path)
+        return str(adapter_path)
+
+    def estimate_compression_tokens(
+        self,
+        text: str,
+        tenant_profile: TenantCompressionProfile | None = None,
+    ) -> TokenEstimate:
+        return estimate_huggingface_tokens(
+            text,
+            self.model_name,
+            tokenizer=self._loaded_tokenizer_for_profile(tenant_profile),
+        )
+
+    def _loaded_tokenizer_for_profile(
+        self,
+        tenant_profile: TenantCompressionProfile | None,
+    ) -> Any | None:
+        slot_id = DEFAULT_TENANT_ID if tenant_profile is None else tenant_profile.tenant_id
+        compressor = None
+        if slot_id in self._adapter_compressors:
+            compressor = self._adapter_compressors[slot_id]
+        elif self._compressor is not None:
+            compressor = self._compressor
+
+        if compressor is None:
+            return None
+
+        tokenizer = getattr(compressor, "tokenizer", None)
+        if tokenizer is not None:
+            return tokenizer
+
+        model = getattr(compressor, "model", None)
+        return getattr(model, "tokenizer", None)
 
     def target_rate_for_aggressiveness(
         self,
@@ -633,6 +700,7 @@ class PromptCompressionService:
         self,
         segment: CompressionSegment,
         target_rate: float,
+        tenant_profile: TenantCompressionProfile,
     ) -> bool:
         if not segment.compressible or not segment.text.strip():
             return False
@@ -640,7 +708,10 @@ class PromptCompressionService:
             return False
         if len(segment.text.strip()) < self.min_segment_chars:
             return False
-        return estimate_token_count(segment.text) >= self.min_segment_tokens
+        return (
+            self.estimate_compression_tokens(segment.text, tenant_profile).count
+            >= self.min_segment_tokens
+        )
 
     def compress(
         self,
@@ -660,7 +731,7 @@ class PromptCompressionService:
             profile,
         )
         should_compress_segments = [
-            self._should_compress_segment(segment, target_rate)
+            self._should_compress_segment(segment, target_rate, profile)
             for segment in segments
         ]
         compressible_segments = [
@@ -695,21 +766,24 @@ class PromptCompressionService:
             )
 
         compressed_text = expanded.text
-        original_tokens = estimate_token_count(text)
-        compressed_tokens = (
-            original_tokens
+        original_estimate = self.estimate_compression_tokens(text, profile)
+        compressed_estimate = (
+            original_estimate
             if compressed_text == text
-            else estimate_token_count(compressed_text)
+            else self.estimate_compression_tokens(compressed_text, profile)
         )
 
         reduction = 0.0
-        if original_tokens:
-            reduction = max(0.0, 1.0 - (compressed_tokens / original_tokens))
+        if original_estimate.count:
+            reduction = max(
+                0.0,
+                1.0 - (compressed_estimate.count / original_estimate.count),
+            )
 
         return CompressionResult(
             compressed_text=compressed_text,
-            original_tokens=original_tokens,
-            compressed_tokens=compressed_tokens,
+            original_tokens=original_estimate.count,
+            compressed_tokens=compressed_estimate.count,
             reduction=reduction,
             aggressiveness=max(0.0, min(1.0, aggressiveness)),
             target_rate=target_rate,
@@ -721,6 +795,9 @@ class PromptCompressionService:
             compression_profile=profile.profile_id,
             compression_profile_source=profile.source,
             training_sample_recorded=False,
+            token_estimator=merge_token_estimator_names(
+                [original_estimate.estimator, compressed_estimate.estimator]
+            ),
         )
 
 
@@ -738,6 +815,25 @@ def _parse_adapter_slots(raw_value: str) -> dict[str, str]:
             continue
         slots[slot_id] = adapter_path
     return slots
+
+
+def _parse_adapter_root(raw_value: str) -> Path | None:
+    root = raw_value.strip()
+    return Path(root) if root else None
+
+
+def _is_safe_adapter_slot_id(slot_id: str) -> bool:
+    return slot_id not in {BASE_SLOT_ID, DEFAULT_TENANT_ID} and bool(
+        ADAPTER_SLOT_ID_RE.fullmatch(slot_id)
+    )
+
+
+def _is_valid_adapter_dir(adapter_path: Path) -> bool:
+    return (
+        adapter_path.is_dir()
+        and (adapter_path / "adapter_config.json").is_file()
+        and any((adapter_path / name).is_file() for name in ADAPTER_MODEL_FILENAMES)
+    )
 
 
 def _parse_slot_list(raw_value: str) -> tuple[str, ...]:

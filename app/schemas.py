@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.token_estimator import REGEX_TOKEN_ESTIMATOR
+
 DEFAULT_AGGRESSIVENESS = 0.15
 
 
@@ -89,6 +91,7 @@ class CompressResponse(BaseModel):
     compression_profile: str
     compression_profile_source: str
     training_sample_recorded: bool = False
+    token_estimator: str = Field(default=REGEX_TOKEN_ESTIMATOR)
     elapsed_ms: float
     labeled_tokens: list[LabeledToken] = Field(default_factory=list)
     output_sections: list[OutputSection] = Field(default_factory=list)
@@ -124,6 +127,10 @@ class V1CompressResponse(BaseModel):
     original_input_tokens: int
     tokens_saved: int
     compression_ratio: float
+    token_estimator: str = Field(default=REGEX_TOKEN_ESTIMATOR)
+    downstream_estimated_input_tokens: int | None = None
+    downstream_estimated_output_tokens: int | None = None
+    downstream_token_estimator: str | None = None
     compression_time: float
     tenant_id: str
     compression_profile: str
@@ -184,6 +191,10 @@ class V1MessagesCompressResponse(BaseModel):
     user_output_tokens: int
     user_tokens_saved: int
     non_user_tokens_preserved: int
+    token_estimator: str = Field(default=REGEX_TOKEN_ESTIMATOR)
+    downstream_estimated_input_tokens: int | None = None
+    downstream_estimated_output_tokens: int | None = None
+    downstream_token_estimator: str | None = None
     tenant_id: str
     compression_profile: str
     compression_profile_source: str
@@ -196,6 +207,23 @@ class HealthResponse(BaseModel):
     status: str
     model: str
     model_loaded: bool
+
+
+class TokenEstimateRequest(BaseModel):
+    text: str = Field(default="", description="Text to estimate.")
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Optional downstream model name. Omit to use the compression model "
+            "tokenizer/fallback."
+        ),
+    )
+
+
+class TokenEstimateResponse(BaseModel):
+    tokens: int
+    token_estimator: str
+    tokenizer_backed: bool
 
 
 class EvalCaseResponse(BaseModel):

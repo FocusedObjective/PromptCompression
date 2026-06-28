@@ -1,11 +1,16 @@
 import copy
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from app.compressor import PromptCompressionService
 from app.tenant_profiles import TenantCompressionProfile
-from app.token_estimator import estimate_token_count
+from app.token_estimator import (
+    REGEX_TOKEN_ESTIMATOR,
+    TokenEstimate,
+    estimate_regex_tokens,
+    merge_token_estimator_names,
+)
 
 TEXT_PART_TYPES = {"text", "input_text"}
 
@@ -34,6 +39,7 @@ class MessagesCompressionResult:
     non_user_tokens_preserved: int
     elapsed_ms: float
     stats: list[MessageCompressionStats]
+    token_estimator: str = REGEX_TOKEN_ESTIMATOR
 
 
 @dataclass(frozen=True)
@@ -58,11 +64,21 @@ def compress_user_messages(
     user_input_tokens = 0
     user_output_tokens = 0
     non_user_tokens_preserved = 0
+    estimator_names: list[str] = []
+    estimate_text_tokens = _compression_text_estimator(
+        compression_service,
+        tenant_profile,
+    )
 
     for index, message in enumerate(messages):
         role = str(message.get("role", ""))
         content = message.get("content")
-        original_tokens = estimate_content_tokens(content)
+        original_estimate = estimate_content_token_details(
+            content,
+            estimate_text_tokens=estimate_text_tokens,
+        )
+        original_tokens = original_estimate.count
+        estimator_names.append(original_estimate.estimator)
         input_tokens += original_tokens
 
         if role.lower() != "user":
@@ -98,7 +114,12 @@ def compress_user_messages(
             compressed_message["content"] = compressed_content
         compressed_messages.append(compressed_message)
 
-        compressed_tokens = estimate_content_tokens(compressed_content)
+        compressed_estimate = estimate_content_token_details(
+            compressed_content,
+            estimate_text_tokens=estimate_text_tokens,
+        )
+        compressed_tokens = compressed_estimate.count
+        estimator_names.append(compressed_estimate.estimator)
         tokens_saved = max(0, original_tokens - compressed_tokens)
         output_tokens += compressed_tokens
         user_input_tokens += original_tokens
@@ -127,27 +148,71 @@ def compress_user_messages(
         non_user_tokens_preserved=non_user_tokens_preserved,
         elapsed_ms=(time.perf_counter() - start) * 1000,
         stats=stats,
+        token_estimator=merge_token_estimator_names(estimator_names),
     )
 
 
 def estimate_content_tokens(content: Any) -> int:
+    return estimate_content_token_details(content).count
+
+
+def estimate_content_token_details(
+    content: Any,
+    estimate_text_tokens: Callable[[str], TokenEstimate] | None = None,
+) -> TokenEstimate:
+    estimator = estimate_text_tokens or estimate_regex_tokens
     if isinstance(content, str):
-        return estimate_token_count(content)
+        return estimator(content)
 
     if isinstance(content, list):
-        return sum(estimate_part_tokens(part) for part in content)
+        estimates = [
+            estimate_part_token_details(part, estimate_text_tokens=estimator)
+            for part in content
+        ]
+        return TokenEstimate(
+            count=sum(estimate.count for estimate in estimates),
+            estimator=merge_token_estimator_names(
+                [estimate.estimator for estimate in estimates]
+            ),
+            tokenizer_backed=any(estimate.tokenizer_backed for estimate in estimates),
+        )
 
-    return 0
+    return TokenEstimate(count=0, estimator=REGEX_TOKEN_ESTIMATOR)
 
 
 def estimate_part_tokens(part: Any) -> int:
+    return estimate_part_token_details(part).count
+
+
+def estimate_part_token_details(
+    part: Any,
+    estimate_text_tokens: Callable[[str], TokenEstimate] | None = None,
+) -> TokenEstimate:
+    estimator = estimate_text_tokens or estimate_regex_tokens
     if isinstance(part, str):
-        return estimate_token_count(part)
+        return estimator(part)
 
     if isinstance(part, dict) and isinstance(part.get("text"), str):
-        return estimate_token_count(part["text"])
+        return estimator(part["text"])
 
-    return 0
+    return TokenEstimate(count=0, estimator=REGEX_TOKEN_ESTIMATOR)
+
+
+def _compression_text_estimator(
+    compression_service: PromptCompressionService,
+    tenant_profile: TenantCompressionProfile | None,
+) -> Callable[[str], TokenEstimate]:
+    def estimate(text: str) -> TokenEstimate:
+        estimate_compression_tokens = getattr(
+            compression_service,
+            "estimate_compression_tokens",
+            None,
+        )
+        if callable(estimate_compression_tokens):
+            return estimate_compression_tokens(text, tenant_profile)
+        return estimate_regex_tokens(text)
+
+    return estimate
 
 
 def count_text_parts(content: Any) -> int:

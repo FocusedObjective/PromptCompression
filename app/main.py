@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from typing import Annotated, Any
+from typing import Annotated, Any, Callable
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +8,10 @@ from fastapi.responses import HTMLResponse
 from app.compressor import CompressionRuntimeError, PromptCompressionService
 from app.eval_suite import evaluate_compression, load_eval_cases, quality_passed
 from app.eval_ui import EVAL_HTML
-from app.message_compression import compress_user_messages, estimate_content_tokens
+from app.message_compression import (
+    compress_user_messages,
+    estimate_content_token_details,
+)
 from app.research_ui import RESEARCH_HTML
 from app.schemas import (
     CompressRequest,
@@ -20,6 +23,8 @@ from app.schemas import (
     EvalRunResponse,
     HealthResponse,
     TenantCompressionSettings,
+    TokenEstimateRequest,
+    TokenEstimateResponse,
     V1CompressRequest,
     V1CompressResponse,
     V1CompressionSettings,
@@ -27,6 +32,13 @@ from app.schemas import (
     V1MessagesCompressResponse,
 )
 from app.tenant_profiles import TenantCompressionProfile, build_tenant_profile
+from app.token_estimator import (
+    REGEX_TOKEN_ESTIMATOR,
+    TokenEstimate,
+    estimate_downstream_tokens,
+    estimate_regex_tokens,
+    merge_token_estimator_names,
+)
 
 DASHBOARD_EMBED_HEADERS = {
     "Content-Security-Policy": "frame-ancestors *",
@@ -671,10 +683,6 @@ priority escalation deadline status background summary should look important.`,
       resultStatus.className = hasError ? "status error" : "status";
     }
 
-    function estimateTokenCount(text) {
-      return (text.match(/[A-Za-z0-9_]+|[^\\s]/g) || []).length;
-    }
-
     function renderTokenDiff(container, labeledTokens) {
       if (!labeledTokens || labeledTokens.length === 0) {
         return;
@@ -850,11 +858,42 @@ priority escalation deadline status background summary should look important.`,
       promptInput.dispatchEvent(new Event("input"));
     });
 
+    let estimateRequestId = 0;
+    let estimateTimer = null;
+
+    async function refreshTokenEstimate() {
+      const requestId = ++estimateRequestId;
+      const text = promptInput.value;
+      inputStatus.textContent = "Estimating...";
+
+      try {
+        const response = await fetch("/tokens/estimate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        const data = await response.json();
+        if (requestId !== estimateRequestId) {
+          return;
+        }
+        if (!response.ok) {
+          throw new Error(data.detail || "Token estimate failed");
+        }
+        inputStatus.textContent = `${data.tokens} est. tokens`;
+        inputStatus.title = data.token_estimator || "";
+      } catch (error) {
+        if (requestId === estimateRequestId) {
+          inputStatus.textContent = "Token estimate unavailable";
+          inputStatus.title = error.message || "";
+        }
+      }
+    }
+
     promptInput.addEventListener("input", () => {
-      const count = estimateTokenCount(promptInput.value);
-      inputStatus.textContent = `${count} est. tokens`;
+      window.clearTimeout(estimateTimer);
+      estimateTimer = window.setTimeout(refreshTokenEstimate, 150);
     });
-    promptInput.dispatchEvent(new Event("input"));
+    refreshTokenEstimate();
 
     copyButton.addEventListener("click", async () => {
       if (!latestCompressedText) {
@@ -914,6 +953,7 @@ priority escalation deadline status background summary should look important.`,
         renderSections(data.output_sections, data.labeled_tokens);
         reduction.textContent = `${Math.round(data.reduction * 100)}%`;
         tokens.textContent = `${data.original_tokens} -> ${data.compressed_tokens}`;
+        tokens.title = data.token_estimator || "";
         elapsed.textContent = `${Math.round(data.elapsed_ms)} ms`;
         setStatus(
           `Complete - ${data.tenant_id || "default"} - ${data.compression_profile || "default:base"}`
@@ -1058,6 +1098,23 @@ def health() -> HealthResponse:
     )
 
 
+@app.post("/tokens/estimate", response_model=TokenEstimateResponse)
+def estimate_tokens(request: TokenEstimateRequest) -> TokenEstimateResponse:
+    if request.model:
+        estimate = estimate_downstream_tokens(request.text, request.model)
+    else:
+        estimate = _estimate_compression_tokens_for_profile(
+            request.text,
+            TenantCompressionProfile(),
+        )
+
+    return TokenEstimateResponse(
+        tokens=estimate.count,
+        token_estimator=estimate.estimator,
+        tokenizer_backed=estimate.tokenizer_backed,
+    )
+
+
 @app.post("/compress", response_model=CompressResponse)
 def compress(
     request: CompressRequest,
@@ -1091,6 +1148,7 @@ def compress(
         compression_profile=result.compression_profile,
         compression_profile_source=result.compression_profile_source,
         training_sample_recorded=result.training_sample_recorded,
+        token_estimator=result.token_estimator,
         elapsed_ms=result.elapsed_ms,
         labeled_tokens=[asdict(token) for token in result.labeled_tokens],
         output_sections=[
@@ -1131,6 +1189,11 @@ def compress_v1(
         if result.compressed_tokens == 0
         else result.original_tokens / result.compressed_tokens
     )
+    downstream_input = estimate_downstream_tokens(request.input, request.model)
+    downstream_output = estimate_downstream_tokens(
+        result.compressed_text,
+        request.model,
+    )
 
     return V1CompressResponse(
         output=result.compressed_text,
@@ -1139,6 +1202,12 @@ def compress_v1(
         original_input_tokens=result.original_tokens,
         tokens_saved=tokens_saved,
         compression_ratio=compression_ratio,
+        token_estimator=result.token_estimator,
+        downstream_estimated_input_tokens=downstream_input.count,
+        downstream_estimated_output_tokens=downstream_output.count,
+        downstream_token_estimator=merge_token_estimator_names(
+            [downstream_input.estimator, downstream_output.estimator]
+        ),
         compression_time=result.elapsed_ms,
         tenant_id=result.tenant_id,
         compression_profile=result.compression_profile,
@@ -1177,9 +1246,12 @@ def compress_v1_messages(
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    preserved_top_level_tokens = _top_level_preserved_tokens(request)
-    input_tokens = result.input_tokens + preserved_top_level_tokens
-    output_tokens = result.output_tokens + preserved_top_level_tokens
+    preserved_top_level = _top_level_preserved_token_details(
+        request,
+        tenant_profile,
+    )
+    input_tokens = result.input_tokens + preserved_top_level.count
+    output_tokens = result.output_tokens + preserved_top_level.count
     tokens_saved = max(0, input_tokens - output_tokens)
     compression_ratio = 0.0 if output_tokens == 0 else input_tokens / output_tokens
     compressed_request = request.model_dump(
@@ -1187,6 +1259,14 @@ def compress_v1_messages(
         exclude_unset=True,
     )
     compressed_request["messages"] = result.messages
+    downstream_input = _estimate_v1_messages_downstream_tokens(
+        request,
+        request_messages=messages,
+    )
+    downstream_output = _estimate_v1_messages_downstream_tokens(
+        request,
+        request_messages=result.messages,
+    )
 
     return V1MessagesCompressResponse(
         compressed_request=compressed_request,
@@ -1201,7 +1281,15 @@ def compress_v1_messages(
         user_output_tokens=result.user_output_tokens,
         user_tokens_saved=max(0, result.user_input_tokens - result.user_output_tokens),
         non_user_tokens_preserved=(
-            result.non_user_tokens_preserved + preserved_top_level_tokens
+            result.non_user_tokens_preserved + preserved_top_level.count
+        ),
+        token_estimator=merge_token_estimator_names(
+            [result.token_estimator, preserved_top_level.estimator]
+        ),
+        downstream_estimated_input_tokens=downstream_input.count,
+        downstream_estimated_output_tokens=downstream_output.count,
+        downstream_token_estimator=merge_token_estimator_names(
+            [downstream_input.estimator, downstream_output.estimator]
         ),
         tenant_id=tenant_profile.tenant_id,
         compression_profile=tenant_profile.profile_id,
@@ -1257,10 +1345,85 @@ def _resolve_v1_aggressiveness(
     return DEFAULT_AGGRESSIVENESS
 
 
-def _top_level_preserved_tokens(request: V1MessagesCompressRequest) -> int:
+def _top_level_preserved_token_details(
+    request: V1MessagesCompressRequest,
+    tenant_profile: TenantCompressionProfile,
+) -> TokenEstimate:
+    return _estimate_top_level_preserved_tokens(
+        request,
+        estimate_text_tokens=lambda text: _estimate_compression_tokens_for_profile(
+            text,
+            tenant_profile,
+        ),
+    )
+
+
+def _estimate_compression_tokens_for_profile(
+    text: str,
+    tenant_profile: TenantCompressionProfile,
+) -> TokenEstimate:
+    estimate_compression_tokens = getattr(
+        compression_service,
+        "estimate_compression_tokens",
+        None,
+    )
+    if callable(estimate_compression_tokens):
+        return estimate_compression_tokens(text, tenant_profile)
+
+    return estimate_regex_tokens(text)
+
+
+def _estimate_v1_messages_downstream_tokens(
+    request: V1MessagesCompressRequest,
+    request_messages: list[dict[str, Any]],
+) -> TokenEstimate:
+    def estimate_text_tokens(text: str) -> TokenEstimate:
+        return estimate_downstream_tokens(text, request.model)
+
+    message_estimates = [
+        estimate_content_token_details(
+            message.get("content"),
+            estimate_text_tokens=estimate_text_tokens,
+        )
+        for message in request_messages
+    ]
+    top_level_estimate = _estimate_top_level_preserved_tokens(
+        request,
+        estimate_text_tokens=estimate_text_tokens,
+    )
+    estimates = [*message_estimates, top_level_estimate]
+
+    return TokenEstimate(
+        count=sum(estimate.count for estimate in estimates),
+        estimator=merge_token_estimator_names(
+            [estimate.estimator for estimate in estimates]
+        ),
+        tokenizer_backed=any(estimate.tokenizer_backed for estimate in estimates),
+    )
+
+
+def _estimate_top_level_preserved_tokens(
+    request: V1MessagesCompressRequest,
+    estimate_text_tokens: Callable[[str], TokenEstimate],
+) -> TokenEstimate:
     extras: dict[str, Any] = request.model_extra or {}
-    tokens = 0
+    estimates: list[TokenEstimate] = []
     for key in ("system", "instructions", "developer"):
         if key in extras:
-            tokens += estimate_content_tokens(extras[key])
-    return tokens
+            estimates.append(
+                estimate_content_token_details(
+                    extras[key],
+                    estimate_text_tokens=estimate_text_tokens,
+                )
+            )
+
+    if not estimates:
+        return TokenEstimate(count=0, estimator=REGEX_TOKEN_ESTIMATOR)
+
+    return TokenEstimate(
+        count=sum(estimate.count for estimate in estimates),
+        estimator=merge_token_estimator_names(
+            [estimate.estimator for estimate in estimates]
+        ),
+        tokenizer_backed=any(estimate.tokenizer_backed for estimate in estimates),
+    )

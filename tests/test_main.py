@@ -7,11 +7,13 @@ from app.schemas import (
     CompressRequest,
     EvalRunRequest,
     TenantCompressionSettings,
+    TokenEstimateRequest,
     V1CompressRequest,
     V1CompressionSettings,
     V1MessagesCompressRequest,
 )
 from app.tenant_profiles import TenantCompressionProfile
+from app.token_estimator import TokenEstimate
 
 
 class FakeCompressionService:
@@ -309,6 +311,10 @@ def test_v1_compress_returns_compatible_shape(monkeypatch):
         "original_input_tokens": 4,
         "tokens_saved": 2,
         "compression_ratio": 2.0,
+        "token_estimator": "regex:unicode-word-or-non-space",
+        "downstream_estimated_input_tokens": 4,
+        "downstream_estimated_output_tokens": 3,
+        "downstream_token_estimator": "regex:unicode-word-or-non-space",
         "compression_time": 12.5,
         "tenant_id": "default",
         "compression_profile": "default:base",
@@ -355,6 +361,10 @@ def test_v1_compress_http_accepts_compatible_request(monkeypatch):
         "original_input_tokens": 4,
         "tokens_saved": 2,
         "compression_ratio": 2.0,
+        "token_estimator": "regex:unicode-word-or-non-space",
+        "downstream_estimated_input_tokens": 4,
+        "downstream_estimated_output_tokens": 3,
+        "downstream_token_estimator": "regex:unicode-word-or-non-space",
         "compression_time": 12.5,
         "tenant_id": "default",
         "compression_profile": "default:base",
@@ -363,6 +373,28 @@ def test_v1_compress_http_accepts_compatible_request(monkeypatch):
         "warnings": [],
     }
     assert service.last_aggressiveness == 0.4
+
+
+def test_token_estimate_endpoint_uses_compression_service_estimator(monkeypatch):
+    class EstimatingCompressionService(FakeCompressionService):
+        def estimate_compression_tokens(
+            self,
+            text: str,
+            tenant_profile: TenantCompressionProfile | None = None,
+        ) -> TokenEstimate:
+            return TokenEstimate(
+                count=len(text) + 1,
+                estimator="fake-tokenizer",
+                tokenizer_backed=True,
+            )
+
+    monkeypatch.setattr(main, "compression_service", EstimatingCompressionService())
+
+    response = main.estimate_tokens(TokenEstimateRequest(text="abc"))
+
+    assert response.tokens == 4
+    assert response.token_estimator == "fake-tokenizer"
+    assert response.tokenizer_backed is True
 
 
 def test_v1_compress_accepts_tenant_id_header_and_profile_body(monkeypatch):

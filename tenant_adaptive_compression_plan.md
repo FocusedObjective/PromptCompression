@@ -38,6 +38,9 @@ Current decisions:
 - Do not create full-size fine-tuned model copies per tenant by default.
 - Use tenant LoRA/adapters only for high-volume tenants that justify the added
   hosting complexity.
+- Runtime PEFT adapter loading is implemented for local artifacts that already
+  exist in the API container or mounted filesystem. It is not a production
+  training, artifact-fetch, or promotion system yet.
 - Consider grouped adapters by request style before one adapter per tenant.
 - Use the light teacher LLM offline to improve labels; do not run it inline for
   normal compression requests.
@@ -55,14 +58,15 @@ Initial API-only behavior:
 ```text
 request with tenant_id and optional tenant_profile
   -> build request-scoped profile from API body or X-Tenant-ID
-  -> compress with base LLMLingua-2 plus request-supplied tenant rules
+  -> choose base compressor or local adapter slot when tenant_id has one
+  -> compress with LLMLingua-2 plus request-supplied tenant rules
   -> return compressed request, stats, and profile metadata
 ```
 
 No raw prompt text, counters, or training samples are stored by the service in
 this first pass.
 
-Current implementation snapshot as of 2026-06-27:
+Current implementation snapshot as of 2026-06-28:
 
 - `app/tenant_profiles.py` normalizes request-supplied tenant IDs and profile
   rules, trims empty values, deduplicates keep/drop lists, and assigns either
@@ -86,9 +90,24 @@ Current implementation snapshot as of 2026-06-27:
   fields are counted but not compressed.
 - Compatible message responses exclude `tenant_id`, `tenant_profile`, and
   `compression_settings` from `compressed_request`.
+- `app/compressor.py` can route a tenant to a local PEFT LoRA adapter when the
+  tenant ID matches a configured adapter slot or a valid adapter folder under
+  `COMPRESSOR_ADAPTER_ROOT`.
+- `COMPRESSOR_ADAPTER_SLOTS` maps explicit tenant slot IDs to adapter
+  directories, and `COMPRESSOR_PRELOAD_SLOTS` can load `base`, named adapters,
+  or `all` during startup.
+- `COMPRESSOR_ADAPTER_ROOT` enables runtime discovery of
+  `<adapter-root>/<tenant_id>` when the tenant ID is a safe folder name and the
+  directory contains `adapter_config.json` plus `adapter_model.safetensors` or
+  `adapter_model.bin`.
+- Adapter slots are cached per process as separate `PromptCompressor` instances
+  wrapped with `peft.PeftModel.from_pretrained`; missing or invalid adapter
+  folders fall back to the base model.
+- The UI includes probe presets for base-vs-adapter behavior on
+  `tenant_lora_probe` and `tenant_rick_probe`.
 - `training_sample_recorded` is always `false`; token accounting, sample
-  collection, profile lookup, teacher audits, adapters, and promotion workflows
-  are not implemented yet.
+  collection, persisted profile lookup, teacher audits, production training,
+  artifact promotion, and rollback workflows are not implemented yet.
 
 Later behavior:
 
@@ -754,7 +773,18 @@ known low-value text.
 
 ## Fine-Tuning And Adapter Plan
 
-Once rules are stable, add `scripts/train_tenant_model.py`.
+Current status:
+
+- `scripts/train_lora_probe_tenant.py` proves that the LLMLingua-2 token
+  classifier can be adapted with PEFT LoRA and that the runtime can load that
+  adapter through `llmlingua.PromptCompressor`.
+- Runtime loading is local-artifact based only. An adapter must already exist in
+  a configured path or under `COMPRESSOR_ADAPTER_ROOT`.
+- There is no production training endpoint, async job worker, artifact store,
+  model registry, promotion gate, or tenant profile database yet.
+
+Once rules and label quality are stable, add `scripts/train_tenant_model.py` and
+an async/offline training service.
 
 Inputs:
 
@@ -763,6 +793,7 @@ Inputs:
 - accepted corrected-label training examples
 - holdout examples
 - output artifact directory
+- adapter artifact manifest destination
 
 Training shape:
 
@@ -770,8 +801,26 @@ Training shape:
 2. Load only `accepted` corrected-label examples from the audit pipeline.
 3. Train a small adapter or LoRA-style delta when supported by the model stack.
 4. Save adapter artifacts under a tenant/version or group/version directory.
-5. Evaluate candidate model against the holdout set.
-6. Write a `tenant_profiles` candidate row with metrics and artifact URI.
+5. Write an artifact manifest with base model, tenant/group ID, adapter version,
+   file list, hashes, training parameters, and eval metadata.
+6. Evaluate candidate model against the holdout set.
+7. Write a `tenant_profiles` candidate row with metrics and artifact URI.
+
+Async/offline service shape:
+
+```text
+customer/admin app
+  -> submit accepted training examples or references to stored examples
+  -> create queued training job
+  -> worker container loads base model and training data
+  -> worker writes adapter artifacts and metrics to artifact storage
+  -> promotion job validates holdout gates
+  -> runtime config points the tenant to the promoted artifact
+```
+
+Do not use FastAPI background tasks for real training. Use a separate worker,
+scheduled job, Cloud Run Job, Cloud Batch job, or equivalent queue-backed
+process so API request latency and lifecycle are independent from training.
 
 Keep training small:
 
@@ -832,17 +881,21 @@ base LLMLingua-2 token classifier
 
 Practical caveat:
 
-The current runtime uses `llmlingua.PromptCompressor`, which hides some model
-loading details. Adapter support may require either:
+The runtime now loads adapters by building a fresh `PromptCompressor` and
+replacing its underlying Hugging Face model with
+`PeftModel.from_pretrained(compressor.model, adapter_path, is_trainable=False)`.
+This proves the integration path, but the current implementation still has
+production limits:
 
-- Loading the underlying Hugging Face token-classification model directly with
-  `transformers` plus `peft`.
-- Extending the compressor wrapper so it can load an adapter.
-- Exporting/merging an adapter into a candidate checkpoint only for evaluation
-  or exceptional dedicated deployments.
+- No dynamic download from Cloud Storage/S3/Hugging Face Hub at request time.
+- No persistent active-profile lookup; routing uses tenant ID directly.
+- No bounded LRU or memory eviction for discovered adapter slots.
+- No explicit version selection beyond the folder path supplied in config.
+- No automated candidate promotion or rollback workflow.
+- No production tenant training loop; the probe uses synthetic marker labels.
 
-The MVP should prove rules-only tenant profiles first, then test whether LoRA can
-be integrated cleanly with the current LLMLingua-2 wrapper.
+The MVP should keep rules-only tenant profiles as the broad default and use LoRA
+only when a tenant or adapter group has enough accepted labels and eval coverage.
 
 Manual probe status:
 
@@ -860,8 +913,10 @@ Manual probe status:
 - The probes write adapter artifacts under `models/tenant_lora_probe/` and
   `models/tenant_rick_probe/`. These directories are local artifacts used by
   the current production test image, not source-controlled training data.
-- Runtime adapter routing, profile promotion, and concurrency-safe adapter
-  selection remain future work.
+- Runtime adapter routing is implemented for configured local slots and safe
+  runtime folder discovery. Profile promotion, dynamic artifact fetch, bounded
+  cache eviction, async training jobs, and production label generation remain
+  future work.
 
 ## Hosting Model Artifacts
 
@@ -887,14 +942,37 @@ only when a tenant is large enough to justify dedicated capacity.
 
 Runtime routing:
 
-1. Load the shared base model once per worker.
-2. Load tenant profile rules from a lightweight store.
-3. If the active profile has an adapter artifact, load it through a bounded LRU
-   cache.
-4. If the adapter is unavailable or memory pressure is high, fall back to base
+Current implementation:
+
+1. `PromptCompressionService` loads the base `PromptCompressor` lazily unless
+   `COMPRESSOR_PRELOAD_SLOTS` asks for `base`.
+2. `COMPRESSOR_ADAPTER_SLOTS` can map tenant IDs to adapter directories:
+   `tenant_a=models/tenant_a;tenant_b=models/tenant_b`.
+3. `COMPRESSOR_PRELOAD_SLOTS` can preload `base`, specific adapter slots, or
+   `all` configured slots.
+4. `COMPRESSOR_ADAPTER_ROOT` can discover adapter folders at request time when
+   `<root>/<tenant_id>` contains a valid PEFT adapter. The service accepts
+   `adapter_config.json` plus either `adapter_model.safetensors` or
+   `adapter_model.bin`.
+5. Runtime-discovered tenant IDs must be simple folder-safe names containing
+   letters, numbers, `_`, `-`, or `.`. The reserved `base` and anonymous
+   `default` IDs are not discovered.
+6. Each loaded adapter slot gets its own `PromptCompressor` instance with a PEFT
+   model wrapper. The service does not mutate a single shared model's active
+   adapter during requests.
+7. If no configured or discovered adapter exists for the request tenant, the
+   service falls back to the base compressor plus tenant profile rules.
+
+Future promoted-artifact routing:
+
+1. Load tenant profile rules from a lightweight store.
+2. Resolve active profile version to an artifact URI or mounted artifact path.
+3. Download or mount the artifact outside the hot request path.
+4. Load the adapter through a bounded cache with eviction and memory limits.
+5. If the adapter is unavailable or memory pressure is high, fall back to base
    model plus tenant rules.
-5. Include `profile_id`, `profile_type`, and `artifact_uri` or adapter version
-   in logs for debuggability.
+6. Include `profile_id`, `profile_type`, artifact version, and fallback reason in
+   logs for debuggability.
 
 Concurrency rule:
 
@@ -911,9 +989,15 @@ Suggested cache policy:
 
 ```text
 rules-only profiles: cache hundreds or thousands
-adapter artifacts: cache 1-3 per worker at first
+adapter artifacts: cache 1-3 per worker at first, then tune from memory data
 full checkpoints: no shared multi-tenant cache; dedicate capacity
 ```
+
+Current cache caveat:
+
+Loaded adapter slots stay in memory for the process lifetime. This is acceptable
+for the local probe and a small fixed slot set, but production runtime discovery
+needs an eviction policy before enabling many tenants.
 
 ## Evaluation And Promotion
 
@@ -951,6 +1035,41 @@ candidate profile created
 
 Add a manual override so a bad profile can be disabled quickly.
 
+## Near-Term Next Steps
+
+The current LoRA work is a proof of training and runtime loading, not a
+production adaptation loop. The next useful implementation sequence is:
+
+1. Define the accepted-label training example format:
+   - original text
+   - tokenizer-aligned KEEP/DROP labels or exact corrected spans
+   - deterministic required spans
+   - tenant/profile metadata
+2. Add `app/training_labels.py` to validate exact teacher spans, align spans to
+   tokenizer offsets, and reject conflicting examples.
+3. Add `scripts/train_tenant_model.py` by extracting reusable pieces from
+   `scripts/train_lora_probe_tenant.py`:
+   - load base model/tokenizer
+   - load accepted examples from JSONL or storage
+   - train PEFT LoRA adapter
+   - evaluate holdout examples
+   - write adapter artifacts and a manifest
+4. Add a trainer container or job command. The current API image can load
+   adapters, but it does not copy `scripts/`, so production training should use
+   a separate worker/trainer image or a mounted script path.
+5. Add job APIs or admin commands:
+   - submit training job
+   - check status
+   - retrieve artifact manifest
+   - promote/disable candidate profile
+6. Store artifacts outside the request container, such as Cloud Storage/S3 plus a
+   profile row containing active artifact URI, version, hashes, metrics, and
+   rollback pointer.
+7. Replace tenant-ID-only runtime discovery with active-profile resolution:
+   tenant ID -> active profile -> local/mounted artifact path -> adapter slot.
+8. Add adapter cache limits, fallback telemetry, and tests for corrupt/missing
+   artifacts.
+
 ## Files To Touch
 
 Implemented in the current service:
@@ -974,6 +1093,14 @@ Implemented in the current service:
   - Merges tenant force-keep tokens with existing forced tokens.
   - Applies request-supplied `min_rate`.
   - Drops exact request-supplied boilerplate phrases only in compressible text.
+  - Loads configured LoRA adapter slots through
+    `COMPRESSOR_ADAPTER_SLOTS`.
+  - Preloads `base`, named adapter slots, or `all` configured slots through
+    `COMPRESSOR_PRELOAD_SLOTS`.
+  - Discovers local PEFT adapter folders at runtime through
+    `COMPRESSOR_ADAPTER_ROOT` when the folder name matches a safe tenant ID.
+  - Wraps adapter compressor models with `peft.PeftModel.from_pretrained` and
+    caches loaded adapter compressor instances per process.
   - Includes profile metadata in `CompressionResult`.
 - `app/message_compression.py`
   - Preserves tenant context through role-aware compression.
@@ -984,11 +1111,29 @@ Implemented in the current service:
 - `app/research_ui.py`
   - Provides the in-app bibliography for compression research, model
     checkpoints, and implementation repositories.
-- `tests/test_main.py` and `tests/test_compressor.py`
+- `scripts/train_lora_probe_tenant.py`
+  - Provides the manual synthetic PEFT LoRA smoke test for
+    `tenant_lora_probe` and `tenant_rick_probe`.
+  - Writes adapter artifacts, tokenizer files, and `probe_report.json`.
+  - Supports `--skip-train` to re-run detection against an existing adapter.
+- `Dockerfile`
+  - Includes runtime dependencies needed to load adapters, including `peft`.
+  - Copies local `models/` artifacts into the runtime image. It does not copy
+    `scripts/`, so containerized training requires a trainer image or a mounted
+    script path.
+- `compose.yaml`
+  - Preconfigures the local probe slots for `tenant_lora_probe` and
+    `tenant_rick_probe`.
+- `README.md`
+  - Documents probe training, configured slots, preloading, and runtime adapter
+    root discovery.
+- `tests/test_main.py`, `tests/test_compressor.py`, and `tests/test_lora_probe.py`
   - Cover default tenant metadata, request-supplied profile metadata, v1 header
     tenant ID fallback, tenant default aggressiveness, force-keep tokens,
     force-drop phrases, role-aware user-only compression, and removal of tenant
     controls from compatible message payloads.
+  - Cover configured adapter routing, runtime adapter-root discovery, unsafe
+    tenant folder rejection, and LoRA probe label/detection helpers.
 
 Future implementation work:
 
@@ -1011,17 +1156,23 @@ Future implementation work:
     compressor candidates against the same eval/holdout set.
   - Report quality failures, mistaken drops, token savings, latency, and
     break-even thresholds.
-- `scripts/train_lora_probe_tenant.py`
-  - Implemented as a manual synthetic adapter smoke test. It is not the
-    automated tenant-training loop.
 - `scripts/train_tenant_model.py`
-  - Fine-tune/adapt model later.
+  - Fine-tune/adapt model from accepted corrected labels later.
+- Async training service or worker container
+  - Accept training jobs from an admin/customer application, run outside the API
+    request path, and write adapter artifacts plus manifests to artifact
+    storage.
+- Adapter artifact registry/manifest
+  - Store base model, adapter version, file hashes, training parameters, eval
+    metrics, promotion status, and rollback pointers.
 - Future tests
   - Token accounting events are emitted once an external event sink exists.
   - Teacher audit output must reference exact original spans.
   - Corrected labels keep mistaken drops and drop safe boilerplate.
   - Conflicting corrections reject the sample.
   - Candidate profile promotion requires eval gates.
+  - Production adapter loading handles missing/corrupt artifacts and fallback
+    telemetry.
 
 ## Rollout Phases
 
@@ -1089,14 +1240,27 @@ Done when:
 
 Train a small adapter or grouped adapter for tenants with enough accepted data.
 
+Status: partially implemented for local probes and runtime loading.
+
+Implemented:
+
+- Synthetic PEFT LoRA probe training in `scripts/train_lora_probe_tenant.py`.
+- Runtime loading from configured local adapter slots.
+- Runtime discovery from `COMPRESSOR_ADAPTER_ROOT` by safe tenant folder name.
+- Local UI presets and tests for probe behavior and adapter routing.
+
 Done when:
 
 - Training is offline and repeatable.
 - Training uses accepted corrected labels, not raw base labels.
 - Candidate artifacts are versioned.
 - Candidate profile promotion is gated by eval.
-- Runtime can route a tenant to active adapter artifacts.
+- Runtime can route a tenant to active adapter artifacts from a profile store or
+  artifact manifest, not only from tenant ID and local folders.
 - Adapter fallback to base model plus tenant rules is reliable.
+- Adapter cache has memory limits and eviction behavior.
+- Async trainer jobs can produce adapter artifacts without running in the API
+  request process.
 
 ### Phase 7: Production Controls
 
@@ -1120,10 +1284,17 @@ Done when:
   residency standpoint.
 - Whether teacher audit should run on all eligible samples or only the most
   valuable/high-risk samples.
-- Which adapter mechanism is practical with the current LLMLingua-2 model stack.
+- Whether the current PEFT wrapper approach is sufficient for production, or
+  whether high-volume adapter tenants need direct `transformers` inference,
+  merged evaluation checkpoints, or dedicated workers.
 - Whether grouped adapters beat tenant-specific adapters for sparse tenants.
 - How many adapter artifacts can be loaded per API instance before memory
   becomes a problem.
+- Whether promoted adapters should be routed by exact tenant ID, a tenant
+  profile record, or grouped adapter assignment.
+- Which async training backend to use: Cloud Run Jobs, Cloud Batch, a queue
+  worker, or a deployment-specific equivalent.
+- How adapter artifacts should be stored, versioned, signed, and rolled back.
 
 ## Recommended MVP
 
@@ -1131,22 +1302,27 @@ Build this in the following order:
 
 1. Done: add `tenant_id`, `tenant_profile`, and API-supplied tenant rules with no
    local database.
-2. Add external per-tenant token accounting after choosing the storage/event
+2. Done for probe/runtime only: prove PEFT LoRA training on synthetic labels,
+   configured adapter slots, and runtime folder discovery.
+3. Add external per-tenant token accounting after choosing the storage/event
    backend.
-3. Add opt-in sample collection for user text only.
-4. Store base LLMLingua-2 token labels for sampled text.
-5. Add deterministic required-span extraction.
-6. Add the base-compressor benchmark command, starting with LLMLingua-2
+4. Add opt-in sample collection for user text only.
+5. Store base LLMLingua-2 token labels for sampled text.
+6. Add deterministic required-span extraction.
+7. Add the base-compressor benchmark command, starting with LLMLingua-2
    BERT-base vs LLMLingua-2 XLM-RoBERTa-large.
-7. Add the offline light-LLM audit for mistaken drops and safe drops.
-8. Build corrected KEEP/DROP labels and reject uncertain examples.
-9. Build rules-only tenant profiles from 50+ accepted requests or 1M sampled
+8. Add the offline light-LLM audit for mistaken drops and safe drops.
+9. Build corrected KEEP/DROP labels and reject uncertain examples.
+10. Build rules-only tenant profiles from 50+ accepted requests or 1M sampled
    tokens.
-10. Route compression through active tenant profile rules.
-11. Add promotion checks against tenant holdout samples.
-12. Train adapters only after rules prove the data collection and eval loop are
+11. Route compression through active tenant profile rules.
+12. Add promotion checks against tenant holdout samples.
+13. Build the async/offline adapter training job and artifact manifest.
+14. Train adapters only after rules prove the data collection and eval loop are
    useful.
-13. Reserve full per-tenant checkpoints for exceptional high-volume tenants.
+15. Promote adapters through profile records and runtime artifact routing.
+16. Add adapter cache limits, fallback telemetry, and rollback controls.
+17. Reserve full per-tenant checkpoints for exceptional high-volume tenants.
 
 This gets useful tenant-specific compression without making the request path
 heavy or turning model training into a production dependency.
