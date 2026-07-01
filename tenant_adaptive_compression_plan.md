@@ -237,6 +237,8 @@ Primary references:
   https://huggingface.co/microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
 - XLM-RoBERTa-large LLMLingua-2 checkpoint:
   https://huggingface.co/microsoft/llmlingua-2-xlm-roberta-large-meetingbank
+- PCToolkit paper:
+  https://arxiv.org/abs/2403.17411
 - DAC: https://arxiv.org/abs/2507.11942
 - SCOPE: https://arxiv.org/abs/2508.15813
 - Cmprsr: https://arxiv.org/abs/2511.12281

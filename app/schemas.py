@@ -205,6 +205,8 @@ class V1MessagesCompressResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    deployment_version: str
+    deployment_timestamp: str
     model: str
     model_loaded: bool
 
@@ -234,6 +236,7 @@ class EvalCaseResponse(BaseModel):
     text: str
     default_aggressiveness: float
     required_substrings: list[str] = Field(default_factory=list)
+    required_whitespace_insensitive_substrings: list[str] = Field(default_factory=list)
     forbidden_substrings: list[str] = Field(default_factory=list)
     expected_section_kinds: list[str] = Field(default_factory=list)
     target_min_reduction: float | None = None

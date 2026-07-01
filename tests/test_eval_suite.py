@@ -31,6 +31,10 @@ def test_eval_cases_load_from_fixture():
         "support_escalation_with_toon_data",
         "exact_json_schema_template",
         "tool_exchange_verbatim",
+        "long_context_needle_in_middle",
+        "gsm8k_style_math_constraints",
+        "bbh_boolean_expression_constraints",
+        "repobench_style_code_completion",
     }
     assert all(case.text for case in cases)
 
@@ -42,6 +46,18 @@ def test_eval_case_required_substrings_exist_in_original_text():
         for case in cases
         for required in case.required_substrings
         if required not in case.text
+    ]
+
+    assert missing == []
+
+
+def test_eval_case_whitespace_insensitive_substrings_exist_in_original_text():
+    cases = load_eval_cases()
+    missing = [
+        (case.id, required)
+        for case in cases
+        for required in case.required_whitespace_insensitive_substrings
+        if "".join(required.split()) not in "".join(case.text.split())
     ]
 
     assert missing == []
@@ -99,6 +115,52 @@ def test_evaluate_compression_fails_missing_required_text():
     assert not quality_passed(checks)
     assert any(
         check.id == "required_0" and not check.passed and check.severity == "error"
+        for check in checks
+    )
+
+
+def test_evaluate_compression_allows_spacing_changes_for_normalized_requirements():
+    case = EvalCase(
+        id="sample",
+        title="Sample",
+        category="test",
+        description="Sample eval.",
+        text="Original text",
+        default_aggressiveness=0.25,
+        required_whitespace_insensitive_substrings=[
+            "not (A and B) or (C and not D)"
+        ],
+    )
+    result = build_result("exact expression not ( A and B ) or ( C and not D ).")
+
+    checks = evaluate_compression(case, result)
+
+    assert quality_passed(checks)
+    assert any(
+        check.id == "required_whitespace_insensitive_0" and check.passed
+        for check in checks
+    )
+
+
+def test_evaluate_compression_normalized_requirements_preserve_parentheses():
+    case = EvalCase(
+        id="sample",
+        title="Sample",
+        category="test",
+        description="Sample eval.",
+        text="Original text",
+        default_aggressiveness=0.25,
+        required_whitespace_insensitive_substrings=[
+            "not (A and B) or (C and not D)"
+        ],
+    )
+    result = build_result("exact expression not A and B or C and not D.")
+
+    checks = evaluate_compression(case, result)
+
+    assert not quality_passed(checks)
+    assert any(
+        check.id == "required_whitespace_insensitive_0" and not check.passed
         for check in checks
     )
 

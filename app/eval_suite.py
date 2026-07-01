@@ -16,6 +16,7 @@ class EvalCase:
     text: str
     default_aggressiveness: float
     required_substrings: list[str] = field(default_factory=list)
+    required_whitespace_insensitive_substrings: list[str] = field(default_factory=list)
     forbidden_substrings: list[str] = field(default_factory=list)
     expected_section_kinds: list[str] = field(default_factory=list)
     target_min_reduction: float | None = None
@@ -44,6 +45,9 @@ def load_eval_cases(path: Path = DEFAULT_EVAL_CASES_PATH) -> list[EvalCase]:
                 text=raw_case["text"],
                 default_aggressiveness=float(raw_case["default_aggressiveness"]),
                 required_substrings=list(raw_case.get("required_substrings", [])),
+                required_whitespace_insensitive_substrings=list(
+                    raw_case.get("required_whitespace_insensitive_substrings", [])
+                ),
                 forbidden_substrings=list(raw_case.get("forbidden_substrings", [])),
                 expected_section_kinds=list(raw_case.get("expected_section_kinds", [])),
                 target_min_reduction=raw_case.get("target_min_reduction"),
@@ -92,6 +96,26 @@ def evaluate_compression(
                     "Found exact substring."
                     if required in compressed_text
                     else "Missing exact substring."
+                ),
+            )
+        )
+
+    normalized_compressed_text = _without_whitespace(compressed_text)
+    for index, required in enumerate(
+        case.required_whitespace_insensitive_substrings
+    ):
+        normalized_required = _without_whitespace(required)
+        passed = normalized_required in normalized_compressed_text
+        checks.append(
+            QualityCheck(
+                id=f"required_whitespace_insensitive_{index}",
+                label=f"Preserves required text ignoring spacing: {required}",
+                passed=passed,
+                severity="error",
+                detail=(
+                    "Found whitespace-insensitive substring."
+                    if passed
+                    else "Missing whitespace-insensitive substring."
                 ),
             )
         )
@@ -152,3 +176,7 @@ def evaluate_compression(
 
 def quality_passed(checks: list[QualityCheck]) -> bool:
     return all(check.passed for check in checks if check.severity == "error")
+
+
+def _without_whitespace(value: str) -> str:
+    return "".join(value.split())

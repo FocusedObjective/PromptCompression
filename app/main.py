@@ -39,6 +39,7 @@ from app.token_estimator import (
     estimate_regex_tokens,
     merge_token_estimator_names,
 )
+from app.version import DEPLOYMENT_TIMESTAMP, DEPLOYMENT_VERSION
 
 DASHBOARD_EMBED_HEADERS = {
     "Content-Security-Policy": "frame-ancestors *",
@@ -971,7 +972,7 @@ priority escalation deadline status background summary should look important.`,
 
 app = FastAPI(
     title="Prompt Compression MVP",
-    version="0.1.0",
+    version=DEPLOYMENT_VERSION,
     description="Fast prompt compression API backed by a token-classification model.",
 )
 app.add_middleware(
@@ -1016,6 +1017,9 @@ def list_eval_cases() -> list[EvalCaseResponse]:
             text=case.text,
             default_aggressiveness=case.default_aggressiveness,
             required_substrings=case.required_substrings,
+            required_whitespace_insensitive_substrings=(
+                case.required_whitespace_insensitive_substrings
+            ),
             forbidden_substrings=case.forbidden_substrings,
             expected_section_kinds=case.expected_section_kinds,
             target_min_reduction=case.target_min_reduction,
@@ -1093,6 +1097,8 @@ def run_eval(request: EvalRunRequest) -> EvalRunResponse:
 def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
+        deployment_version=DEPLOYMENT_VERSION,
+        deployment_timestamp=DEPLOYMENT_TIMESTAMP,
         model=compression_service.model_name,
         model_loaded=compression_service.is_loaded,
     )

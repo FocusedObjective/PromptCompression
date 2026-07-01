@@ -114,6 +114,22 @@ def test_index_http_allows_iframe_embedding():
     assert "x-frame-options" not in response.headers
 
 
+def test_health_includes_deployment_version():
+    service = FakeCompressionService()
+    original_service = main.compression_service
+    main.compression_service = service
+    try:
+        response = main.health()
+    finally:
+        main.compression_service = original_service
+
+    assert response.status == "ok"
+    assert response.deployment_version == main.DEPLOYMENT_VERSION
+    assert response.deployment_timestamp == main.DEPLOYMENT_TIMESTAMP
+    assert response.model == service.model_name
+    assert response.model_loaded is True
+
+
 def test_eval_index_returns_eval_ui():
     response = main.eval_index()
     body = response.body.decode()

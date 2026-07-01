@@ -67,6 +67,18 @@ python scripts\smoke_test.py
 
 Checks whether the service is up.
 
+Response:
+
+```json
+{
+  "status": "ok",
+  "deployment_version": "2026.06.30.192552",
+  "deployment_timestamp": "2026-06-30T19:25:52-07:00",
+  "model": "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
+  "model_loaded": false
+}
+```
+
 ### `GET /`
 
 Opens a browser UI where you can paste a prompt, compress it, and inspect which

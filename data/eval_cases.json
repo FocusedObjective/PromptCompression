@@ -120,5 +120,82 @@
     ],
     "forbidden_substrings": [],
     "text": "Prepare a vendor-risk summary. Do not delete the contract exception. The account is ORD-7781 and the renewal cap is $15,000 through 2026-08-15 unless legal approves a written amendment. The customer can receive a service credit only if the outage exceeds 240 minutes in a single billing month. Never imply that credits are automatic. The operations team needs a shorter version of this context for an executive update, but all thresholds, dates, identifiers, negations, and exception words must remain available to the downstream model."
+  },
+  {
+    "id": "long_context_needle_in_middle",
+    "title": "Long Context Needle In Middle",
+    "category": "long_context_qa",
+    "description": "LongBench-style case where the answer-bearing paragraph sits in the middle of distractors and must survive compression.",
+    "default_aggressiveness": 0.2,
+    "target_min_reduction": 0.08,
+    "max_elapsed_ms": 5500,
+    "expected_section_kinds": [],
+    "required_substrings": [
+      "CACHE-440",
+      "search ranking drift",
+      "2026-07-02 18:00 UTC"
+    ],
+    "required_whitespace_insensitive_substrings": [
+      "pin shard-affinity routing"
+    ],
+    "forbidden_substrings": [],
+    "text": "You are answering a reliability question from the following incident notes. Compress irrelevant context but preserve the paragraph that answers the question.\n\nQuestion: Which incident owns the customer-visible search ranking drift, what mitigation was chosen, and what deadline applies?\n\nParagraph 1: The checkout latency review belongs to PAY-118 and only affects sandbox merchants during replay tests.\nParagraph 2: The email unsubscribe regression belongs to MKT-772 and was already rolled back by the lifecycle team.\nParagraph 3: The nightly warehouse load had a harmless retry storm in JOB-204, but customers never saw it.\nParagraph 4: Incident CACHE-440 owns the customer-visible search ranking drift. The mitigation is to pin shard-affinity routing until the vector index backfill finishes. Deadline: 2026-07-02 18:00 UTC.\nParagraph 5: The mobile release notes mention a dark-mode rendering defect that is cosmetic and tracked by APP-901.\nParagraph 6: The CRM export queue was slow for one internal tenant, but no external service-level objective was breached.\nParagraph 7: The analytics team is tuning dashboard sample rates and does not need executive escalation.\nParagraph 8: The support macro cleanup can wait until next sprint because it only changes internal wording.\n\nAnswer format: incident id, mitigation, deadline."
+  },
+  {
+    "id": "gsm8k_style_math_constraints",
+    "title": "Math Word Problem Constraints",
+    "category": "math_reasoning",
+    "description": "GSM8K-style prompt where quantities, units, and final-answer instructions must remain intact after compression.",
+    "default_aggressiveness": 0.18,
+    "target_min_reduction": 0.04,
+    "max_elapsed_ms": 4500,
+    "expected_section_kinds": [],
+    "required_substrings": [
+      "24 packages",
+      "$3.50",
+      "7 packages",
+      "Do not round",
+      "exact dollar amount"
+    ],
+    "forbidden_substrings": [],
+    "text": "Solve the math problem, but first compress the prompt for a downstream model. Mara starts Monday with 24 packages of printer paper. She sells 9 packages before lunch and 7 packages after lunch. Each package sells for $3.50. A separate customer returns 2 packages, but returned packages do not count as sales revenue. Do not round the answer. The final answer must be an exact dollar amount. Keep every quantity, the return rule, the unit, and the answer-format constraint available to the downstream model."
+  },
+  {
+    "id": "bbh_boolean_expression_constraints",
+    "title": "Boolean Expression Constraints",
+    "category": "boolean_reasoning",
+    "description": "BBH-style boolean task where operators, truth assignments, and the exact expression must survive compression.",
+    "default_aggressiveness": 0.18,
+    "target_min_reduction": 0.02,
+    "max_elapsed_ms": 4500,
+    "expected_section_kinds": [],
+    "required_substrings": [
+      "A = true",
+      "B = false",
+      "C = false",
+      "D = true"
+    ],
+    "required_whitespace_insensitive_substrings": [
+      "not (A and B) or (C and not D)"
+    ],
+    "forbidden_substrings": [],
+    "text": "Evaluate the boolean expression for a downstream model. The exact expression is not (A and B) or (C and not D). The truth assignments are A = true, B = false, C = false, and D = true. Preserve every operator, parenthesis, and assignment exactly because changing a negation changes the answer. The downstream response should contain only true or false, but the compressed prompt must keep the full reasoning inputs."
+  },
+  {
+    "id": "repobench_style_code_completion",
+    "title": "Code Completion Context",
+    "category": "code_completion",
+    "description": "RepoBench-style case where code context and symbolic constants must remain exact while surrounding prose can shrink.",
+    "default_aggressiveness": 0.25,
+    "target_min_reduction": 0.04,
+    "max_elapsed_ms": 4500,
+    "expected_section_kinds": ["code"],
+    "required_substrings": [
+      "def compute_retry_delay",
+      "base_ms * (2 ** attempt)",
+      "MAX_RETRY_DELAY_MS"
+    ],
+    "forbidden_substrings": [],
+    "text": "Compress the explanation for a code-completion model, but preserve the implementation context exactly. The model must infer the next line without losing constants or arithmetic.\n\n```python\nMAX_RETRY_DELAY_MS = 5000\n\n\ndef compute_retry_delay(attempt: int, base_ms: int = 250) -> int:\n    capped = min(base_ms * (2 ** attempt), MAX_RETRY_DELAY_MS)\n    return capped\n\n\ndef should_retry(status_code: int) -> bool:\n    return status_code in {429, 500, 502, 503, 504}\n```\n\nThe surrounding explanation repeats that exponential backoff is capped and that retryable HTTP status codes are limited to transient failures. Shorten the prose only if the code remains byte-stable."
   }
 ]
