@@ -5,6 +5,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
+from app.benchmark_ui import BENCHMARK_HTML
 from app.compressor import CompressionRuntimeError, PromptCompressionService
 from app.eval_suite import evaluate_compression, load_eval_cases, quality_passed
 from app.eval_ui import EVAL_HTML
@@ -479,6 +480,7 @@ APP_HTML = """
         <p class="subhead">Paste a prompt, compress it, and inspect which words were kept or dropped.</p>
         <nav class="nav-links" aria-label="Primary navigation">
           <a class="nav-link" href="/eval">Eval Suite</a>
+          <a class="nav-link" href="/benchmark">Benchmark</a>
           <a class="nav-link" href="/research">Research</a>
         </nav>
       </div>
@@ -1006,6 +1008,11 @@ def research_index() -> HTMLResponse:
     return HTMLResponse(content=RESEARCH_HTML, headers=DASHBOARD_EMBED_HEADERS)
 
 
+@app.get("/benchmark", response_class=HTMLResponse)
+def benchmark_index() -> HTMLResponse:
+    return HTMLResponse(content=BENCHMARK_HTML, headers=DASHBOARD_EMBED_HEADERS)
+
+
 @app.get("/eval/cases", response_model=list[EvalCaseResponse])
 def list_eval_cases() -> list[EvalCaseResponse]:
     return [
@@ -1121,7 +1128,7 @@ def estimate_tokens(request: TokenEstimateRequest) -> TokenEstimateResponse:
     )
 
 
-@app.post("/compress", response_model=CompressResponse)
+@app.post("/compress", response_model=CompressResponse, response_model_exclude_none=True)
 def compress(
     request: CompressRequest,
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
@@ -1161,6 +1168,11 @@ def compress(
             asdict(section)
             for section in result.output_sections
         ],
+        diagnostics=(
+            asdict(result.diagnostics)
+            if request.include_diagnostics and result.diagnostics is not None
+            else None
+        ),
     )
 
 

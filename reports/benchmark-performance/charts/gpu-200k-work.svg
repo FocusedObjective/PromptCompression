@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="930" height="470" viewBox="0 0 930 470" role="img">
+<rect x="0" y="0" width="930" height="470" fill="#ffffff" rx="0" ry="0" />
+<text x="40" y="38" font-size="22" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">GPU 200k: JSON Ratio Reduces Model Work</text>
+<text x="40" y="62" font-size="13" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="start">Bars are latency; line is LLMLingua chunk count. Both fall as more input bypasses model compression.</text>
+<rect x="86" y="112" width="720" height="270" fill="#ffffff" stroke="#cbd5e1" rx="0" ry="0" />
+<line x1="86" y1="382.0" x2="806" y2="382.0" stroke="#e2e8f0" stroke-width="1" />
+<text x="76" y="386.0" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">0s</text>
+<line x1="86" y1="343.43" x2="806" y2="343.43" stroke="#e2e8f0" stroke-width="1" />
+<text x="76" y="347.43" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">2s</text>
+<line x1="86" y1="304.86" x2="806" y2="304.86" stroke="#e2e8f0" stroke-width="1" />
+<text x="76" y="308.86" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">4s</text>
+<line x1="86" y1="266.29" x2="806" y2="266.29" stroke="#e2e8f0" stroke-width="1" />
+<text x="76" y="270.29" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">6s</text>
+<line x1="86" y1="227.71" x2="806" y2="227.71" stroke="#e2e8f0" stroke-width="1" />
+<text x="76" y="231.71" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">8s</text>
+<line x1="86" y1="189.14" x2="806" y2="189.14" stroke="#e2e8f0" stroke-width="1" />
+<text x="76" y="193.14" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">10s</text>
+<line x1="86" y1="150.57" x2="806" y2="150.57" stroke="#e2e8f0" stroke-width="1" />
+<text x="76" y="154.57" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">12s</text>
+<line x1="86" y1="112.0" x2="806" y2="112.0" stroke="#e2e8f0" stroke-width="1" />
+<text x="76" y="116.0" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">14s</text>
+<text x="816" y="386.0" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#7c3aed" text-anchor="start">0</text>
+<text x="816" y="329.16" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#7c3aed" text-anchor="start">20</text>
+<text x="816" y="272.32" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#7c3aed" text-anchor="start">40</text>
+<text x="816" y="215.47" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#7c3aed" text-anchor="start">60</text>
+<text x="816" y="158.63" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#7c3aed" text-anchor="start">80</text>
+<rect x="134.0" y="113.93" width="48" height="268.07" fill="#2563eb" rx="4" ry="4" opacity="0.88" />
+<text x="158.0" y="105.93" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">13.9s</text>
+<text x="158.0" y="406" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">0%</text>
+<rect x="278.0" y="142.54" width="48" height="239.46" fill="#059669" rx="4" ry="4" opacity="0.88" />
+<text x="302.0" y="134.54" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">12.4s</text>
+<text x="302.0" y="406" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">10%</text>
+<rect x="422.0" y="185.5" width="48" height="196.5" fill="#d97706" rx="4" ry="4" opacity="0.88" />
+<text x="446.0" y="177.5" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">10.2s</text>
+<text x="446.0" y="406" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">25%</text>
+<rect x="566.0" y="242.79" width="48" height="139.21" fill="#dc2626" rx="4" ry="4" opacity="0.88" />
+<text x="590.0" y="234.79" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">7.2s</text>
+<text x="590.0" y="406" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">50%</text>
+<rect x="710.0" y="304.46" width="48" height="77.54" fill="#7c3aed" rx="4" ry="4" opacity="0.88" />
+<text x="734.0" y="296.46" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">4.0s</text>
+<text x="734.0" y="406" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">75%</text>
+<polyline points="158.0,112.0 302.0,140.42 446.0,180.21 590.0,245.58 734.0,313.79" fill="none" stroke="#7c3aed" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="158.0" cy="112.0" r="5" fill="#7c3aed" stroke="#fff" stroke-width="1" />
+<text x="168.0" y="104.0" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#7c3aed" text-anchor="start">95</text>
+<circle cx="302.0" cy="140.42" r="5" fill="#7c3aed" stroke="#fff" stroke-width="1" />
+<text x="312.0" y="132.42" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#7c3aed" text-anchor="start">85</text>
+<circle cx="446.0" cy="180.21" r="5" fill="#7c3aed" stroke="#fff" stroke-width="1" />
+<text x="456.0" y="172.21" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#7c3aed" text-anchor="start">71</text>
+<circle cx="590.0" cy="245.58" r="5" fill="#7c3aed" stroke="#fff" stroke-width="1" />
+<text x="600.0" y="237.58" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#7c3aed" text-anchor="start">48</text>
+<circle cx="734.0" cy="313.79" r="5" fill="#7c3aed" stroke="#fff" stroke-width="1" />
+<text x="744.0" y="305.79" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#7c3aed" text-anchor="start">24</text>
+<text x="446.0" y="436" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="middle">JSON ratio target</text>
+<text x="32" y="247.0" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="middle" transform="rotate(-90 32 247.0)">latency</text>
+<text x="860" y="247.0" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#7c3aed" text-anchor="middle" transform="rotate(90 860 247.0)">chunks</text>
+</svg>

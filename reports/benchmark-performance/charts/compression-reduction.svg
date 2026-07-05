@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="850" height="440" viewBox="0 0 850 440" role="img">
+<rect x="0" y="0" width="850" height="440" fill="#ffffff" rx="0" ry="0" />
+<text x="40" y="38" font-size="22" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">Observed Token Reduction by JSON Ratio</text>
+<text x="40" y="62" font-size="13" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="start">Averages use successful GPU runs, which cover all sizes through 200k; whiskers show min/max.</text>
+<rect x="82" y="108" width="650" height="245" fill="#ffffff" stroke="#cbd5e1" rx="0" ry="0" />
+<line x1="82" y1="353.0" x2="732" y2="353.0" stroke="#e2e8f0" stroke-width="1" />
+<text x="72" y="357.0" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">0%</text>
+<line x1="82" y1="298.56" x2="732" y2="298.56" stroke="#e2e8f0" stroke-width="1" />
+<text x="72" y="302.56" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">10%</text>
+<line x1="82" y1="244.11" x2="732" y2="244.11" stroke="#e2e8f0" stroke-width="1" />
+<text x="72" y="248.11" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">20%</text>
+<line x1="82" y1="189.67" x2="732" y2="189.67" stroke="#e2e8f0" stroke-width="1" />
+<text x="72" y="193.67" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">30%</text>
+<line x1="82" y1="135.22" x2="732" y2="135.22" stroke="#e2e8f0" stroke-width="1" />
+<text x="72" y="139.22" font-size="11" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="end">40%</text>
+<rect x="118.0" y="304.67" width="58" height="48.33" fill="#2563eb" rx="4" ry="4" opacity="0.9" />
+<line x1="147.0" y1="297.09" x2="147.0" y2="307.39" stroke="#111827" stroke-width="1.5" />
+<line x1="138.0" y1="297.09" x2="156.0" y2="297.09" stroke="#111827" stroke-width="1.5" />
+<line x1="138.0" y1="307.39" x2="156.0" y2="307.39" stroke="#111827" stroke-width="1.5" />
+<text x="147.0" y="296.67" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">8.9%</text>
+<text x="147.0" y="377" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">0%</text>
+<rect x="248.0" y="284.4" width="58" height="68.6" fill="#059669" rx="4" ry="4" opacity="0.9" />
+<line x1="277.0" y1="272.44" x2="277.0" y2="290.92" stroke="#111827" stroke-width="1.5" />
+<line x1="268.0" y1="272.44" x2="286.0" y2="272.44" stroke="#111827" stroke-width="1.5" />
+<line x1="268.0" y1="290.92" x2="286.0" y2="290.92" stroke="#111827" stroke-width="1.5" />
+<text x="277.0" y="276.4" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">12.6%</text>
+<text x="277.0" y="377" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">10%</text>
+<rect x="378.0" y="256.46" width="58" height="96.54" fill="#d97706" rx="4" ry="4" opacity="0.9" />
+<line x1="407.0" y1="250.19" x2="407.0" y2="280.68" stroke="#111827" stroke-width="1.5" />
+<line x1="398.0" y1="250.19" x2="416.0" y2="250.19" stroke="#111827" stroke-width="1.5" />
+<line x1="398.0" y1="280.68" x2="416.0" y2="280.68" stroke="#111827" stroke-width="1.5" />
+<text x="407.0" y="248.46" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">17.7%</text>
+<text x="407.0" y="377" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">25%</text>
+<rect x="508.0" y="203.12" width="58" height="149.88" fill="#dc2626" rx="4" ry="4" opacity="0.9" />
+<line x1="537.0" y1="193.26" x2="537.0" y2="259.84" stroke="#111827" stroke-width="1.5" />
+<line x1="528.0" y1="193.26" x2="546.0" y2="193.26" stroke="#111827" stroke-width="1.5" />
+<line x1="528.0" y1="259.84" x2="546.0" y2="259.84" stroke="#111827" stroke-width="1.5" />
+<text x="537.0" y="195.12" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">27.5%</text>
+<text x="537.0" y="377" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">50%</text>
+<rect x="638.0" y="148.76" width="58" height="204.24" fill="#7c3aed" rx="4" ry="4" opacity="0.9" />
+<line x1="667.0" y1="134.19" x2="667.0" y2="208.17" stroke="#111827" stroke-width="1.5" />
+<line x1="658.0" y1="134.19" x2="676.0" y2="134.19" stroke="#111827" stroke-width="1.5" />
+<line x1="658.0" y1="208.17" x2="676.0" y2="208.17" stroke="#111827" stroke-width="1.5" />
+<text x="667.0" y="140.76" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="middle">37.5%</text>
+<text x="667.0" y="377" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="middle">75%</text>
+<text x="407.0" y="407" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="middle">JSON ratio target</text>
+<text x="28" y="230.5" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="middle" transform="rotate(-90 28 230.5)">reduction</text>
+</svg>

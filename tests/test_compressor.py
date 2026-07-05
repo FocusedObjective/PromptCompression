@@ -27,6 +27,10 @@ class LowForceTokenCompressor(RecordingCompressor):
     max_force_token = 1
 
 
+class ZeroForceTokenCompressor(RecordingCompressor):
+    max_force_token = 0
+
+
 class LabelingPlaceholderCompressor(RecordingCompressor):
     def compress_prompt_llmlingua2(
         self,
@@ -181,6 +185,12 @@ def test_non_ui_compression_skips_word_labels_and_sections():
     assert compressor.return_word_label_values == [False]
     assert result.labeled_tokens == []
     assert result.output_sections == []
+    assert result.diagnostics is not None
+    assert result.diagnostics.llmlingua_called is True
+    assert result.diagnostics.timings.llmlingua_ms >= 0
+    assert result.diagnostics.timings.preprocessing_ms >= 0
+    assert result.diagnostics.model_segment_count == 1
+    assert result.diagnostics.compressible_segment_count == 1
 
 
 def test_tenant_force_keep_tokens_are_added_to_model_force_tokens():
@@ -374,12 +384,12 @@ def test_protected_prose_spans_are_placeholdered_before_model_call():
     assert "ORD-7781" not in compressor.inputs[0]
     assert "$15,000" not in compressor.inputs[0]
     assert "2026-08-15" not in compressor.inputs[0]
-    assert compressor.force_tokens_values[0][:4] == [
+    assert compressor.force_tokens_values[0][:2] == [
         "__CK_KEEP_0000__",
         "__CK_KEEP_0001__",
-        "__CK_KEEP_0002__",
-        "__CK_KEEP_0003__",
     ]
+    assert result.diagnostics is not None
+    assert result.diagnostics.placeholder_count == 2
     assert "Do not delete" in result.compressed_text
     assert "ORD-7781" in result.compressed_text
     assert "$15,000" in result.compressed_text
@@ -415,7 +425,7 @@ def test_placeholder_drop_falls_back_to_preprocessed_prompt():
     ]
 
 
-def test_too_many_placeholders_skip_model_for_safety():
+def test_placeholders_are_chunked_to_respect_force_token_limit():
     compressor = LowForceTokenCompressor()
     service = build_service_with_pipeline(compressor)
     text = (
@@ -429,9 +439,74 @@ def test_too_many_placeholders_skip_model_for_safety():
     result = service.compress(text, aggressiveness=0.25)
 
     assert result.compressed_text == (
-        "Please review before. KEEP A Please review middle. KEEP B Please review after."
+        "Review before. KEEP A Review middle. KEEP B Review after."
     )
-    assert compressor.inputs == []
+    assert compressor.inputs == [
+        "Please review before. __CK_KEEP_0000__ Please review middle. ",
+        "__CK_KEEP_0001__ Please review after.",
+    ]
+    assert [tokens[0] for tokens in compressor.force_tokens_values] == [
+        "__CK_KEEP_0000__",
+        "__CK_KEEP_0001__",
+    ]
+    assert result.diagnostics is not None
+    assert result.diagnostics.llmlingua_called is True
+    assert result.diagnostics.llmlingua_call_count == 2
+    assert result.diagnostics.model_chunk_count == 2
+    assert result.diagnostics.chunk_placeholder_max == 1
+    assert result.diagnostics.fallback_used is False
+
+
+def test_unforceable_placeholder_chunk_falls_back_without_corrupting_exact_text():
+    compressor = ZeroForceTokenCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "Please review before. "
+        "<nocompress>KEEP EXACT</nocompress> "
+        "Please review after."
+    )
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    assert result.compressed_text == "Review before. KEEP EXACT Review after."
+    assert compressor.inputs == [
+        "Please review before. ",
+        " Please review after.",
+    ]
+    assert result.diagnostics is not None
+    assert result.diagnostics.llmlingua_called is True
+    assert result.diagnostics.llmlingua_call_count == 2
+    assert result.diagnostics.model_chunk_count == 3
+    assert result.diagnostics.skipped_model_chunk_count == 1
+    assert result.diagnostics.fallback_used is True
+    assert result.diagnostics.fallback_reason == "too_many_placeholders"
+
+
+def test_long_model_input_chunks_by_char_limit_without_placeholders():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.max_model_chunk_chars = 35
+    text = (
+        "Please review alpha content. "
+        "Please review beta content. "
+        "Please review gamma content."
+    )
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    assert compressor.inputs == [
+        "Please review alpha content. ",
+        "Please review beta content. Please ",
+        "review gamma content.",
+    ]
+    assert all(len(chunk) <= service.max_model_chunk_chars for chunk in compressor.inputs)
+    assert result.compressed_text == (
+        "Review alpha content. Review beta content. Please review gamma content."
+    )
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_chunk_count == 3
+    assert result.diagnostics.llmlingua_call_count == 3
+    assert result.diagnostics.chunk_chars_max <= service.max_model_chunk_chars
 
 
 def test_placeholder_sections_keep_model_word_labels_for_ui():

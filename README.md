@@ -72,8 +72,8 @@ Response:
 ```json
 {
   "status": "ok",
-  "deployment_version": "2026.06.30.192552",
-  "deployment_timestamp": "2026-06-30T19:25:52-07:00",
+  "deployment_version": "2026.07.01.110308",
+  "deployment_timestamp": "2026-07-01T11:03:08-07:00",
   "model": "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
   "model_loaded": false
 }
@@ -129,7 +129,8 @@ Request:
   },
   "text": "Prompts are production code. Manage them that way.",
   "aggressiveness": 0.15,
-  "include_sections": false
+  "include_sections": false,
+  "include_diagnostics": false
 }
 ```
 
@@ -162,6 +163,11 @@ Response:
   "output_sections": []
 }
 ```
+
+Set `include_diagnostics` to `true` for benchmark runs. The response then
+includes phase-level timings for preprocessing, segment selection/token gating,
+model load, LLMLingua2, placeholder expansion, uncompressed-output expansion,
+and final token estimates, plus segment counts and model-input sizes.
 
 ### `POST /tokens/estimate`
 
@@ -510,6 +516,50 @@ Later optimization steps:
 - Export the classifier to ONNX.
 - Quantize to INT8.
 - Add metrics for latency, reduction percentage, and model version.
+
+## Performance Benchmark
+
+Use `scripts/benchmark_performance.py` to compare local, Docker, or Cloud Run
+configurations. It generates deterministic prompts with target sizes from 256 to
+200,000 tokens. The default target-size list has a median of 3,000 tokens and is
+crossed with JSON-share targets of `0`, `0.1`, `0.25`, `0.5`, and `0.75`.
+
+For an ad hoc production run, open the deployed benchmark page:
+
+```text
+https://YOUR-CLOUD-RUN-SERVICE-URL/benchmark
+```
+
+The page runs requests from your browser against that deployment's `/compress`
+endpoint, captures the diagnostics timing fields, and provides raw JSONL and
+summary CSV downloads. Use concurrency `1` when comparing Cloud Run CPU/memory
+shapes unless you intentionally want to measure overlapping requests.
+
+Against a deployed service:
+
+```powershell
+$env:API_URL="$env:SERVICE_URL/compress"
+python scripts\benchmark_performance.py `
+  --url $env:API_URL `
+  --repeats 3 `
+  --label "cpu=2" `
+  --label "memory=4Gi"
+```
+
+For IAM-protected Cloud Run, pass an identity token as a header:
+
+```powershell
+$token = gcloud auth print-identity-token
+python scripts\benchmark_performance.py `
+  --url "$env:SERVICE_URL/compress" `
+  --header "Authorization: Bearer $token"
+```
+
+The script writes `raw.jsonl`, `raw.csv`, `summary.csv`, `summary.json`,
+`metadata.json`, and `cases.json` under `data/benchmarks/<timestamp>`. Use
+`summary.csv` for quick size-vs-latency comparisons, and `raw.jsonl` when you
+need to inspect whether time went to preprocessing, token gating, model load, or
+LLMLingua2 for an individual run.
 
 ## Notes
 

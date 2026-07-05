@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="610" viewBox="0 0 1140 610" role="img">
+<rect x="0" y="0" width="1140" height="610" fill="#ffffff" rx="0" ry="0" />
+<text x="40" y="38" font-size="22" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">Timing Breakdown at 100k Tokens</text>
+<text x="40" y="62" font-size="13" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#475569" text-anchor="start">Percent of server elapsed time. Bar labels show total latency.</text>
+<text x="76" y="137" font-size="13" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#334155" text-anchor="start">JSON 0%</text>
+<text x="198" y="132" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">CPU</text>
+<rect x="210" y="118" width="750.23" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="960.23" y="118" width="3.59" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="963.82" y="118" width="3.39" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="967.2" y="118" width="2.14" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="969.34" y="118" width="0.66" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="118" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="132" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">3.6 min</text>
+<text x="198" y="164" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">GPU</text>
+<rect x="210" y="150" width="545.48" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="755.48" y="150" width="78.06" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="833.54" y="150" width="83.0" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="916.54" y="150" width="42.19" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="958.72" y="150" width="11.28" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="150" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="164" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">6.02 s</text>
+<text x="76" y="229" font-size="13" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#334155" text-anchor="start">JSON 10%</text>
+<text x="198" y="224" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">CPU</text>
+<rect x="210" y="210" width="749.75" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="959.75" y="210" width="4.13" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="963.88" y="210" width="3.45" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="967.33" y="210" width="1.85" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="969.19" y="210" width="0.81" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="210" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="224" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">2.9 min</text>
+<text x="198" y="256" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">GPU</text>
+<rect x="210" y="242" width="546.13" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="756.13" y="242" width="80.81" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="836.93" y="242" width="79.1" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="916.03" y="242" width="39.24" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="955.27" y="242" width="14.73" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="242" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="256" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">5.42 s</text>
+<text x="76" y="321" font-size="13" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#334155" text-anchor="start">JSON 25%</text>
+<text x="198" y="316" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">CPU</text>
+<rect x="210" y="302" width="749.48" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="959.48" y="302" width="5.49" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="964.97" y="302" width="2.57" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="967.54" y="302" width="1.63" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="969.16" y="302" width="0.84" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="302" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="316" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">3.0 min</text>
+<text x="198" y="348" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">GPU</text>
+<rect x="210" y="334" width="578.14" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="788.14" y="334" width="84.02" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="872.16" y="334" width="51.11" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="923.26" y="334" width="30.1" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="953.36" y="334" width="16.64" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="334" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="348" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">6.42 s</text>
+<text x="76" y="413" font-size="13" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#334155" text-anchor="start">JSON 50%</text>
+<text x="198" y="408" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">CPU</text>
+<rect x="210" y="394" width="748.51" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="958.51" y="394" width="5.73" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="964.24" y="394" width="2.56" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="966.79" y="394" width="2.04" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="968.83" y="394" width="1.17" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="394" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="408" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">1.7 min</text>
+<text x="198" y="440" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">GPU</text>
+<rect x="210" y="426" width="499.32" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="709.32" y="426" width="133.78" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="843.1" y="426" width="56.15" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="899.26" y="426" width="46.74" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="946.0" y="426" width="24.0" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="426" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="440" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">3.31 s</text>
+<text x="76" y="505" font-size="13" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#334155" text-anchor="start">JSON 75%</text>
+<text x="198" y="500" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">CPU</text>
+<rect x="210" y="486" width="743.46" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="953.46" y="486" width="10.17" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="963.64" y="486" width="2.23" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="965.87" y="486" width="2.25" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="968.12" y="486" width="1.88" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="486" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="500" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">50.4 s</text>
+<text x="198" y="532" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="end">GPU</text>
+<rect x="210" y="518" width="418.56" height="18" fill="#2563eb" rx="2" ry="2" />
+<rect x="628.56" y="518" width="218.18" height="18" fill="#059669" rx="0" ry="0" />
+<rect x="846.74" y="518" width="39.5" height="18" fill="#d97706" rx="0" ry="0" />
+<rect x="886.24" y="518" width="44.08" height="18" fill="#dc2626" rx="0" ry="0" />
+<rect x="930.32" y="518" width="39.68" height="18" fill="#64748b" rx="0" ry="0" />
+<rect x="210" y="518" width="760" height="18" fill="none" stroke="#cbd5e1" rx="3" ry="3" />
+<text x="984" y="532" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#111827" text-anchor="start">1.96 s</text>
+<rect x="210" y="537" width="14" height="14" fill="#2563eb" rx="2" ry="2" />
+<text x="230" y="549" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="start">LLMLingua</text>
+<rect x="388" y="537" width="14" height="14" fill="#059669" rx="2" ry="2" />
+<text x="408" y="549" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="start">Token estimate</text>
+<rect x="566" y="537" width="14" height="14" fill="#d97706" rx="2" ry="2" />
+<text x="586" y="549" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="start">Model input</text>
+<rect x="744" y="537" width="14" height="14" fill="#dc2626" rx="2" ry="2" />
+<text x="764" y="549" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="start">Segment select</text>
+<rect x="922" y="537" width="14" height="14" fill="#64748b" rx="2" ry="2" />
+<text x="942" y="549" font-size="12" font-family="Segoe UI, Arial, sans-serif" font-weight="400" fill="#334155" text-anchor="start">Pre/post/other</text>
+</svg>

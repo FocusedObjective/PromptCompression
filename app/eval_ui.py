@@ -387,6 +387,7 @@ EVAL_HTML = """
         <p class="subhead">Quality checks for preserved data, protected structures, latency, and token savings.</p>
         <nav class="nav-links" aria-label="Primary navigation">
           <a class="nav-link" href="/">Compression UI</a>
+          <a class="nav-link" href="/benchmark">Benchmark</a>
           <a class="nav-link" href="/research">Research</a>
         </nav>
       </div>

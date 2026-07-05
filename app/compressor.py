@@ -8,7 +8,11 @@ from threading import Lock
 from typing import Any
 
 from app.compression_pipeline import CompressionSegment, PromptPreprocessor
-from app.protected_spans import force_tokens_for_text, protected_spans_for_text
+from app.protected_spans import (
+    ProtectedSpan,
+    force_tokens_for_text,
+    protected_spans_for_text,
+)
 from app.tenant_profiles import (
     DEFAULT_PROFILE_ID,
     DEFAULT_PROFILE_SOURCE,
@@ -29,12 +33,36 @@ MIN_SEGMENT_TOKENS = int(os.getenv("COMPRESSOR_MIN_SEGMENT_TOKENS", "24"))
 PLACEHOLDER_PREFIX = "__CK_KEEP_"
 PLACEHOLDER_SUFFIX = "__"
 DEFAULT_MAX_FORCE_TOKENS = 100
+DEFAULT_PLACEHOLDER_CHUNK_TARGET = int(
+    os.getenv("COMPRESSOR_PLACEHOLDER_CHUNK_TARGET", "80")
+)
+DEFAULT_MODEL_CHUNK_CHARS = int(os.getenv("COMPRESSOR_MODEL_CHUNK_CHARS", "24000"))
+PROTECTED_SPAN_COALESCE_GAP_CHARS = int(
+    os.getenv("COMPRESSOR_PROTECTED_SPAN_COALESCE_GAP_CHARS", "24")
+)
+PROTECTED_SPAN_COALESCE_MAX_CHARS = int(
+    os.getenv("COMPRESSOR_PROTECTED_SPAN_COALESCE_MAX_CHARS", "240")
+)
 BASE_SLOT_ID = "base"
 ADAPTER_SLOT_ENV = "COMPRESSOR_ADAPTER_SLOTS"
 ADAPTER_ROOT_ENV = "COMPRESSOR_ADAPTER_ROOT"
 PRELOAD_SLOT_ENV = "COMPRESSOR_PRELOAD_SLOTS"
 ADAPTER_MODEL_FILENAMES = ("adapter_model.safetensors", "adapter_model.bin")
 ADAPTER_SLOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+TIMED_PHASES = (
+    "target_rate_ms",
+    "preprocessing_ms",
+    "force_drop_ms",
+    "segment_selection_ms",
+    "model_load_ms",
+    "model_input_ms",
+    "force_tokens_ms",
+    "llmlingua_ms",
+    "placeholder_validation_ms",
+    "model_expand_ms",
+    "uncompressed_expand_ms",
+    "token_estimate_ms",
+)
 
 
 class CompressionRuntimeError(RuntimeError):
@@ -73,6 +101,48 @@ class CompressionResult:
     compression_profile_source: str = DEFAULT_PROFILE_SOURCE
     training_sample_recorded: bool = False
     token_estimator: str = REGEX_TOKEN_ESTIMATOR
+    diagnostics: "CompressionDiagnostics | None" = None
+
+
+@dataclass(frozen=True)
+class CompressionTiming:
+    total_ms: float
+    target_rate_ms: float
+    preprocessing_ms: float
+    force_drop_ms: float
+    segment_selection_ms: float
+    model_load_ms: float
+    model_input_ms: float
+    force_tokens_ms: float
+    llmlingua_ms: float
+    placeholder_validation_ms: float
+    model_expand_ms: float
+    uncompressed_expand_ms: float
+    token_estimate_ms: float
+    other_ms: float
+
+
+@dataclass(frozen=True)
+class CompressionDiagnostics:
+    timings: CompressionTiming
+    input_chars: int
+    output_chars: int
+    segment_count: int
+    compressible_segment_count: int
+    model_segment_count: int
+    skipped_segment_count: int
+    placeholder_count: int
+    model_input_chars: int
+    segment_kinds: dict[str, int]
+    llmlingua_called: bool
+    fallback_used: bool
+    fallback_reason: str | None = None
+    model_chunk_count: int = 0
+    llmlingua_call_count: int = 0
+    skipped_model_chunk_count: int = 0
+    chunk_placeholder_max: int = 0
+    chunk_placeholder_avg: float = 0.0
+    chunk_chars_max: int = 0
 
 
 @dataclass(frozen=True)
@@ -88,10 +158,40 @@ class _PreparedModelInput:
 
 
 @dataclass(frozen=True)
+class _ModelInputChunk:
+    text: str
+    placeholders: list[_CompressionPlaceholder]
+
+
+@dataclass(frozen=True)
+class _ChunkedCompressionStats:
+    chunk_count: int = 0
+    llmlingua_call_count: int = 0
+    skipped_chunk_count: int = 0
+    placeholder_counts: tuple[int, ...] = ()
+    char_counts: tuple[int, ...] = ()
+    fallback_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _ChunkedCompressionResult:
+    expanded: "_ExpandedCompression"
+    stats: _ChunkedCompressionStats
+
+
+@dataclass(frozen=True)
 class _ExpandedCompression:
     text: str
     labeled_tokens: list[CompressionToken]
     output_sections: list[CompressionOutputSection]
+
+
+def _elapsed_ms(start: float) -> float:
+    return (time.perf_counter() - start) * 1000
+
+
+def _add_timing(timings: dict[str, float], key: str, elapsed_ms: float) -> None:
+    timings[key] = timings.get(key, 0.0) + elapsed_ms
 
 
 class PromptCompressionService:
@@ -108,6 +208,16 @@ class PromptCompressionService:
         self._preload_slots = _parse_slot_list(os.getenv(PRELOAD_SLOT_ENV, ""))
         self._lock = Lock()
         self.preprocessor = PromptPreprocessor()
+        self.placeholder_chunk_target = max(0, DEFAULT_PLACEHOLDER_CHUNK_TARGET)
+        self.max_model_chunk_chars = max(0, DEFAULT_MODEL_CHUNK_CHARS)
+        self.protected_span_coalesce_gap_chars = max(
+            0,
+            PROTECTED_SPAN_COALESCE_GAP_CHARS,
+        )
+        self.protected_span_coalesce_max_chars = max(
+            0,
+            PROTECTED_SPAN_COALESCE_MAX_CHARS,
+        )
 
     @property
     def is_loaded(self) -> bool:
@@ -317,6 +427,56 @@ class PromptCompressionService:
     def _placeholder_for_index(self, index: int) -> str:
         return f"{PLACEHOLDER_PREFIX}{index:04d}{PLACEHOLDER_SUFFIX}"
 
+    def _placeholder_chunk_limit(self, max_force_tokens: int) -> int:
+        if max_force_tokens <= 0:
+            return 0
+        if self.placeholder_chunk_target <= 0:
+            return max_force_tokens
+        return min(max_force_tokens, self.placeholder_chunk_target)
+
+    def _protected_spans_for_model_input(self, text: str) -> list[ProtectedSpan]:
+        spans = protected_spans_for_text(text)
+        if not spans:
+            return spans
+        return self._coalesce_protected_spans(text, spans)
+
+    def _coalesce_protected_spans(
+        self,
+        text: str,
+        spans: list[ProtectedSpan],
+    ) -> list[ProtectedSpan]:
+        if (
+            not spans
+            or self.protected_span_coalesce_gap_chars <= 0
+            or self.protected_span_coalesce_max_chars <= 0
+        ):
+            return spans
+
+        coalesced: list[ProtectedSpan] = []
+        current = spans[0]
+        for span in spans[1:]:
+            gap = text[current.end : span.start]
+            merged_text = text[current.start : span.end]
+            if (
+                len(gap) <= self.protected_span_coalesce_gap_chars
+                and len(merged_text) <= self.protected_span_coalesce_max_chars
+                and "\n" not in gap
+                and re.search(r"[.!?]\s", gap) is None
+            ):
+                current = ProtectedSpan(
+                    start=current.start,
+                    end=span.end,
+                    text=merged_text,
+                    kind="protected_group",
+                )
+                continue
+
+            coalesced.append(current)
+            current = span
+
+        coalesced.append(current)
+        return coalesced
+
     def _prepare_model_input(
         self,
         segments: list[CompressionSegment],
@@ -348,7 +508,7 @@ class PromptCompressionService:
         ):
             if should_compress:
                 cursor = 0
-                for span in protected_spans_for_text(segment.text):
+                for span in self._protected_spans_for_model_input(segment.text):
                     parts.append(segment.text[cursor:span.start])
                     append_placeholder(
                         CompressionSegment(
@@ -367,6 +527,102 @@ class PromptCompressionService:
             text="".join(parts),
             placeholders=placeholders,
         )
+
+    def _split_prepared_model_input(
+        self,
+        prepared: _PreparedModelInput,
+        placeholder_limit: int,
+    ) -> list[_ModelInputChunk]:
+        chunks: list[_ModelInputChunk] = []
+        parts: list[str] = []
+        placeholders: list[_CompressionPlaceholder] = []
+        char_count = 0
+
+        def flush() -> None:
+            nonlocal parts, placeholders, char_count
+            if not parts:
+                return
+            chunks.append(
+                _ModelInputChunk(
+                    text="".join(parts),
+                    placeholders=placeholders,
+                )
+            )
+            parts = []
+            placeholders = []
+            char_count = 0
+
+        def append_unit(
+            text: str,
+            unit_placeholders: list[_CompressionPlaceholder],
+        ) -> None:
+            nonlocal char_count
+            if not text:
+                return
+
+            exceeds_placeholder_limit = (
+                bool(unit_placeholders)
+                and len(placeholders) + len(unit_placeholders) > placeholder_limit
+            )
+            exceeds_char_limit = (
+                self.max_model_chunk_chars > 0
+                and char_count + len(text) > self.max_model_chunk_chars
+            )
+            current_exceeds_placeholder_limit = (
+                len(placeholders) > placeholder_limit
+            )
+            if parts and (
+                exceeds_placeholder_limit
+                or exceeds_char_limit
+                or current_exceeds_placeholder_limit
+            ):
+                flush()
+
+            parts.append(text)
+            placeholders.extend(unit_placeholders)
+            char_count += len(text)
+
+        cursor = 0
+        for placeholder in prepared.placeholders:
+            position = prepared.text.find(placeholder.token, cursor)
+            if position < cursor:
+                continue
+
+            for text_part in self._split_text_for_model_chunks(
+                prepared.text[cursor:position]
+            ):
+                append_unit(text_part, [])
+
+            append_unit(placeholder.token, [placeholder])
+            cursor = position + len(placeholder.token)
+
+        for text_part in self._split_text_for_model_chunks(prepared.text[cursor:]):
+            append_unit(text_part, [])
+
+        flush()
+        return chunks
+
+    def _split_text_for_model_chunks(self, text: str) -> list[str]:
+        if (
+            not text
+            or self.max_model_chunk_chars <= 0
+            or len(text) <= self.max_model_chunk_chars
+        ):
+            return [text] if text else []
+
+        chunks: list[str] = []
+        cursor = 0
+        while cursor < len(text):
+            end = min(len(text), cursor + self.max_model_chunk_chars)
+            if end < len(text):
+                newline_break = text.rfind("\n", cursor + 1, end)
+                space_break = text.rfind(" ", cursor + 1, end)
+                break_at = max(newline_break, space_break)
+                if break_at > cursor:
+                    end = break_at + 1
+            chunks.append(text[cursor:end])
+            cursor = end
+        return chunks
 
     def _force_tokens_for_model_input(
         self,
@@ -563,6 +819,98 @@ class PromptCompressionService:
             )
         )
 
+    def _append_uncompressed_prose_section(
+        self,
+        chunk: str,
+        labeled_tokens: list[CompressionToken],
+        output_sections: list[CompressionOutputSection],
+        include_sections: bool,
+    ) -> None:
+        if not include_sections or not chunk:
+            return
+        labels = (
+            [CompressionToken(text=chunk, kept=True)]
+            if chunk.strip()
+            else []
+        )
+        labeled_tokens.extend(labels)
+        output_sections.append(
+            CompressionOutputSection(
+                text=chunk,
+                kind="prose",
+                compressed=False,
+                protected=False,
+                labeled_tokens=labels,
+            )
+        )
+
+    def _expand_prepared_chunk_uncompressed(
+        self,
+        chunk: _ModelInputChunk,
+        include_sections: bool,
+    ) -> _ExpandedCompression:
+        if not chunk.placeholders:
+            labeled_tokens: list[CompressionToken] = []
+            output_sections: list[CompressionOutputSection] = []
+            self._append_uncompressed_prose_section(
+                chunk.text,
+                labeled_tokens,
+                output_sections,
+                include_sections=include_sections,
+            )
+            return _ExpandedCompression(
+                text=chunk.text,
+                labeled_tokens=labeled_tokens,
+                output_sections=output_sections,
+            )
+
+        output_parts: list[str] = []
+        labeled_tokens = []
+        output_sections = []
+        cursor = 0
+
+        for placeholder in chunk.placeholders:
+            position = chunk.text.find(placeholder.token, cursor)
+            if position < cursor:
+                continue
+
+            prose = chunk.text[cursor:position]
+            output_parts.append(prose)
+            self._append_uncompressed_prose_section(
+                prose,
+                labeled_tokens,
+                output_sections,
+                include_sections=include_sections,
+            )
+
+            segment = placeholder.segment
+            output_parts.append(segment.text)
+            segment_labels = self._uncompressed_segment_labels(
+                segment,
+                include_sections=include_sections,
+            )
+            labeled_tokens.extend(segment_labels)
+            if include_sections:
+                output_sections.append(
+                    self._section_for_uncompressed_segment(segment, segment_labels)
+                )
+            cursor = position + len(placeholder.token)
+
+        tail = chunk.text[cursor:]
+        output_parts.append(tail)
+        self._append_uncompressed_prose_section(
+            tail,
+            labeled_tokens,
+            output_sections,
+            include_sections=include_sections,
+        )
+
+        return _ExpandedCompression(
+            text="".join(output_parts),
+            labeled_tokens=labeled_tokens,
+            output_sections=output_sections,
+        )
+
     def _expand_compressed_model_text(
         self,
         compressed_text: str,
@@ -645,56 +993,191 @@ class PromptCompressionService:
         target_rate: float,
         include_sections: bool,
         tenant_profile: TenantCompressionProfile,
-    ) -> _ExpandedCompression | None:
-        required_tokens = [placeholder.token for placeholder in prepared.placeholders]
+        timings: dict[str, float] | None = None,
+    ) -> _ChunkedCompressionResult:
         max_force_tokens = self._max_force_tokens(compressor)
-        if len(required_tokens) > max_force_tokens:
-            LOGGER.warning(
-                "Skipping model compression because %s placeholders exceed "
-                "max_force_token=%s",
-                len(required_tokens),
-                max_force_tokens,
-            )
-            return None
+        placeholder_limit = self._placeholder_chunk_limit(max_force_tokens)
+        chunks = self._split_prepared_model_input(
+            prepared,
+            placeholder_limit=placeholder_limit,
+        )
 
+        output_parts: list[str] = []
+        labeled_tokens: list[CompressionToken] = []
+        output_sections: list[CompressionOutputSection] = []
+        placeholder_counts: list[int] = []
+        char_counts: list[int] = []
+        llmlingua_call_count = 0
+        skipped_chunk_count = 0
+        fallback_reason: str | None = None
+
+        for chunk in chunks:
+            placeholder_count = len(chunk.placeholders)
+            placeholder_counts.append(placeholder_count)
+            char_counts.append(len(chunk.text))
+            required_tokens = [placeholder.token for placeholder in chunk.placeholders]
+
+            if len(required_tokens) > max_force_tokens:
+                LOGGER.warning(
+                    "Skipping model chunk because %s placeholders exceed "
+                    "max_force_token=%s",
+                    len(required_tokens),
+                    max_force_tokens,
+                )
+                skipped_chunk_count += 1
+                fallback_reason = fallback_reason or "too_many_placeholders"
+                fallback_expand_start = time.perf_counter()
+                expanded_chunk = self._expand_prepared_chunk_uncompressed(
+                    chunk,
+                    include_sections=include_sections,
+                )
+                if timings is not None:
+                    _add_timing(
+                        timings,
+                        "uncompressed_expand_ms",
+                        _elapsed_ms(fallback_expand_start),
+                    )
+                self._append_expanded_chunk(
+                    expanded_chunk,
+                    output_parts,
+                    labeled_tokens,
+                    output_sections,
+                )
+                continue
+
+            llmlingua_call_count += 1
+            expanded_chunk = self._compress_prepared_model_chunk(
+                compressor=compressor,
+                chunk=chunk,
+                target_rate=target_rate,
+                include_sections=include_sections,
+                tenant_profile=tenant_profile,
+                max_force_tokens=max_force_tokens,
+                timings=timings,
+            )
+            if expanded_chunk is None:
+                skipped_chunk_count += 1
+                if fallback_reason is None:
+                    fallback_reason = "placeholder_validation_failed"
+                fallback_expand_start = time.perf_counter()
+                expanded_chunk = self._expand_prepared_chunk_uncompressed(
+                    chunk,
+                    include_sections=include_sections,
+                )
+                if timings is not None:
+                    _add_timing(
+                        timings,
+                        "uncompressed_expand_ms",
+                        _elapsed_ms(fallback_expand_start),
+                    )
+            self._append_expanded_chunk(
+                expanded_chunk,
+                output_parts,
+                labeled_tokens,
+                output_sections,
+            )
+
+        return _ChunkedCompressionResult(
+            expanded=_ExpandedCompression(
+                text="".join(output_parts),
+                labeled_tokens=labeled_tokens,
+                output_sections=output_sections,
+            ),
+            stats=_ChunkedCompressionStats(
+                chunk_count=len(chunks),
+                llmlingua_call_count=llmlingua_call_count,
+                skipped_chunk_count=skipped_chunk_count,
+                placeholder_counts=tuple(placeholder_counts),
+                char_counts=tuple(char_counts),
+                fallback_reason=fallback_reason,
+            ),
+        )
+
+    def _append_expanded_chunk(
+        self,
+        expanded_chunk: _ExpandedCompression,
+        output_parts: list[str],
+        labeled_tokens: list[CompressionToken],
+        output_sections: list[CompressionOutputSection],
+    ) -> None:
+        output_parts.append(expanded_chunk.text)
+        labeled_tokens.extend(expanded_chunk.labeled_tokens)
+        output_sections.extend(expanded_chunk.output_sections)
+
+    def _compress_prepared_model_chunk(
+        self,
+        *,
+        compressor: Any,
+        chunk: _ModelInputChunk,
+        target_rate: float,
+        include_sections: bool,
+        tenant_profile: TenantCompressionProfile,
+        max_force_tokens: int,
+        timings: dict[str, float] | None,
+    ) -> _ExpandedCompression | None:
+        required_tokens = [placeholder.token for placeholder in chunk.placeholders]
+
+        force_tokens_start = time.perf_counter()
         force_tokens = self._force_tokens_for_model_input(
-            prepared.text,
+            chunk.text,
             required_tokens=required_tokens,
             max_tokens=max_force_tokens,
             priority_tokens=list(tenant_profile.force_keep_tokens),
         )
+        if timings is not None:
+            _add_timing(timings, "force_tokens_ms", _elapsed_ms(force_tokens_start))
 
         try:
+            llmlingua_start = time.perf_counter()
             raw_result = compressor.compress_prompt_llmlingua2(
-                prepared.text,
+                chunk.text,
                 rate=target_rate,
                 force_tokens=force_tokens,
                 return_word_label=include_sections,
             )
+            if timings is not None:
+                _add_timing(timings, "llmlingua_ms", _elapsed_ms(llmlingua_start))
         except Exception as exc:  # pragma: no cover - model-specific runtime path
             message = str(exc) or exc.__class__.__name__
             raise CompressionRuntimeError(f"Compression failed: {message}") from exc
 
         compressed_model_text = raw_result.get("compressed_prompt", "")
+        placeholder_validation_start = time.perf_counter()
         if not self._has_valid_placeholders(
             compressed_model_text,
-            prepared.placeholders,
+            chunk.placeholders,
         ):
+            if timings is not None:
+                _add_timing(
+                    timings,
+                    "placeholder_validation_ms",
+                    _elapsed_ms(placeholder_validation_start),
+                )
             LOGGER.warning("Skipping compressed output because placeholders changed")
             return None
+        if timings is not None:
+            _add_timing(
+                timings,
+                "placeholder_validation_ms",
+                _elapsed_ms(placeholder_validation_start),
+            )
 
+        expand_start = time.perf_counter()
         model_labeled_tokens: list[CompressionToken] = []
         if include_sections:
             model_labeled_tokens = self.parse_word_labels(
                 raw_result.get("fn_labeled_original_prompt", "")
             )
 
-        return self._expand_compressed_model_text(
+        expanded = self._expand_compressed_model_text(
             compressed_model_text,
-            prepared.placeholders,
+            chunk.placeholders,
             include_sections=include_sections,
             model_labeled_tokens=model_labeled_tokens,
         )
+        if timings is not None:
+            _add_timing(timings, "model_expand_ms", _elapsed_ms(expand_start))
+        return expanded
 
     def _should_compress_segment(
         self,
@@ -721,15 +1204,25 @@ class PromptCompressionService:
         tenant_profile: TenantCompressionProfile | None = None,
     ) -> CompressionResult:
         start = time.perf_counter()
+        timings = dict.fromkeys(TIMED_PHASES, 0.0)
         profile = tenant_profile or TenantCompressionProfile()
+
+        phase_start = time.perf_counter()
         target_rate = self.target_rate_for_aggressiveness(
             aggressiveness,
             min_rate_override=profile.min_rate,
         )
-        segments = self._apply_force_drop_phrases(
-            self.preprocessor.prepare(text),
-            profile,
-        )
+        timings["target_rate_ms"] = _elapsed_ms(phase_start)
+
+        phase_start = time.perf_counter()
+        prepared_segments = self.preprocessor.prepare(text)
+        timings["preprocessing_ms"] = _elapsed_ms(phase_start)
+
+        phase_start = time.perf_counter()
+        segments = self._apply_force_drop_phrases(prepared_segments, profile)
+        timings["force_drop_ms"] = _elapsed_ms(phase_start)
+
+        phase_start = time.perf_counter()
         should_compress_segments = [
             self._should_compress_segment(segment, target_rate, profile)
             for segment in segments
@@ -743,35 +1236,53 @@ class PromptCompressionService:
             )
             if should_compress
         ]
+        timings["segment_selection_ms"] = _elapsed_ms(phase_start)
 
+        prepared: _PreparedModelInput | None = None
+        chunk_stats: _ChunkedCompressionStats | None = None
+        fallback_used = False
+        fallback_reason = None
+        llmlingua_called = False
         if compressible_segments:
+            phase_start = time.perf_counter()
             compressor = self._load_for_profile(profile)
+            timings["model_load_ms"] = _elapsed_ms(phase_start)
+
+            phase_start = time.perf_counter()
             prepared = self._prepare_model_input(segments, should_compress_segments)
-            expanded = self._compress_prepared_model_input(
+            timings["model_input_ms"] = _elapsed_ms(phase_start)
+
+            chunked_result = self._compress_prepared_model_input(
                 compressor,
                 prepared,
                 target_rate,
                 include_sections=include_sections,
                 tenant_profile=profile,
+                timings=timings,
             )
-            if expanded is None:
-                expanded = self._uncompressed_result_parts(
-                    segments,
-                    include_sections=include_sections,
-                )
+            expanded = chunked_result.expanded
+            chunk_stats = chunked_result.stats
+            llmlingua_called = chunk_stats.llmlingua_call_count > 0
+            if chunk_stats.skipped_chunk_count:
+                fallback_used = True
+                fallback_reason = chunk_stats.fallback_reason
         else:
+            phase_start = time.perf_counter()
             expanded = self._uncompressed_result_parts(
                 segments,
                 include_sections=include_sections,
             )
+            timings["uncompressed_expand_ms"] = _elapsed_ms(phase_start)
 
         compressed_text = expanded.text
+        phase_start = time.perf_counter()
         original_estimate = self.estimate_compression_tokens(text, profile)
         compressed_estimate = (
             original_estimate
             if compressed_text == text
             else self.estimate_compression_tokens(compressed_text, profile)
         )
+        timings["token_estimate_ms"] = _elapsed_ms(phase_start)
 
         reduction = 0.0
         if original_estimate.count:
@@ -779,6 +1290,20 @@ class PromptCompressionService:
                 0.0,
                 1.0 - (compressed_estimate.count / original_estimate.count),
             )
+        total_ms = _elapsed_ms(start)
+        diagnostics = self._build_diagnostics(
+            timings=timings,
+            total_ms=total_ms,
+            input_text=text,
+            compressed_text=compressed_text,
+            segments=segments,
+            should_compress_segments=should_compress_segments,
+            prepared=prepared,
+            chunk_stats=chunk_stats,
+            llmlingua_called=llmlingua_called,
+            fallback_used=fallback_used,
+            fallback_reason=fallback_reason,
+        )
 
         return CompressionResult(
             compressed_text=compressed_text,
@@ -788,7 +1313,7 @@ class PromptCompressionService:
             aggressiveness=max(0.0, min(1.0, aggressiveness)),
             target_rate=target_rate,
             model=self.model_name,
-            elapsed_ms=(time.perf_counter() - start) * 1000,
+            elapsed_ms=total_ms,
             labeled_tokens=expanded.labeled_tokens,
             output_sections=expanded.output_sections,
             tenant_id=profile.tenant_id,
@@ -798,6 +1323,83 @@ class PromptCompressionService:
             token_estimator=merge_token_estimator_names(
                 [original_estimate.estimator, compressed_estimate.estimator]
             ),
+            diagnostics=diagnostics,
+        )
+
+    def _build_diagnostics(
+        self,
+        *,
+        timings: dict[str, float],
+        total_ms: float,
+        input_text: str,
+        compressed_text: str,
+        segments: list[CompressionSegment],
+        should_compress_segments: list[bool],
+        prepared: _PreparedModelInput | None,
+        chunk_stats: _ChunkedCompressionStats | None,
+        llmlingua_called: bool,
+        fallback_used: bool,
+        fallback_reason: str | None,
+    ) -> CompressionDiagnostics:
+        segment_kinds: dict[str, int] = {}
+        for segment in segments:
+            segment_kinds[segment.kind] = segment_kinds.get(segment.kind, 0) + 1
+
+        accounted_ms = sum(timings.get(phase, 0.0) for phase in TIMED_PHASES)
+        timing = CompressionTiming(
+            total_ms=total_ms,
+            target_rate_ms=timings["target_rate_ms"],
+            preprocessing_ms=timings["preprocessing_ms"],
+            force_drop_ms=timings["force_drop_ms"],
+            segment_selection_ms=timings["segment_selection_ms"],
+            model_load_ms=timings["model_load_ms"],
+            model_input_ms=timings["model_input_ms"],
+            force_tokens_ms=timings["force_tokens_ms"],
+            llmlingua_ms=timings["llmlingua_ms"],
+            placeholder_validation_ms=timings["placeholder_validation_ms"],
+            model_expand_ms=timings["model_expand_ms"],
+            uncompressed_expand_ms=timings["uncompressed_expand_ms"],
+            token_estimate_ms=timings["token_estimate_ms"],
+            other_ms=max(0.0, total_ms - accounted_ms),
+        )
+
+        model_segment_count = sum(
+            1 for should_compress in should_compress_segments if should_compress
+        )
+        placeholder_counts = (
+            chunk_stats.placeholder_counts if chunk_stats is not None else ()
+        )
+        char_counts = chunk_stats.char_counts if chunk_stats is not None else ()
+        return CompressionDiagnostics(
+            timings=timing,
+            input_chars=len(input_text),
+            output_chars=len(compressed_text),
+            segment_count=len(segments),
+            compressible_segment_count=sum(
+                1 for segment in segments if segment.compressible
+            ),
+            model_segment_count=model_segment_count,
+            skipped_segment_count=len(segments) - model_segment_count,
+            placeholder_count=0 if prepared is None else len(prepared.placeholders),
+            model_input_chars=0 if prepared is None else len(prepared.text),
+            segment_kinds=segment_kinds,
+            llmlingua_called=llmlingua_called,
+            fallback_used=fallback_used,
+            fallback_reason=fallback_reason,
+            model_chunk_count=0 if chunk_stats is None else chunk_stats.chunk_count,
+            llmlingua_call_count=(
+                0 if chunk_stats is None else chunk_stats.llmlingua_call_count
+            ),
+            skipped_model_chunk_count=(
+                0 if chunk_stats is None else chunk_stats.skipped_chunk_count
+            ),
+            chunk_placeholder_max=max(placeholder_counts, default=0),
+            chunk_placeholder_avg=(
+                0.0
+                if not placeholder_counts
+                else sum(placeholder_counts) / len(placeholder_counts)
+            ),
+            chunk_chars_max=max(char_counts, default=0),
         )
 
 

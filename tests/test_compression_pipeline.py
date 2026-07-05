@@ -80,18 +80,19 @@ and html?"""
 
     assert [section.kind for section in result.output_sections].count("html") == 2
     assert any(
-        section.kind == "protected" and section.text == "Do not remove"
+        section.kind == "protected" and section.text == "Do not remove API"
         for section in result.output_sections
     )
     assert compressor.inputs == [
         "__CK_KEEP_0000__\n\n"
-        "__CK_KEEP_0001__ __CK_KEEP_0002__ keys, URLs, dates, or hard constraints.\n\n"
-        "__CK_KEEP_0003__\n\n"
+        "__CK_KEEP_0001__ keys, URLs, dates, or hard constraints.\n\n"
+        "__CK_KEEP_0002__\n\n"
         "and html?"
     ]
-    assert compressor.force_tokens_values[0][:2] == [
+    assert compressor.force_tokens_values[0][:3] == [
         "__CK_KEEP_0000__",
         "__CK_KEEP_0001__",
+        "__CK_KEEP_0002__",
     ]
     assert "  <a>a</a>   <b>b</b>" in result.compressed_text
     assert "</html>\n\nDo not remove" in result.compressed_text

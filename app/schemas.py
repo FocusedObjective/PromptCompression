@@ -64,6 +64,10 @@ class CompressRequest(BaseModel):
             "Disabled by default to reduce latency and payload size."
         ),
     )
+    include_diagnostics: bool = Field(
+        default=False,
+        description="Include phase-level timing and request-shape diagnostics.",
+    )
 
 
 class LabeledToken(BaseModel):
@@ -77,6 +81,45 @@ class OutputSection(BaseModel):
     compressed: bool
     protected: bool
     labeled_tokens: list[LabeledToken] = Field(default_factory=list)
+
+
+class CompressionTimingResponse(BaseModel):
+    total_ms: float
+    target_rate_ms: float
+    preprocessing_ms: float
+    force_drop_ms: float
+    segment_selection_ms: float
+    model_load_ms: float
+    model_input_ms: float
+    force_tokens_ms: float
+    llmlingua_ms: float
+    placeholder_validation_ms: float
+    model_expand_ms: float
+    uncompressed_expand_ms: float
+    token_estimate_ms: float
+    other_ms: float
+
+
+class CompressionDiagnosticsResponse(BaseModel):
+    timings: CompressionTimingResponse
+    input_chars: int
+    output_chars: int
+    segment_count: int
+    compressible_segment_count: int
+    model_segment_count: int
+    skipped_segment_count: int
+    placeholder_count: int
+    model_input_chars: int
+    segment_kinds: dict[str, int]
+    llmlingua_called: bool
+    fallback_used: bool
+    fallback_reason: str | None = None
+    model_chunk_count: int = 0
+    llmlingua_call_count: int = 0
+    skipped_model_chunk_count: int = 0
+    chunk_placeholder_max: int = 0
+    chunk_placeholder_avg: float = 0.0
+    chunk_chars_max: int = 0
 
 
 class CompressResponse(BaseModel):
@@ -95,6 +138,7 @@ class CompressResponse(BaseModel):
     elapsed_ms: float
     labeled_tokens: list[LabeledToken] = Field(default_factory=list)
     output_sections: list[OutputSection] = Field(default_factory=list)
+    diagnostics: CompressionDiagnosticsResponse | None = None
 
 
 class V1CompressionSettings(BaseModel):

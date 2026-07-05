@@ -1,7 +1,13 @@
 from fastapi.testclient import TestClient
 
 from app import main
-from app.compressor import CompressionOutputSection, CompressionResult, CompressionToken
+from app.compressor import (
+    CompressionDiagnostics,
+    CompressionOutputSection,
+    CompressionResult,
+    CompressionTiming,
+    CompressionToken,
+)
 from app.eval_suite import EvalCase
 from app.schemas import (
     CompressRequest,
@@ -70,6 +76,35 @@ class FakeCompressionService:
                 "default" if tenant_profile is None else tenant_profile.source
             ),
             training_sample_recorded=False,
+            diagnostics=CompressionDiagnostics(
+                timings=CompressionTiming(
+                    total_ms=12.5,
+                    target_rate_ms=0.1,
+                    preprocessing_ms=1.0,
+                    force_drop_ms=0.1,
+                    segment_selection_ms=2.0,
+                    model_load_ms=0.0,
+                    model_input_ms=0.2,
+                    force_tokens_ms=0.1,
+                    llmlingua_ms=8.0,
+                    placeholder_validation_ms=0.1,
+                    model_expand_ms=0.4,
+                    uncompressed_expand_ms=0.0,
+                    token_estimate_ms=0.4,
+                    other_ms=0.1,
+                ),
+                input_chars=len(text),
+                output_chars=len("Prompts code."),
+                segment_count=1,
+                compressible_segment_count=1,
+                model_segment_count=1,
+                skipped_segment_count=0,
+                placeholder_count=0,
+                model_input_chars=len(text),
+                segment_kinds={"prose": 1},
+                llmlingua_called=True,
+                fallback_used=False,
+            ),
         )
 
 
@@ -79,6 +114,7 @@ def test_index_returns_prompt_compression_ui():
 
     assert "Prompt Compression" in body
     assert "Eval Suite" in body
+    assert 'href="/benchmark"' in body
     assert 'href="/research"' in body
     assert "Dropped Words Highlighted" in body
     assert "JSON compressed to TOON" in body
@@ -136,8 +172,21 @@ def test_eval_index_returns_eval_ui():
 
     assert "Prompt Compression Eval" in body
     assert "Run Selected" in body
+    assert 'href="/benchmark"' in body
     assert 'href="/research"' in body
     assert "/eval/run" in body
+
+
+def test_benchmark_index_returns_benchmark_page():
+    response = main.benchmark_index()
+    body = response.body.decode()
+
+    assert "Performance Benchmark" in body
+    assert 'href="/eval"' in body
+    assert "include_diagnostics" in body
+    assert "Download Raw JSONL" in body
+    assert "LLMLingua p50" in body
+    assert "Model calls" in body
 
 
 def test_research_index_returns_research_page():
@@ -145,6 +194,7 @@ def test_research_index_returns_research_page():
     body = response.body.decode()
 
     assert "Prompt Compression Research" in body
+    assert 'href="/benchmark"' in body
     assert "LLMLingua-2 BERT-base" in body
     assert "PCToolkit Assessment" in body
     assert "not as a production runtime dependency" in body
@@ -235,6 +285,24 @@ def test_compress_response_omits_sections_by_default(monkeypatch):
     assert response.training_sample_recorded is False
     assert [token.model_dump() for token in response.labeled_tokens] == []
     assert response.output_sections == []
+    assert response.diagnostics is None
+
+
+def test_compress_response_includes_diagnostics_when_requested(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress(
+        CompressRequest(
+            text="Prompts are code.",
+            aggressiveness=0.25,
+            include_diagnostics=True,
+        )
+    )
+
+    assert response.diagnostics is not None
+    assert response.diagnostics.timings.llmlingua_ms == 8.0
+    assert response.diagnostics.model_segment_count == 1
 
 
 def test_compress_response_includes_sections_when_requested(monkeypatch):
