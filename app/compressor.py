@@ -239,6 +239,7 @@ class CompressionDiagnostics:
     whitespace_tokens_saved: int = 0
     toon_tokens_saved: int = 0
     json_minify_tokens_saved: int = 0
+    html_markdown_tokens_saved: int = 0
     nocompress_wrapper_tokens_saved: int = 0
     skipped_model_candidate_tokens: int = 0
     literal_placeholder_count: int = 0
@@ -334,6 +335,7 @@ class _DeterministicComponentSavings:
     whitespace_tokens_saved: int = 0
     toon_tokens_saved: int = 0
     json_minify_tokens_saved: int = 0
+    html_markdown_tokens_saved: int = 0
     nocompress_wrapper_tokens_saved: int = 0
 
 
@@ -1693,7 +1695,16 @@ class PromptCompressionService:
             len(segment.text)
             for segment in segments
             if not segment.compressible
-            or segment.kind in {"code", "html", "json", "nocompress", "toon", "verbatim"}
+            or segment.kind
+            in {
+                "code",
+                "html",
+                "html_markdown",
+                "json",
+                "nocompress",
+                "toon",
+                "verbatim",
+            }
         )
         return structured_chars / total_chars
 
@@ -1777,12 +1788,14 @@ class PromptCompressionService:
     ) -> _DeterministicComponentSavings:
         source_by_category: dict[str, list[str]] = {
             "json_minify": [],
+            "html_markdown": [],
             "nocompress_wrapper": [],
             "toon": [],
             "whitespace": [],
         }
         output_by_category: dict[str, list[str]] = {
             "json_minify": [],
+            "html_markdown": [],
             "nocompress_wrapper": [],
             "toon": [],
             "whitespace": [],
@@ -1816,6 +1829,11 @@ class PromptCompressionService:
                 "".join(output_by_category["json_minify"]),
                 tenant_profile,
             ),
+            html_markdown_tokens_saved=self._token_savings_between_texts(
+                "".join(source_by_category["html_markdown"]),
+                "".join(output_by_category["html_markdown"]),
+                tenant_profile,
+            ),
             nocompress_wrapper_tokens_saved=self._token_savings_between_texts(
                 "".join(source_by_category["nocompress_wrapper"]),
                 "".join(output_by_category["nocompress_wrapper"]),
@@ -1831,6 +1849,8 @@ class PromptCompressionService:
             return "toon"
         if segment.kind == "json_minified":
             return "json_minify"
+        if segment.kind == "html_markdown":
+            return "html_markdown"
         if segment.kind == "nocompress":
             return "nocompress_wrapper"
         if segment.kind == "prose":
@@ -2236,6 +2256,9 @@ class PromptCompressionService:
                 whitespace_tokens_saved=component_savings.whitespace_tokens_saved,
                 toon_tokens_saved=component_savings.toon_tokens_saved,
                 json_minify_tokens_saved=component_savings.json_minify_tokens_saved,
+                html_markdown_tokens_saved=(
+                    component_savings.html_markdown_tokens_saved
+                ),
                 nocompress_wrapper_tokens_saved=(
                     component_savings.nocompress_wrapper_tokens_saved
                 ),
@@ -2325,6 +2348,7 @@ class PromptCompressionService:
         whitespace_tokens_saved: int,
         toon_tokens_saved: int,
         json_minify_tokens_saved: int,
+        html_markdown_tokens_saved: int,
         nocompress_wrapper_tokens_saved: int,
         skipped_model_candidate_tokens: int,
         literal_placeholder_count: int,
@@ -2409,6 +2433,7 @@ class PromptCompressionService:
             whitespace_tokens_saved=whitespace_tokens_saved,
             toon_tokens_saved=toon_tokens_saved,
             json_minify_tokens_saved=json_minify_tokens_saved,
+            html_markdown_tokens_saved=html_markdown_tokens_saved,
             nocompress_wrapper_tokens_saved=nocompress_wrapper_tokens_saved,
             skipped_model_candidate_tokens=skipped_model_candidate_tokens,
             literal_placeholder_count=literal_placeholder_count,

@@ -5,6 +5,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from app.html_compactor import (
+    compact_html_to_markdown,
+    should_preserve_html_verbatim,
+)
 from app.toon_adapter import ToonEncodingError, encode_toon
 from app.whitespace_normalizer import (
     ENABLE_STRICT_PROSE_WHITESPACE,
@@ -14,6 +18,14 @@ from app.whitespace_normalizer import (
 MIN_JSON_CHARS = int(os.getenv("COMPRESSOR_MIN_JSON_CHARS", "300"))
 MIN_JSON_LINES = int(os.getenv("COMPRESSOR_MIN_JSON_LINES", "4"))
 MIN_TOON_SAVINGS = float(os.getenv("COMPRESSOR_MIN_TOON_SAVINGS", "0.08"))
+ENABLE_HTML_MARKDOWN = os.getenv(
+    "COMPRESSOR_ENABLE_HTML_MARKDOWN",
+    "true",
+).lower() in {"1", "true", "yes", "on"}
+MIN_HTML_CHARS = int(os.getenv("COMPRESSOR_MIN_HTML_CHARS", "1000"))
+MIN_HTML_MARKDOWN_SAVINGS = float(
+    os.getenv("COMPRESSOR_MIN_HTML_MARKDOWN_SAVINGS", "0.20")
+)
 ENABLE_JSON_MINIFY = os.getenv(
     "COMPRESSOR_ENABLE_JSON_MINIFY",
     "false",
@@ -44,6 +56,10 @@ HTML_BLOCK_TAGS = (
 )
 HTML_START_TAG_PATTERN = re.compile(
     r"<(?P<tag>" + "|".join(HTML_BLOCK_TAGS) + r")\b[^>]*>",
+    re.IGNORECASE,
+)
+HTML_DOCTYPE_BEFORE_DOCUMENT_PATTERN = re.compile(
+    r"<!doctype\s+html\b[^>]*>\s*$",
     re.IGNORECASE,
 )
 HTML_END_TAG_PATTERNS = {
@@ -95,6 +111,10 @@ class PromptPreprocessor:
         min_json_chars: int = MIN_JSON_CHARS,
         min_json_lines: int = MIN_JSON_LINES,
         min_toon_savings: float = MIN_TOON_SAVINGS,
+        html_markdown_converter: Callable[[str], str | None] = compact_html_to_markdown,
+        enable_html_markdown: bool = ENABLE_HTML_MARKDOWN,
+        min_html_chars: int = MIN_HTML_CHARS,
+        min_html_markdown_savings: float = MIN_HTML_MARKDOWN_SAVINGS,
         enable_json_minify: bool = ENABLE_JSON_MINIFY,
         min_json_minify_savings: float = MIN_JSON_MINIFY_SAVINGS,
         strict_prose_whitespace: bool = ENABLE_STRICT_PROSE_WHITESPACE,
@@ -103,11 +123,19 @@ class PromptPreprocessor:
         self.min_json_chars = min_json_chars
         self.min_json_lines = min_json_lines
         self.min_toon_savings = min_toon_savings
+        self.html_markdown_converter = html_markdown_converter
+        self.enable_html_markdown = enable_html_markdown
+        self.min_html_chars = min_html_chars
+        self.min_html_markdown_savings = min_html_markdown_savings
         self.enable_json_minify = enable_json_minify
         self.min_json_minify_savings = min_json_minify_savings
         self.strict_prose_whitespace = strict_prose_whitespace
 
     def prepare(self, text: str) -> list[CompressionSegment]:
+        html_markdown_segment = self._html_markdown_segment_for_candidate(text)
+        if html_markdown_segment is not None:
+            return [html_markdown_segment]
+
         segments: list[CompressionSegment] = []
         cursor = 0
 
@@ -129,6 +157,10 @@ class PromptPreprocessor:
         return [segment for segment in segments if segment.text]
 
     def _prepare_compressible_text(self, text: str) -> list[CompressionSegment]:
+        html_markdown_segment = self._html_markdown_segment_for_candidate(text)
+        if html_markdown_segment is not None:
+            return [html_markdown_segment]
+
         segments: list[CompressionSegment] = []
         cursor = 0
 
@@ -284,6 +316,10 @@ class PromptPreprocessor:
             prose_segment = self._prose_segment(text)
             return [] if prose_segment is None else [prose_segment]
 
+        html_markdown_segment = self._html_markdown_segment_for_candidate(text)
+        if html_markdown_segment is not None:
+            return [html_markdown_segment]
+
         segments: list[CompressionSegment] = []
         cursor = 0
 
@@ -292,7 +328,13 @@ class PromptPreprocessor:
             if prose_segment is not None:
                 segments.append(prose_segment)
 
-            html_segment = self._prose_segment(text[span.start : span.end])
+            html_text = text[span.start : span.end]
+            html_segment = self._html_markdown_segment_for_candidate(
+                html_text,
+                leading_context=text[max(0, cursor) : span.start],
+            )
+            if html_segment is None:
+                html_segment = self._prose_segment(html_text)
             if html_segment is not None:
                 segments.append(html_segment)
 
@@ -303,6 +345,34 @@ class PromptPreprocessor:
             segments.append(prose_segment)
 
         return segments
+
+    def _html_markdown_segment_for_candidate(
+        self,
+        candidate: str,
+        *,
+        leading_context: str = "",
+    ) -> CompressionSegment | None:
+        if not self.enable_html_markdown:
+            return None
+        if len(candidate) < self.min_html_chars:
+            return None
+        if should_preserve_html_verbatim(candidate, leading_context=leading_context):
+            return None
+
+        markdown = self.html_markdown_converter(candidate)
+        if markdown is None or not markdown.strip():
+            return None
+
+        savings = 1.0 - (len(markdown) / len(candidate))
+        if savings < self.min_html_markdown_savings:
+            return None
+
+        return CompressionSegment(
+            text=markdown,
+            compressible=False,
+            kind="html_markdown",
+            source_text=candidate,
+        )
 
     def _html_block_spans(self, text: str) -> list[_Span]:
         spans: list[_Span] = []
@@ -325,7 +395,15 @@ class PromptPreprocessor:
                 cursor = start_match.end()
                 continue
 
-            spans.append(_Span(start_match.start(), end_match.end()))
+            span_start = start_match.start()
+            if tag == "html":
+                doctype_match = HTML_DOCTYPE_BEFORE_DOCUMENT_PATTERN.search(
+                    text[cursor:span_start]
+                )
+                if doctype_match is not None:
+                    span_start = cursor + doctype_match.start()
+
+            spans.append(_Span(span_start, end_match.end()))
             cursor = end_match.end()
 
         return spans

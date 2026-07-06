@@ -133,6 +133,10 @@ def test_index_returns_prompt_compression_ui():
     assert "Tenant Profile" in body
     assert 'id="tenantTestPreset"' in body
     assert 'id="compressionMode"' in body
+    assert 'id="loadHtmlExampleButton"' in body
+    assert "HTML Page Example" in body
+    assert "HTML page converted to Markdown" in body
+    assert "Prompt Compression Guide" in body
     assert 'id="latencyBudgetMs"' in body
     assert 'id="allowCpuModelAuto"' in body
     assert "tenant_rick_probe" in body
@@ -207,6 +211,9 @@ def test_benchmark_index_returns_benchmark_page():
     assert "LLMLingua p50" in body
     assert "Model calls" in body
     assert "Gate skips" in body
+    assert 'id="htmlRatiosInput"' in body
+    assert "HTML ratios" in body
+    assert "html_markdown" in body
     assert 'id="compressionModeInput"' in body
     assert 'id="latencyBudgetInput"' in body
     assert 'id="allowCpuModelAutoInput"' in body

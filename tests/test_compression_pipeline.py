@@ -1,3 +1,8 @@
+from app.benchmark_ui import BENCHMARK_HTML
+from app.compression_pipeline import PromptPreprocessor
+from app.eval_ui import EVAL_HTML
+from app.html_compactor import fallback_html_to_markdown
+from app.main import APP_HTML
 from tests.pipeline_helpers import RecordingCompressor, build_service_with_pipeline
 
 
@@ -27,7 +32,7 @@ def test_html_preservation_skips_model():
 
    exact </pre>"""
 
-    result = service.compress(html, aggressiveness=0.25)
+    result = service.compress(html, aggressiveness=0.25, mode="deterministic")
 
     assert compressor.inputs == []
     assert result.compressed_text == html
@@ -41,7 +46,7 @@ def test_protected_segments_do_not_duplicate_full_text_as_labels():
     service = build_service_with_pipeline(compressor)
     html = "<pre>" + ("x" * 1000) + "</pre>"
 
-    result = service.compress(html, aggressiveness=0.25)
+    result = service.compress(html, aggressiveness=0.25, mode="deterministic")
 
     assert result.compressed_text == html
     assert result.labeled_tokens == []
@@ -59,6 +64,145 @@ def test_common_html_content_tags_remain_compressible_prose():
     assert compressor.inputs == [html]
     assert [section.kind for section in result.output_sections] == ["prose"]
     assert result.output_sections[0].protected is False
+
+
+def build_service_with_html_markdown() -> tuple[RecordingCompressor, object]:
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.preprocessor = PromptPreprocessor(
+        html_markdown_converter=fallback_html_to_markdown,
+        min_html_chars=1,
+        min_html_markdown_savings=0.0,
+    )
+    return compressor, service
+
+
+def test_full_html_document_converts_to_protected_markdown():
+    compressor, service = build_service_with_html_markdown()
+    html = """<!doctype html>
+<html lang="en">
+<head>
+  <title>Prompt Compression Guide</title>
+  <style>.ad { display: block; }</style>
+  <script src="/tracking.js"></script>
+</head>
+<body>
+  <main>
+    <article>
+      <h1>Prompt Compression Guide</h1>
+      <p>Reduce prompt tokens while preserving constraints.</p>
+      <h2>Do not compress</h2>
+      <ul><li>Exact code blocks</li><li>Security policies</li></ul>
+    </article>
+  </main>
+</body>
+</html>"""
+
+    result = service.compress(html, aggressiveness=0.25)
+
+    assert compressor.inputs == []
+    assert result.output_sections[0].kind == "html_markdown"
+    assert result.output_sections[0].protected is True
+    assert result.output_sections[0].compressed is False
+    assert "# Prompt Compression Guide" in result.compressed_text
+    assert "- Exact code blocks" in result.compressed_text
+    assert "<style>" not in result.compressed_text
+    assert "tracking.js" not in result.compressed_text
+    assert result.diagnostics is not None
+    assert result.diagnostics.segment_kinds == {"html_markdown": 1}
+    assert result.diagnostics.html_markdown_tokens_saved > 0
+
+
+def test_exact_html_context_preserves_document_verbatim():
+    compressor, service = build_service_with_html_markdown()
+    html = """Preserve this HTML markup exactly for a selector audit:
+<!doctype html>
+<html>
+<body><main><h1>Keep HTML</h1></main></body>
+</html>"""
+
+    result = service.compress(html, aggressiveness=0.25)
+
+    assert "<html>" in result.compressed_text
+    assert "<h1>Keep HTML</h1>" in result.compressed_text
+    assert "html_markdown" not in [section.kind for section in result.output_sections]
+    assert compressor.inputs
+
+
+def test_non_html_preserve_context_still_allows_document_markdown():
+    compressor, service = build_service_with_html_markdown()
+    html = """Preserve customer IDs, URLs, dates, retry limits, and hard constraints.
+
+Downloaded incident HTML page:
+<!doctype html>
+<html>
+<body>
+  <main>
+    <h1>Incident Page</h1>
+    <p>Customer ID acct_2048 has deadline 2026-08-15.</p>
+  </main>
+</body>
+</html>"""
+
+    result = service.compress(html, aggressiveness=0.25, mode="deterministic")
+
+    assert compressor.inputs == []
+    assert [section.kind for section in result.output_sections] == [
+        "prose",
+        "html_markdown",
+    ]
+    assert "Customer ID acct_2048" in result.compressed_text
+    assert "<html>" not in result.compressed_text
+
+
+def test_app_html_page_converts_to_markdown_before_model():
+    compressor, service = build_service_with_html_markdown()
+
+    result = service.compress(APP_HTML, aggressiveness=0.25)
+
+    assert compressor.inputs == []
+    assert result.output_sections[0].kind == "html_markdown"
+    assert "Prompt Compression" in result.compressed_text
+    assert "Compression Settings" in result.compressed_text
+    assert "--dropped-bg" not in result.compressed_text
+    assert "function renderDiagnostics" not in result.compressed_text
+    assert result.diagnostics is not None
+    assert result.diagnostics.preprocessing_tokens_saved > 0
+    assert result.diagnostics.html_markdown_tokens_saved > 0
+
+
+def test_benchmark_html_page_converts_to_markdown_before_model():
+    compressor, service = build_service_with_html_markdown()
+
+    result = service.compress(BENCHMARK_HTML, aggressiveness=0.25)
+
+    assert compressor.inputs == []
+    assert result.output_sections[0].kind == "html_markdown"
+    assert "Performance Benchmark" in result.compressed_text
+    assert "Target tokens" in result.compressed_text
+    assert "JSON ratios" in result.compressed_text
+    assert "<style>" not in result.compressed_text
+    assert "generated_for" not in result.compressed_text
+    assert result.diagnostics is not None
+    assert result.diagnostics.preprocessing_tokens_saved > 0
+    assert result.diagnostics.html_markdown_tokens_saved > 0
+
+
+def test_eval_html_page_converts_to_markdown_before_model():
+    compressor, service = build_service_with_html_markdown()
+
+    result = service.compress(EVAL_HTML, aggressiveness=0.25)
+
+    assert compressor.inputs == []
+    assert result.output_sections[0].kind == "html_markdown"
+    assert "Prompt Compression Eval" in result.compressed_text
+    assert "Run Selected" in result.compressed_text
+    assert "Select All" in result.compressed_text
+    assert "--soft-warn" not in result.compressed_text
+    assert "function renderRun" not in result.compressed_text
+    assert result.diagnostics is not None
+    assert result.diagnostics.preprocessing_tokens_saved > 0
+    assert result.diagnostics.html_markdown_tokens_saved > 0
 
 
 def test_html_blocks_are_split_from_surrounding_prose():

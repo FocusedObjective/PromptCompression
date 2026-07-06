@@ -598,6 +598,7 @@ Output:
 - Blockers and owner
 - Next three actions</textarea>
         <div class="controls">
+          <button class="copy-button" id="loadHtmlExampleButton" type="button">HTML Page Example</button>
           <button id="compressButton" type="button">Compress</button>
         </div>
         <div class="tenant-controls">
@@ -671,8 +672,9 @@ Output:
             <li><code>&lt;nocompress&gt;...&lt;/nocompress&gt;</code> skips model compression and removes the wrapper.</li>
             <li><code>```json ... ```</code> protects JSON fences exactly as code.</li>
             <li>Medium/large raw JSON converts to TOON when safe; exact JSON, schemas/templates, tool exchanges, duplicate-key JSON, and low-savings cases stay verbatim.</li>
+            <li>Full downloaded HTML pages convert to compact Markdown when structure can be preserved with meaningful savings.</li>
             <li>Agent UI/output contracts, follow-on blocks, and card payload blocks are preserved verbatim.</li>
-            <li>HTML/code-bearing blocks such as <code>&lt;html&gt;</code>, <code>&lt;pre&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;template&gt;</code>, and <code>&lt;svg&gt;</code> are protected; ordinary content tags like <code>&lt;div&gt;</code>, <code>&lt;p&gt;</code>, and <code>&lt;table&gt;</code> remain compressible prose.</li>
+            <li>HTML snippets and code-bearing blocks such as <code>&lt;pre&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;template&gt;</code>, and <code>&lt;svg&gt;</code> are protected; ordinary content tags like <code>&lt;div&gt;</code>, <code>&lt;p&gt;</code>, and <code>&lt;table&gt;</code> remain compressible prose.</li>
             <li>Whitespace inside protected HTML is kept exactly as provided.</li>
             <li><code>```</code> and <code>~~~</code> markdown fences are protected from compression and preserve whitespace.</li>
           </ul>
@@ -716,6 +718,7 @@ Output:
     const tenantForceKeepTokensInput = document.getElementById("tenantForceKeepTokens");
     const tenantForceDropPhrasesInput = document.getElementById("tenantForceDropPhrases");
     const compressButton = document.getElementById("compressButton");
+    const loadHtmlExampleButton = document.getElementById("loadHtmlExampleButton");
     const copyButton = document.getElementById("copyButton");
     const inputStatus = document.getElementById("inputStatus");
     const resultStatus = document.getElementById("resultStatus");
@@ -774,6 +777,45 @@ rickflag nevergonna adapteronly
 priority escalation deadline status background summary should look important.`,
       },
     };
+    const HTML_PAGE_EXAMPLE = `Compress this downloaded web page while keeping the document structure and main facts.
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Prompt Compression Guide</title>
+  <style>
+    body { font-family: system-ui; }
+    .ad, .tracking-banner { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/pricing">Pricing</a>
+    </nav>
+  </header>
+  <aside class="ad">Sponsored: Buy more tokens before 2026-08-15.</aside>
+  <main>
+    <article>
+      <h1>Prompt Compression Guide</h1>
+      <p>Reduce prompt tokens while preserving constraints, IDs, dates, URLs, and thresholds.</p>
+      <h2>When to compress</h2>
+      <p>Compress copied web pages, repeated background, and verbose prose before sending a prompt downstream.</p>
+      <h2>Do not compress</h2>
+      <ul>
+        <li>Exact code blocks</li>
+        <li>Security policies</li>
+        <li>Customer ID acct_2048</li>
+        <li>Deadline 2026-08-15</li>
+      </ul>
+      <blockquote>Hard constraint: never raise retry_count above 3.</blockquote>
+    </article>
+  </main>
+  <footer>Copyright 2026 Example Corp</footer>
+</body>
+</html>`;
 
     function setStatus(message, isError) {
       const hasError = isError === true;
@@ -837,6 +879,7 @@ priority escalation deadline status background summary should look important.`,
       appendDiagnosticItem("Whitespace saved", diagnostics.whitespace_tokens_saved);
       appendDiagnosticItem("TOON saved", diagnostics.toon_tokens_saved);
       appendDiagnosticItem("JSON minify saved", diagnostics.json_minify_tokens_saved);
+      appendDiagnosticItem("HTML markdown saved", diagnostics.html_markdown_tokens_saved);
       appendDiagnosticItem("Literal refs", diagnostics.literal_placeholder_count);
       appendDiagnosticItem("Duplicate blocks", diagnostics.duplicate_block_candidate_count);
       appendDiagnosticItem("Protected density", formatDiagnosticPercent(diagnostics.protected_density));
@@ -879,6 +922,9 @@ priority escalation deadline status background summary should look important.`,
       }
       if (section.kind === "html") {
         return "HTML protected";
+      }
+      if (section.kind === "html_markdown") {
+        return "HTML page converted to Markdown";
       }
       if (section.kind === "nocompress") {
         return "No-compress protected";
@@ -1074,6 +1120,17 @@ priority escalation deadline status background summary should look important.`,
       estimateTimer = window.setTimeout(refreshTokenEstimate, 150);
     });
     refreshTokenEstimate();
+
+    loadHtmlExampleButton.addEventListener("click", () => {
+      promptInput.value = HTML_PAGE_EXAMPLE;
+      tenantTestPresetInput.value = "";
+      latestCompressedText = "";
+      copyButton.disabled = true;
+      diff.textContent = "";
+      clearDiagnostics();
+      setStatus("HTML example loaded");
+      promptInput.dispatchEvent(new Event("input"));
+    });
 
     copyButton.addEventListener("click", async () => {
       if (!latestCompressedText) {

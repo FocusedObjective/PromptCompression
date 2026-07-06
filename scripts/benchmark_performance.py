@@ -42,6 +42,7 @@ DEFAULT_TARGET_TOKENS = (
     200_000,
 )
 DEFAULT_JSON_RATIOS = (0.0, 0.1, 0.25, 0.5, 0.75)
+DEFAULT_HTML_RATIOS = (0.0, 0.25)
 DEFAULT_AGGRESSIVENESS = 0.25
 DEFAULT_TIMEOUT_SECONDS = 900.0
 TIMING_FIELDS = (
@@ -77,6 +78,7 @@ LATENCY_FIELDS = (
 MEAN_FIELDS = (
     "synthetic_input_tokens",
     "synthetic_json_tokens",
+    "synthetic_html_tokens",
     "response_original_tokens",
     "response_compressed_tokens",
     "response_tokens_saved",
@@ -94,6 +96,7 @@ MEAN_FIELDS = (
     "deterministic_reduction",
     "whitespace_tokens_saved",
     "toon_tokens_saved",
+    "html_markdown_tokens_saved",
     "json_minify_tokens_saved",
     "nocompress_wrapper_tokens_saved",
     "literal_placeholder_count",
@@ -119,10 +122,13 @@ class BenchmarkCase:
     case_id: str
     target_tokens: int
     json_ratio_target: float
+    html_ratio_target: float
     synthetic_input_tokens: int
     synthetic_json_tokens: int
+    synthetic_html_tokens: int
     input_chars: int
     json_chars: int
+    html_chars: int
     prompt_sha256: str
     text: str
 
@@ -155,6 +161,11 @@ def parse_args() -> argparse.Namespace:
         "--json-ratios",
         default=",".join(str(value) for value in DEFAULT_JSON_RATIOS),
         help="Comma-separated JSON token-share targets from 0.0 to 1.0.",
+    )
+    parser.add_argument(
+        "--html-ratios",
+        default=",".join(str(value) for value in DEFAULT_HTML_RATIOS),
+        help="Comma-separated HTML-page token-share targets from 0.0 to 1.0.",
     )
     parser.add_argument(
         "--repeats",
@@ -238,7 +249,8 @@ def main() -> int:
     args = parse_args()
     target_tokens = parse_int_list(args.sizes)
     json_ratios = parse_float_list(args.json_ratios)
-    validate_args(args, target_tokens, json_ratios)
+    html_ratios = parse_float_list(args.html_ratios)
+    validate_args(args, target_tokens, json_ratios, html_ratios)
 
     output_dir = resolve_output_dir(args.out_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -250,6 +262,7 @@ def main() -> int:
         "target_tokens": target_tokens,
         "target_token_median": statistics.median(target_tokens),
         "json_ratios": json_ratios,
+        "html_ratios": html_ratios,
         "repeats": args.repeats,
         "warmup": args.warmup,
         "concurrency": args.concurrency,
@@ -261,8 +274,8 @@ def main() -> int:
         "labels": labels,
     }
 
-    print(f"Generating {len(target_tokens) * len(json_ratios)} prompt cases...")
-    cases = build_cases(target_tokens, json_ratios)
+    cases = build_cases(target_tokens, json_ratios, html_ratios)
+    print(f"Generating {len(cases)} prompt cases...")
     write_case_manifest(output_dir / "cases.json", cases, metadata)
     if args.save_prompts:
         write_prompts(output_dir / "prompts.jsonl", cases)
@@ -274,6 +287,7 @@ def main() -> int:
         for case in cases
         if case.target_tokens == min(target_tokens)
         and case.json_ratio_target == min(json_ratios)
+        and case.html_ratio_target == min(html_ratios)
     )
     for index in range(args.warmup):
         print(f"Warmup {index + 1}/{args.warmup}...")
@@ -330,11 +344,14 @@ def validate_args(
     args: argparse.Namespace,
     target_tokens: list[int],
     json_ratios: list[float],
+    html_ratios: list[float],
 ) -> None:
     if not target_tokens:
         raise SystemExit("--sizes must include at least one value")
     if not json_ratios:
         raise SystemExit("--json-ratios must include at least one value")
+    if not html_ratios:
+        raise SystemExit("--html-ratios must include at least one value")
     if args.repeats < 1:
         raise SystemExit("--repeats must be at least 1")
     if args.warmup < 0:
@@ -346,24 +363,42 @@ def validate_args(
     for value in json_ratios:
         if value < 0.0 or value > 1.0:
             raise SystemExit("--json-ratios values must be between 0.0 and 1.0")
+    for value in html_ratios:
+        if value < 0.0 or value > 1.0:
+            raise SystemExit("--html-ratios values must be between 0.0 and 1.0")
+    if not any(
+        json_ratio + html_ratio <= 1.0
+        for json_ratio in json_ratios
+        for html_ratio in html_ratios
+    ):
+        raise SystemExit("At least one JSON + HTML ratio pair must be <= 1.0")
 
 
 def build_cases(
     target_tokens: list[int],
     json_ratios: list[float],
+    html_ratios: list[float],
 ) -> list[BenchmarkCase]:
     return [
-        build_case(target, json_ratio)
+        build_case(target, json_ratio, html_ratio)
         for target in target_tokens
         for json_ratio in json_ratios
+        for html_ratio in html_ratios
+        if json_ratio + html_ratio <= 1.0
     ]
 
 
-def build_case(target_tokens: int, json_ratio: float) -> BenchmarkCase:
+def build_case(
+    target_tokens: int,
+    json_ratio: float,
+    html_ratio: float = 0.0,
+) -> BenchmarkCase:
     json_token_budget = int(target_tokens * json_ratio)
-    prose_token_budget = max(1, target_tokens - json_token_budget)
+    html_token_budget = int(target_tokens * html_ratio)
+    prose_token_budget = max(1, target_tokens - json_token_budget - html_token_budget)
     prose = build_prose(prose_token_budget)
     json_block = build_json_block(json_token_budget)
+    html_block = build_html_block(html_token_budget)
     prompt = "\n\n".join(
         part
         for part in (
@@ -372,21 +407,29 @@ def build_case(target_tokens: int, json_ratio: float) -> BenchmarkCase:
             "Summarize risk, identify likely blockers, and propose next actions.",
             prose,
             json_block,
+            html_block,
             "Output: executive summary, blockers and owner, next three actions.",
         )
         if part
     )
     synthetic_input_tokens = estimate_token_count(prompt)
     synthetic_json_tokens = estimate_token_count(json_block) if json_block else 0
-    case_id = f"tok{target_tokens}_json{format_ratio(json_ratio)}"
+    synthetic_html_tokens = estimate_token_count(html_block) if html_block else 0
+    case_id = (
+        f"tok{target_tokens}_json{format_ratio(json_ratio)}"
+        f"_html{format_ratio(html_ratio)}"
+    )
     return BenchmarkCase(
         case_id=case_id,
         target_tokens=target_tokens,
         json_ratio_target=json_ratio,
+        html_ratio_target=html_ratio,
         synthetic_input_tokens=synthetic_input_tokens,
         synthetic_json_tokens=synthetic_json_tokens,
+        synthetic_html_tokens=synthetic_html_tokens,
         input_chars=len(prompt),
         json_chars=len(json_block),
+        html_chars=len(html_block),
         prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         text=prompt,
     )
@@ -416,6 +459,57 @@ def build_json_block(token_budget: int) -> str:
     record_count = max(1, math.ceil(max(1, token_budget - base_tokens) / record_tokens))
     payload = json_payload(record_count)
     return "Customer telemetry JSON:\n" + payload
+
+
+def build_html_block(token_budget: int) -> str:
+    if token_budget <= 0:
+        return ""
+
+    base_tokens = estimate_token_count(html_page(0))
+    sample_count = 10
+    sample_tokens = estimate_token_count(html_page(sample_count))
+    record_tokens = max(1.0, (sample_tokens - base_tokens) / sample_count)
+    record_count = max(1, math.ceil(max(1, token_budget - base_tokens) / record_tokens))
+    return "Downloaded incident HTML page:\n" + html_page(record_count)
+
+
+def html_page(record_count: int) -> str:
+    sections = "".join(html_record(index) for index in range(record_count))
+    return (
+        "<!doctype html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '  <meta charset="utf-8">\n'
+        "  <title>Benchmark HTML Incident Page</title>\n"
+        "  <style>body{font-family:system-ui}.ad{display:block}</style>\n"
+        "</head>\n"
+        "<body>\n"
+        '  <header><nav><a href="/">Home</a><a href="/docs">Docs</a></nav></header>\n'
+        '  <aside class="ad">Synthetic benchmark advertisement.</aside>\n'
+        "  <main>\n"
+        "    <h1>Benchmark HTML Incident Page</h1>\n"
+        "    <p>Downloaded web page content for HTML-to-Markdown preprocessing.</p>\n"
+        f"{sections}"
+        "  </main>\n"
+        "  <footer>Generated for prompt compression benchmark.</footer>\n"
+        "</body>\n"
+        "</html>"
+    )
+
+
+def html_record(index: int) -> str:
+    return (
+        f'    <section class="incident-card" data-incident="INC-{index:06d}">\n'
+        f"      <h2>Incident INC-{index:06d}</h2>\n"
+        f"      <p>Account acct_{index:08d} has checkout latency, retry pressure, "
+        "deadline 2026-08-15, and dashboard "
+        f"https://example.com/html/{index:06d}.</p>\n"
+        "      <ul>\n"
+        "        <li>Hard constraint: never raise retry_count above 3.</li>\n"
+        "        <li>Owner: support operations.</li>\n"
+        "      </ul>\n"
+        "    </section>\n"
+    )
 
 
 def json_payload(record_count: int) -> str:
@@ -621,8 +715,10 @@ def base_result_row(
         "repeat": repeat_index,
         "target_tokens": case.target_tokens,
         "json_ratio_target": case.json_ratio_target,
+        "html_ratio_target": case.html_ratio_target,
         "synthetic_input_tokens": case.synthetic_input_tokens,
         "synthetic_json_tokens": case.synthetic_json_tokens,
+        "synthetic_html_tokens": case.synthetic_html_tokens,
         "synthetic_json_ratio": (
             0.0
             if case.synthetic_input_tokens == 0
@@ -630,6 +726,7 @@ def base_result_row(
         ),
         "input_chars": case.input_chars,
         "json_chars": case.json_chars,
+        "html_chars": case.html_chars,
         "prompt_sha256": case.prompt_sha256,
     }
     for key, value in labels.items():
@@ -703,6 +800,9 @@ def add_response_fields(row: dict[str, Any], body: dict[str, Any]) -> dict[str, 
             "deterministic_reduction": diagnostics.get("deterministic_reduction"),
             "whitespace_tokens_saved": diagnostics.get("whitespace_tokens_saved"),
             "toon_tokens_saved": diagnostics.get("toon_tokens_saved"),
+            "html_markdown_tokens_saved": diagnostics.get(
+                "html_markdown_tokens_saved"
+            ),
             "json_minify_tokens_saved": diagnostics.get("json_minify_tokens_saved"),
             "nocompress_wrapper_tokens_saved": diagnostics.get(
                 "nocompress_wrapper_tokens_saved"
@@ -763,10 +863,11 @@ def build_summary_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     summary_rows = [summary_for_group("overall", {}, rows)]
     summary_rows.extend(grouped_summaries("target_tokens", ("target_tokens",), rows))
     summary_rows.extend(grouped_summaries("json_ratio", ("json_ratio_target",), rows))
+    summary_rows.extend(grouped_summaries("html_ratio", ("html_ratio_target",), rows))
     summary_rows.extend(
         grouped_summaries(
-            "target_tokens_json_ratio",
-            ("target_tokens", "json_ratio_target"),
+            "target_tokens_json_html_ratio",
+            ("target_tokens", "json_ratio_target", "html_ratio_target"),
             rows,
         )
     )
@@ -802,6 +903,7 @@ def summary_for_group(
         "group_type": group_type,
         "target_tokens": key_values.get("target_tokens", ""),
         "json_ratio_target": key_values.get("json_ratio_target", ""),
+        "html_ratio_target": key_values.get("html_ratio_target", ""),
         "count": len(rows),
         "success_count": len(success_rows),
         "error_count": len(rows) - len(success_rows),
@@ -889,8 +991,10 @@ def write_prompts(path: Path, cases: list[BenchmarkCase]) -> None:
                         "case_id": case.case_id,
                         "target_tokens": case.target_tokens,
                         "json_ratio_target": case.json_ratio_target,
+                        "html_ratio_target": case.html_ratio_target,
                         "synthetic_input_tokens": case.synthetic_input_tokens,
                         "synthetic_json_tokens": case.synthetic_json_tokens,
+                        "synthetic_html_tokens": case.synthetic_html_tokens,
                         "prompt_sha256": case.prompt_sha256,
                         "text": case.text,
                     },

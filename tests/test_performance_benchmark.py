@@ -17,10 +17,31 @@ def test_build_case_generates_json_share_metadata():
 
     assert case.target_tokens == 1_000
     assert case.json_ratio_target == 0.5
+    assert case.html_ratio_target == 0.0
     assert case.synthetic_input_tokens >= 1_000
     assert case.synthetic_json_tokens > 0
+    assert case.synthetic_html_tokens == 0
     assert case.json_chars > 0
+    assert case.html_chars == 0
     assert "Customer telemetry JSON" in case.text
+
+
+def test_build_case_generates_html_share_metadata():
+    case = build_case(1_000, 0.25, 0.25)
+
+    assert case.case_id == "tok1000_json0p25_html0p25"
+    assert case.target_tokens == 1_000
+    assert case.json_ratio_target == 0.25
+    assert case.html_ratio_target == 0.25
+    assert case.synthetic_input_tokens >= 1_000
+    assert case.synthetic_json_tokens > 0
+    assert case.synthetic_html_tokens > 0
+    assert case.json_chars > 0
+    assert case.html_chars > 0
+    assert "Customer telemetry JSON" in case.text
+    assert "Downloaded incident HTML page" in case.text
+    assert "<!doctype html>" in case.text
+    assert "Benchmark HTML Incident Page" in case.text
 
 
 def test_summary_rows_group_latency_distributions():

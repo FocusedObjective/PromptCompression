@@ -153,6 +153,7 @@ class CompressionDiagnosticsResponse(BaseModel):
     whitespace_tokens_saved: int = 0
     toon_tokens_saved: int = 0
     json_minify_tokens_saved: int = 0
+    html_markdown_tokens_saved: int = 0
     nocompress_wrapper_tokens_saved: int = 0
     skipped_model_candidate_tokens: int = 0
     literal_placeholder_count: int = 0

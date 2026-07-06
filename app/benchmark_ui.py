@@ -362,6 +362,10 @@ BENCHMARK_HTML = """
         JSON ratios
         <input id="jsonRatiosInput" type="text" spellcheck="false" value="0,0.1,0.25,0.5,0.75">
       </label>
+      <label class="field wide">
+        HTML ratios
+        <input id="htmlRatiosInput" type="text" spellcheck="false" value="0,0.25">
+      </label>
       <label class="field">
         Repeats
         <input id="repeatsInput" type="number" min="1" max="20" step="1" value="1">
@@ -502,6 +506,7 @@ BENCHMARK_HTML = """
 
     const sizesInput = document.getElementById("sizesInput");
     const jsonRatiosInput = document.getElementById("jsonRatiosInput");
+    const htmlRatiosInput = document.getElementById("htmlRatiosInput");
     const repeatsInput = document.getElementById("repeatsInput");
     const warmupInput = document.getElementById("warmupInput");
     const concurrencyInput = document.getElementById("concurrencyInput");
@@ -580,6 +585,7 @@ BENCHMARK_HTML = """
           `components whitespace=${compactNumber(diagnostics.whitespace_tokens_saved)} ` +
           `force_drop=${compactNumber(diagnostics.force_drop_tokens_saved)} ` +
           `toon=${compactNumber(diagnostics.toon_tokens_saved)} ` +
+          `html_markdown=${compactNumber(diagnostics.html_markdown_tokens_saved)} ` +
           `json_minify=${compactNumber(diagnostics.json_minify_tokens_saved)} ` +
           `literal=${compactNumber(diagnostics.literal_placeholder_tokens_saved)}`
         ),
@@ -695,45 +701,112 @@ BENCHMARK_HTML = """
       return "Customer telemetry JSON:\\n" + jsonPayload(recordCount);
     }
 
+    function htmlRecord(index) {
+      const key = pad(index, 6);
+      return (
+        `<section class="incident-card" data-incident="INC-${key}">\\n` +
+        `  <h2>Incident INC-${key}</h2>\\n` +
+        `  <p>Account acct_${pad(index, 8)} has checkout latency, retry pressure, ` +
+        `deadline 2026-08-15, and dashboard https://example.com/html/${key}.</p>\\n` +
+        "  <ul>\\n" +
+        "    <li>Hard constraint: never raise retry_count above 3.</li>\\n" +
+        "    <li>Owner: support operations.</li>\\n" +
+        "  </ul>\\n" +
+        "</section>\\n"
+      );
+    }
+
+    function htmlPage(recordCount) {
+      const sections = [];
+      for (let index = 0; index < recordCount; index += 1) {
+        sections.push(htmlRecord(index));
+      }
+      return (
+        "<!doctype html>\\n" +
+        "<html lang=\\"en\\">\\n" +
+        "<head>\\n" +
+        "  <meta charset=\\"utf-8\\">\\n" +
+        "  <title>Benchmark HTML Incident Page</title>\\n" +
+        "  <style>body{font-family:system-ui}.ad{display:block}</style>\\n" +
+        "</head>\\n" +
+        "<body>\\n" +
+        "  <header><nav><a href=\\"/\\">Home</a><a href=\\"/docs\\">Docs</a></nav></header>\\n" +
+        "  <aside class=\\"ad\\">Synthetic benchmark advertisement.</aside>\\n" +
+        "  <main>\\n" +
+        "    <h1>Benchmark HTML Incident Page</h1>\\n" +
+        "    <p>Downloaded web page content for HTML-to-Markdown preprocessing.</p>\\n" +
+        sections.join("") +
+        "  </main>\\n" +
+        "  <footer>Generated for prompt compression benchmark.</footer>\\n" +
+        "</body>\\n" +
+        "</html>"
+      );
+    }
+
+    function buildHtmlBlock(tokenBudget) {
+      if (tokenBudget <= 0) {
+        return "";
+      }
+      const baseTokens = estimateTokenCount(htmlPage(0));
+      const sampleCount = 10;
+      const sampleTokens = estimateTokenCount(htmlPage(sampleCount));
+      const recordTokens = Math.max(1, (sampleTokens - baseTokens) / sampleCount);
+      const recordCount = Math.max(1, Math.ceil(Math.max(1, tokenBudget - baseTokens) / recordTokens));
+      return "Downloaded incident HTML page:\\n" + htmlPage(recordCount);
+    }
+
     function formatRatio(value) {
       return String(value).replace(".", "p");
     }
 
-    function buildCase(targetTokens, jsonRatio) {
+    function buildCase(targetTokens, jsonRatio, htmlRatio) {
       const jsonTokenBudget = Math.floor(targetTokens * jsonRatio);
-      const proseTokenBudget = Math.max(1, targetTokens - jsonTokenBudget);
+      const htmlTokenBudget = Math.floor(targetTokens * htmlRatio);
+      const proseTokenBudget = Math.max(1, targetTokens - jsonTokenBudget - htmlTokenBudget);
       const prose = buildProse(proseTokenBudget);
       const jsonBlock = buildJsonBlock(jsonTokenBudget);
+      const htmlBlock = buildHtmlBlock(htmlTokenBudget);
       const parts = [
         "You are a support operations analyst preparing an escalation brief.",
         "Preserve customer IDs, URLs, dates, retry limits, and hard constraints.",
         "Summarize risk, identify likely blockers, and propose next actions.",
         prose,
         jsonBlock,
+        htmlBlock,
         "Output: executive summary, blockers and owner, next three actions.",
       ].filter((part) => part);
       const text = parts.join("\\n\\n");
       const syntheticInputTokens = estimateTokenCount(text);
       const syntheticJsonTokens = jsonBlock ? estimateTokenCount(jsonBlock) : 0;
+      const syntheticHtmlTokens = htmlBlock ? estimateTokenCount(htmlBlock) : 0;
       return {
-        case_id: `tok${targetTokens}_json${formatRatio(jsonRatio)}`,
+        case_id: `tok${targetTokens}_json${formatRatio(jsonRatio)}_html${formatRatio(htmlRatio)}`,
         target_tokens: targetTokens,
         json_ratio_target: jsonRatio,
+        html_ratio_target: htmlRatio,
         synthetic_input_tokens: syntheticInputTokens,
         synthetic_json_tokens: syntheticJsonTokens,
+        synthetic_html_tokens: syntheticHtmlTokens,
         synthetic_json_ratio: syntheticInputTokens ? syntheticJsonTokens / syntheticInputTokens : 0,
+        synthetic_html_ratio: syntheticInputTokens ? syntheticHtmlTokens / syntheticInputTokens : 0,
         input_chars: text.length,
         json_chars: jsonBlock.length,
+        html_chars: htmlBlock.length,
         text,
       };
     }
 
-    function buildTasks(sizes, jsonRatios, repeats) {
+    function buildTasks(sizes, jsonRatios, htmlRatios, repeats) {
       const tasks = [];
       for (const targetTokens of sizes) {
         for (const jsonRatio of jsonRatios) {
-          for (let repeat = 1; repeat <= repeats; repeat += 1) {
-            tasks.push({ targetTokens, jsonRatio, repeat, measured: true });
+          for (const htmlRatio of htmlRatios) {
+            if (jsonRatio + htmlRatio > 1) {
+              continue;
+            }
+            for (let repeat = 1; repeat <= repeats; repeat += 1) {
+              tasks.push({ targetTokens, jsonRatio, htmlRatio, repeat, measured: true });
+            }
           }
         }
       }
@@ -749,16 +822,20 @@ BENCHMARK_HTML = """
         repeat,
         target_tokens: testCase.target_tokens,
         json_ratio_target: testCase.json_ratio_target,
+        html_ratio_target: testCase.html_ratio_target,
         synthetic_input_tokens: testCase.synthetic_input_tokens,
         synthetic_json_tokens: testCase.synthetic_json_tokens,
+        synthetic_html_tokens: testCase.synthetic_html_tokens,
         synthetic_json_ratio: testCase.synthetic_json_ratio,
+        synthetic_html_ratio: testCase.synthetic_html_ratio,
         input_chars: testCase.input_chars,
         json_chars: testCase.json_chars,
+        html_chars: testCase.html_chars,
       };
     }
 
     async function runOne(task) {
-      const testCase = buildCase(task.targetTokens, task.jsonRatio);
+      const testCase = buildCase(task.targetTokens, task.jsonRatio, task.htmlRatio);
       const row = baseRow(testCase, task.repeat, task.measured);
       row.requested_compression_mode = compressionModeInput.value;
       row.allow_cpu_model_auto_override = allowCpuModelAutoInput.checked;
@@ -852,6 +929,7 @@ BENCHMARK_HTML = """
       row.whitespace_tokens_saved = diagnostics.whitespace_tokens_saved;
       row.force_drop_tokens_saved = diagnostics.force_drop_tokens_saved;
       row.toon_tokens_saved = diagnostics.toon_tokens_saved;
+      row.html_markdown_tokens_saved = diagnostics.html_markdown_tokens_saved;
       row.json_minify_tokens_saved = diagnostics.json_minify_tokens_saved;
       row.literal_placeholder_count = diagnostics.literal_placeholder_count;
       row.literal_placeholder_tokens_saved = diagnostics.literal_placeholder_tokens_saved;
@@ -947,7 +1025,7 @@ BENCHMARK_HTML = """
       const measuredRows = rows.filter((row) => row.measured);
       const groups = new Map();
       for (const row of measuredRows) {
-        const key = `${row.target_tokens}|${row.json_ratio_target}`;
+        const key = `${row.target_tokens}|${row.json_ratio_target}|${row.html_ratio_target}`;
         if (!groups.has(key)) {
           groups.set(key, []);
         }
@@ -955,20 +1033,25 @@ BENCHMARK_HTML = """
       }
       return [...groups.entries()]
         .sort((left, right) => {
-          const [leftTokens, leftRatio] = left[0].split("|").map(Number);
-          const [rightTokens, rightRatio] = right[0].split("|").map(Number);
-          return leftTokens - rightTokens || leftRatio - rightRatio;
+          const [leftTokens, leftJsonRatio, leftHtmlRatio] = left[0].split("|").map(Number);
+          const [rightTokens, rightJsonRatio, rightHtmlRatio] = right[0].split("|").map(Number);
+          return (
+            leftTokens - rightTokens ||
+            leftJsonRatio - rightJsonRatio ||
+            leftHtmlRatio - rightHtmlRatio
+          );
         })
         .map(([key, groupRows]) => {
-          const [targetTokens, jsonRatio] = key.split("|");
+          const [targetTokens, jsonRatio, htmlRatio] = key.split("|");
           const okRows = groupRows.filter((row) => row.status === "ok");
           const modelRows = okRows.filter((row) => row.llmlingua_called === true);
           const modelCallCount = sum(numericValues(okRows, "llmlingua_call_count"));
           const modelGateSkipCount = okRows.filter((row) => row.model_gate_decision === "skip").length;
           return {
-            case_id: `tok${targetTokens}_json${formatRatio(Number(jsonRatio))}`,
+            case_id: `tok${targetTokens}_json${formatRatio(Number(jsonRatio))}_html${formatRatio(Number(htmlRatio))}`,
             target_tokens: Number(targetTokens),
             json_ratio_target: Number(jsonRatio),
+            html_ratio_target: Number(htmlRatio),
             count: groupRows.length,
             success_count: okRows.length,
             error_count: groupRows.length - okRows.length,
@@ -1092,6 +1175,7 @@ BENCHMARK_HTML = """
       stopButton.disabled = !running;
       sizesInput.disabled = running;
       jsonRatiosInput.disabled = running;
+      htmlRatiosInput.disabled = running;
       repeatsInput.disabled = running;
       warmupInput.disabled = running;
       concurrencyInput.disabled = running;
@@ -1124,15 +1208,24 @@ BENCHMARK_HTML = """
     runButton.addEventListener("click", async () => {
       const sizes = parseNumberList(sizesInput.value, Number.parseInt);
       const jsonRatios = parseNumberList(jsonRatiosInput.value, Number.parseFloat);
+      const htmlRatios = parseNumberList(htmlRatiosInput.value, Number.parseFloat);
       const repeats = Math.max(1, Number.parseInt(repeatsInput.value, 10) || 1);
       const warmup = Math.max(0, Number.parseInt(warmupInput.value, 10) || 0);
       const concurrency = Math.max(1, Math.min(8, Number.parseInt(concurrencyInput.value, 10) || 1));
-      if (!sizes.length || !jsonRatios.length) {
-        setStatus("Enter at least one size and JSON ratio", "error");
+      if (!sizes.length || !jsonRatios.length || !htmlRatios.length) {
+        setStatus("Enter at least one size, JSON ratio, and HTML ratio", "error");
         return;
       }
       if (jsonRatios.some((value) => value < 0 || value > 1)) {
         setStatus("JSON ratios must be between 0 and 1", "error");
+        return;
+      }
+      if (htmlRatios.some((value) => value < 0 || value > 1)) {
+        setStatus("HTML ratios must be between 0 and 1", "error");
+        return;
+      }
+      if (!jsonRatios.some((jsonRatio) => htmlRatios.some((htmlRatio) => jsonRatio + htmlRatio <= 1))) {
+        setStatus("At least one JSON + HTML ratio pair must be <= 1", "error");
         return;
       }
 
@@ -1142,7 +1235,8 @@ BENCHMARK_HTML = """
       logNode.textContent = "";
       cancelled = false;
       completedRuns = 0;
-      plannedRuns = sizes.length * jsonRatios.length * repeats;
+      const measuredTasks = buildTasks(sizes, jsonRatios, htmlRatios, repeats);
+      plannedRuns = measuredTasks.length;
       setRunning(true);
       setStatus("Running");
       logStatus.textContent = "Running";
@@ -1151,9 +1245,11 @@ BENCHMARK_HTML = """
       try {
         const smallestSize = Math.min(...sizes);
         const smallestRatio = Math.min(...jsonRatios);
+        const smallestHtmlRatio = Math.min(...htmlRatios);
         const warmupTasks = Array.from({ length: warmup }, (_item, index) => ({
           targetTokens: smallestSize,
           jsonRatio: smallestRatio,
+          htmlRatio: smallestHtmlRatio,
           repeat: -(index + 1),
           measured: false,
         }));
@@ -1162,7 +1258,6 @@ BENCHMARK_HTML = """
           await runTasks(warmupTasks, 1);
         }
 
-        const measuredTasks = buildTasks(sizes, jsonRatios, repeats);
         log(`Measured requests: ${measuredTasks.length}`);
         await runTasks(measuredTasks, concurrency);
         setStatus(cancelled ? "Cancelled" : "Complete", cancelled ? "error" : "ok");
