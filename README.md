@@ -381,6 +381,10 @@ image so Cloud Run does not need to download it on first request.
 For a complete Google Cloud Run deployment runbook starting from a machine with
 nothing installed, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
+For the separate GPU Cloud Run container path, see
+[DEPLOYMENT_GPU.md](DEPLOYMENT_GPU.md). The GPU path keeps the CPU container
+unchanged and uses `Dockerfile.gpu` with `cloudbuild.gpu.yaml`.
+
 Build:
 
 ```powershell

@@ -1,18 +1,19 @@
-FROM python:3.12-slim
+ARG GPU_BASE_IMAGE=us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-cu124.2-4.py310
+FROM ${GPU_BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/cache/huggingface \
     HF_HUB_CACHE=/cache/huggingface/hub \
-    TRANSFORMERS_CACHE=/cache/huggingface/hub
+    TRANSFORMERS_CACHE=/cache/huggingface/hub \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cu118 "torch" \
-    && grep -v '^torch==' requirements.txt > /tmp/requirements-no-torch.txt \
-    && pip install --no-cache-dir -r /tmp/requirements-no-torch.txt
+RUN python -m pip install --upgrade pip \
+    && grep -vE '^torch([=<>!~]|$)' requirements.txt > /tmp/requirements-no-torch.txt \
+    && python -m pip install -r /tmp/requirements-no-torch.txt
 
 ARG COMPRESSOR_MODEL=microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
 ENV COMPRESSOR_MODEL=${COMPRESSOR_MODEL}
@@ -21,7 +22,8 @@ RUN mkdir -p /cache/huggingface/hub \
 ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1
 
-RUN adduser --disabled-password --gecos "" appuser \
+RUN groupadd --system appuser \
+    && useradd --system --gid appuser --home-dir /app --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app /cache
 
 COPY --chown=appuser:appuser app ./app

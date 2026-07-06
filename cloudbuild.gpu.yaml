@@ -5,6 +5,8 @@ steps:
       - -f
       - Dockerfile.gpu
       - --build-arg
+      - GPU_BASE_IMAGE=${_GPU_BASE_IMAGE}
+      - --build-arg
       - COMPRESSOR_MODEL=${_COMPRESSOR_MODEL}
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
@@ -17,4 +19,9 @@ substitutions:
   _REGION: us-central1
   _REPO: prompt-compression
   _SERVICE: prompt-compression-gpu
+  _GPU_BASE_IMAGE: us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-cu124.2-4.py310
   _COMPRESSOR_MODEL: microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
+
+options:
+  machineType: E2_HIGHCPU_32
+  diskSizeGb: "500"
