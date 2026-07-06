@@ -58,6 +58,8 @@ TIMING_FIELDS = (
     "model_expand_ms",
     "uncompressed_expand_ms",
     "token_estimate_ms",
+    "model_gate_ms",
+    "diagnostics_ms",
     "other_ms",
 )
 LATENCY_FIELDS = (
@@ -66,8 +68,10 @@ LATENCY_FIELDS = (
     "timing_total_ms",
     "timing_preprocessing_ms",
     "timing_segment_selection_ms",
+    "timing_model_gate_ms",
     "timing_model_load_ms",
     "timing_llmlingua_ms",
+    "timing_diagnostics_ms",
     "timing_token_estimate_ms",
 )
 MEAN_FIELDS = (
@@ -86,6 +90,22 @@ MEAN_FIELDS = (
     "chunk_placeholder_max",
     "chunk_placeholder_avg",
     "chunk_chars_max",
+    "deterministic_tokens_saved",
+    "deterministic_reduction",
+    "whitespace_tokens_saved",
+    "toon_tokens_saved",
+    "json_minify_tokens_saved",
+    "nocompress_wrapper_tokens_saved",
+    "literal_placeholder_count",
+    "literal_placeholder_tokens_saved",
+    "duplicate_block_candidate_count",
+    "duplicate_block_candidate_tokens",
+    "model_incremental_tokens_saved",
+    "model_incremental_reduction",
+    "model_expected_incremental_savings_tokens",
+    "model_expected_incremental_reduction",
+    "model_projected_latency_ms",
+    "model_candidate_tokens",
 )
 SUM_FIELDS = (
     "model_chunk_count",
@@ -167,6 +187,18 @@ def parse_args() -> argparse.Namespace:
         help="Compression aggressiveness sent with each request.",
     )
     parser.add_argument(
+        "--compression-mode",
+        choices=("deterministic", "model_auto", "model_force"),
+        default="model_force",
+        help="Compression mode sent with each request.",
+    )
+    parser.add_argument(
+        "--latency-budget-ms",
+        type=float,
+        default=None,
+        help="Optional latency budget sent with model_auto requests.",
+    )
+    parser.add_argument(
         "--include-sections",
         action="store_true",
         help="Request section/word-label output. Leave off for production latency.",
@@ -222,6 +254,8 @@ def main() -> int:
         "warmup": args.warmup,
         "concurrency": args.concurrency,
         "aggressiveness": args.aggressiveness,
+        "compression_mode": args.compression_mode,
+        "latency_budget_ms": args.latency_budget_ms,
         "include_sections": args.include_sections,
         "seed": args.seed,
         "labels": labels,
@@ -481,9 +515,12 @@ def run_one_http(
     payload = {
         "text": case.text,
         "aggressiveness": args.aggressiveness,
+        "mode": args.compression_mode,
         "include_sections": args.include_sections,
         "include_diagnostics": True,
     }
+    if args.latency_budget_ms is not None:
+        payload["latency_budget_ms"] = args.latency_budget_ms
     started = time.perf_counter()
     try:
         response = requests.post(
@@ -532,6 +569,8 @@ def run_one_in_process(
             case.text,
             aggressiveness=args.aggressiveness,
             include_sections=args.include_sections,
+            mode=args.compression_mode,
+            latency_budget_ms=args.latency_budget_ms,
         )
         client_wall_ms = (time.perf_counter() - started) * 1000
         body = {
@@ -542,6 +581,8 @@ def run_one_in_process(
             "target_rate": result.target_rate,
             "model": result.model,
             "token_estimator": result.token_estimator,
+            "compression_mode": result.compression_mode,
+            "compression_path": result.compression_path,
             "elapsed_ms": result.elapsed_ms,
             "diagnostics": (
                 asdict(result.diagnostics)
@@ -601,6 +642,21 @@ def add_response_fields(row: dict[str, Any], body: dict[str, Any]) -> dict[str, 
     timings = diagnostics.get("timings") or {}
     response_original_tokens = body.get("original_tokens")
     response_compressed_tokens = body.get("compressed_tokens")
+    deterministic_output_tokens = diagnostics.get("deterministic_output_tokens")
+    model_incremental_tokens_saved = diagnostics.get(
+        "model_incremental_tokens_saved"
+    )
+    if model_incremental_tokens_saved is None:
+        model_incremental_tokens_saved = tokens_saved(
+            deterministic_output_tokens,
+            response_compressed_tokens,
+        )
+    model_incremental_reduction = diagnostics.get("model_incremental_reduction")
+    if model_incremental_reduction is None:
+        model_incremental_reduction = reduction_between(
+            deterministic_output_tokens,
+            response_compressed_tokens,
+        )
     row.update(
         {
             "status": "ok",
@@ -616,6 +672,14 @@ def add_response_fields(row: dict[str, Any], body: dict[str, Any]) -> dict[str, 
             "target_rate": body.get("target_rate"),
             "model": body.get("model", ""),
             "token_estimator": body.get("token_estimator", ""),
+            "compression_mode": body.get(
+                "compression_mode",
+                diagnostics.get("compression_mode", ""),
+            ),
+            "compression_path": body.get(
+                "compression_path",
+                diagnostics.get("compression_path", ""),
+            ),
             "output_chars": len(body.get("compressed_text", "")),
             "diagnostics_present": bool(diagnostics),
             "segment_count": diagnostics.get("segment_count"),
@@ -633,6 +697,42 @@ def add_response_fields(row: dict[str, Any], body: dict[str, Any]) -> dict[str, 
             "chunk_chars_max": diagnostics.get("chunk_chars_max"),
             "fallback_used": diagnostics.get("fallback_used"),
             "fallback_reason": diagnostics.get("fallback_reason", ""),
+            "deterministic_tokens_saved": diagnostics.get(
+                "deterministic_tokens_saved"
+            ),
+            "deterministic_reduction": diagnostics.get("deterministic_reduction"),
+            "whitespace_tokens_saved": diagnostics.get("whitespace_tokens_saved"),
+            "toon_tokens_saved": diagnostics.get("toon_tokens_saved"),
+            "json_minify_tokens_saved": diagnostics.get("json_minify_tokens_saved"),
+            "nocompress_wrapper_tokens_saved": diagnostics.get(
+                "nocompress_wrapper_tokens_saved"
+            ),
+            "literal_placeholder_count": diagnostics.get(
+                "literal_placeholder_count"
+            ),
+            "literal_placeholder_tokens_saved": diagnostics.get(
+                "literal_placeholder_tokens_saved"
+            ),
+            "duplicate_block_candidate_count": diagnostics.get(
+                "duplicate_block_candidate_count"
+            ),
+            "duplicate_block_candidate_tokens": diagnostics.get(
+                "duplicate_block_candidate_tokens"
+            ),
+            "model_incremental_tokens_saved": model_incremental_tokens_saved,
+            "model_incremental_reduction": model_incremental_reduction,
+            "model_gate_decision": diagnostics.get("model_gate_decision", ""),
+            "model_gate_reason": diagnostics.get("model_gate_reason", ""),
+            "model_expected_incremental_savings_tokens": diagnostics.get(
+                "model_expected_incremental_savings_tokens"
+            ),
+            "model_expected_incremental_reduction": diagnostics.get(
+                "model_expected_incremental_reduction"
+            ),
+            "model_projected_latency_ms": diagnostics.get(
+                "model_projected_latency_ms"
+            ),
+            "model_candidate_tokens": diagnostics.get("model_candidate_tokens"),
             "segment_kinds_json": json.dumps(
                 diagnostics.get("segment_kinds", {}),
                 sort_keys=True,
@@ -648,6 +748,15 @@ def tokens_saved(original: Any, compressed: Any) -> int | None:
     if original is None or compressed is None:
         return None
     return max(0, int(original) - int(compressed))
+
+
+def reduction_between(original: Any, compressed: Any) -> float | None:
+    if original is None or compressed is None:
+        return None
+    original_value = int(original)
+    if original_value <= 0:
+        return 0.0
+    return max(0.0, 1.0 - (int(compressed) / original_value))
 
 
 def build_summary_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

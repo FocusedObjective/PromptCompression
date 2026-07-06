@@ -11,6 +11,48 @@ def test_plain_text_whitespace_is_normalized_conservatively():
     assert result.compressible is True
 
 
+def test_strict_prose_whitespace_collapses_interior_spaces():
+    text = "First   line has     copied spacing.\nSecond\t\tline has tabs."
+
+    result = normalize_whitespace(text, strict_prose=True)
+
+    assert result.text == "First line has copied spacing.\nSecond line has tabs."
+
+
+def test_strict_prose_whitespace_preserves_markdown_boundaries():
+    text = (
+        "- item   keeps spacing\n"
+        "1. ordered   keeps spacing\n"
+        "> quote   keeps spacing\n"
+        "| Name   | Value   |\n"
+        "| --- | --- |\n"
+        "key:   value\n"
+        "Name     Value     Notes\n"
+        "Paragraph   collapses.  "
+    )
+
+    result = normalize_whitespace(text, strict_prose=True)
+
+    assert "- item   keeps spacing" in result.text
+    assert "1. ordered   keeps spacing" in result.text
+    assert "> quote   keeps spacing" in result.text
+    assert "| Name   | Value   |" in result.text
+    assert "key:   value" in result.text
+    assert "Name     Value     Notes" in result.text
+    assert result.text.endswith("Paragraph collapses.  ")
+
+
+def test_strict_prose_whitespace_preserves_fenced_code_and_hard_breaks():
+    fenced = "```python\nvalue   =   1\n```\n"
+    text = f"Before   prose.  \n{fenced}After   prose."
+
+    result = normalize_whitespace(text, strict_prose=True)
+
+    assert "Before prose.  \n" in result.text
+    assert "value   =   1" in result.text
+    assert result.text.endswith("After prose.")
+
+
 def test_plain_text_preserves_boundary_separator():
     result = normalize_whitespace("Before protected span.   ")
 

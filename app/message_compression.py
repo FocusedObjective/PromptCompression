@@ -1,6 +1,6 @@
 import copy
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app.compressor import PromptCompressionService
@@ -40,6 +40,7 @@ class MessagesCompressionResult:
     elapsed_ms: float
     stats: list[MessageCompressionStats]
     token_estimator: str = REGEX_TOKEN_ESTIMATOR
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class _TextCompressionResult:
     original_tokens: int
     compressed_tokens: int
     changed: bool
+    warnings: list[str]
 
 
 def compress_user_messages(
@@ -55,6 +57,10 @@ def compress_user_messages(
     compression_service: PromptCompressionService,
     aggressiveness: float,
     tenant_profile: TenantCompressionProfile | None = None,
+    mode: str | None = None,
+    latency_budget_ms: float | None = None,
+    compact_empty_user_messages: bool = False,
+    compact_duplicate_user_text_parts: bool = False,
 ) -> MessagesCompressionResult:
     start = time.perf_counter()
     compressed_messages: list[dict[str, Any]] = []
@@ -65,6 +71,8 @@ def compress_user_messages(
     user_output_tokens = 0
     non_user_tokens_preserved = 0
     estimator_names: list[str] = []
+    warnings: list[str] = []
+    seen_user_text_parts: set[str] = set()
     estimate_text_tokens = _compression_text_estimator(
         compression_service,
         tenant_profile,
@@ -101,18 +109,72 @@ def compress_user_messages(
             )
             continue
 
+        if compact_empty_user_messages and _is_empty_user_content(content):
+            user_input_tokens += original_tokens
+            stats.append(
+                MessageCompressionStats(
+                    index=index,
+                    role=role,
+                    original_tokens=original_tokens,
+                    compressed_tokens=0,
+                    tokens_saved=original_tokens,
+                    compression_applied=False,
+                    compressed=original_tokens > 0,
+                    text_parts=count_text_parts(content),
+                    compressed_text_parts=0,
+                    skipped_reason="empty_user_message_dropped",
+                )
+            )
+            continue
+
+        content_to_compress, duplicate_text_parts_dropped = (
+            _drop_duplicate_user_text_parts(content, seen_user_text_parts)
+            if compact_duplicate_user_text_parts
+            else (content, 0)
+        )
+        if compact_duplicate_user_text_parts and _is_empty_user_content(
+            content_to_compress,
+        ):
+            stats.append(
+                MessageCompressionStats(
+                    index=index,
+                    role=role,
+                    original_tokens=original_tokens,
+                    compressed_tokens=0,
+                    tokens_saved=original_tokens,
+                    compression_applied=False,
+                    compressed=original_tokens > 0,
+                    text_parts=count_text_parts(content),
+                    compressed_text_parts=0,
+                    skipped_reason="duplicate_user_text_dropped",
+                )
+            )
+            user_input_tokens += original_tokens
+            continue
+
         compressed_message = copy.deepcopy(message)
-        compressed_content, text_parts, compressed_text_parts, applied = (
+        (
+            compressed_content,
+            text_parts,
+            compressed_text_parts,
+            applied,
+            content_warnings,
+        ) = (
             _compress_user_content(
-                content,
+                content_to_compress,
                 compression_service=compression_service,
                 aggressiveness=aggressiveness,
                 tenant_profile=tenant_profile,
+                mode=mode,
+                latency_budget_ms=latency_budget_ms,
             )
         )
         if "content" in compressed_message:
             compressed_message["content"] = compressed_content
         compressed_messages.append(compressed_message)
+        for warning in content_warnings:
+            if warning not in warnings:
+                warnings.append(warning)
 
         compressed_estimate = estimate_content_token_details(
             compressed_content,
@@ -135,7 +197,11 @@ def compress_user_messages(
                 compressed=tokens_saved > 0,
                 text_parts=text_parts,
                 compressed_text_parts=compressed_text_parts,
-                skipped_reason=None if applied else _user_skip_reason(content),
+                skipped_reason=(
+                    "duplicate_user_text_part_dropped"
+                    if duplicate_text_parts_dropped
+                    else None if applied else _user_skip_reason(content)
+                ),
             )
         )
 
@@ -149,6 +215,7 @@ def compress_user_messages(
         elapsed_ms=(time.perf_counter() - start) * 1000,
         stats=stats,
         token_estimator=merge_token_estimator_names(estimator_names),
+        warnings=warnings,
     )
 
 
@@ -236,26 +303,31 @@ def _compress_user_content(
     compression_service: PromptCompressionService,
     aggressiveness: float,
     tenant_profile: TenantCompressionProfile | None,
-) -> tuple[Any, int, int, bool]:
+    mode: str | None,
+    latency_budget_ms: float | None,
+) -> tuple[Any, int, int, bool, list[str]]:
     if isinstance(content, str):
         if not content:
-            return content, 0, 0, False
+            return content, 0, 0, False, []
 
         result = _compress_text(
             content,
             compression_service=compression_service,
             aggressiveness=aggressiveness,
             tenant_profile=tenant_profile,
+            mode=mode,
+            latency_budget_ms=latency_budget_ms,
         )
-        return result.text, 1, 1 if result.changed else 0, True
+        return result.text, 1, 1 if result.changed else 0, True, result.warnings
 
     if not isinstance(content, list):
-        return content, 0, 0, False
+        return content, 0, 0, False, []
 
     compressed_parts: list[Any] = []
     text_parts = 0
     compressed_text_parts = 0
     applied = False
+    warnings: list[str] = []
 
     for part in content:
         if isinstance(part, str):
@@ -267,8 +339,13 @@ def _compress_user_content(
                 compression_service=compression_service,
                 aggressiveness=aggressiveness,
                 tenant_profile=tenant_profile,
+                mode=mode,
+                latency_budget_ms=latency_budget_ms,
             )
             compressed_parts.append(result.text)
+            for warning in result.warnings:
+                if warning not in warnings:
+                    warnings.append(warning)
             text_parts += 1
             compressed_text_parts += 1 if result.changed else 0
             applied = True
@@ -280,10 +357,15 @@ def _compress_user_content(
                 compression_service=compression_service,
                 aggressiveness=aggressiveness,
                 tenant_profile=tenant_profile,
+                mode=mode,
+                latency_budget_ms=latency_budget_ms,
             )
             compressed_part = copy.deepcopy(part)
             compressed_part["text"] = result.text
             compressed_parts.append(compressed_part)
+            for warning in result.warnings:
+                if warning not in warnings:
+                    warnings.append(warning)
             text_parts += 1
             compressed_text_parts += 1 if result.changed else 0
             applied = True
@@ -291,7 +373,63 @@ def _compress_user_content(
 
         compressed_parts.append(copy.deepcopy(part))
 
-    return compressed_parts, text_parts, compressed_text_parts, applied
+    return compressed_parts, text_parts, compressed_text_parts, applied, warnings
+
+
+def _is_empty_user_content(content: Any) -> bool:
+    if isinstance(content, str):
+        return not content.strip()
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, str) and part.strip():
+                return False
+            if _is_text_dict_part(part) and part["text"].strip():
+                return False
+            if not (isinstance(part, str) or _is_text_dict_part(part)):
+                return False
+        return True
+    return False
+
+
+def _drop_duplicate_user_text_parts(
+    content: Any,
+    seen_text_parts: set[str],
+) -> tuple[Any, int]:
+    if isinstance(content, str):
+        if content in seen_text_parts:
+            return "", 1
+        if content:
+            seen_text_parts.add(content)
+        return content, 0
+
+    if not isinstance(content, list):
+        return content, 0
+
+    updated_parts: list[Any] = []
+    dropped = 0
+    for part in content:
+        if isinstance(part, str):
+            if part in seen_text_parts:
+                dropped += 1
+                continue
+            if part:
+                seen_text_parts.add(part)
+            updated_parts.append(part)
+            continue
+
+        if _is_text_dict_part(part):
+            text = part["text"]
+            if text in seen_text_parts:
+                dropped += 1
+                continue
+            if text:
+                seen_text_parts.add(text)
+            updated_parts.append(copy.deepcopy(part))
+            continue
+
+        updated_parts.append(copy.deepcopy(part))
+
+    return updated_parts, dropped
 
 
 def _compress_text(
@@ -299,18 +437,24 @@ def _compress_text(
     compression_service: PromptCompressionService,
     aggressiveness: float,
     tenant_profile: TenantCompressionProfile | None,
+    mode: str | None,
+    latency_budget_ms: float | None,
 ) -> _TextCompressionResult:
     result = compression_service.compress(
         text=text,
         aggressiveness=aggressiveness,
         include_sections=False,
         tenant_profile=tenant_profile,
+        mode=mode,
+        latency_budget_ms=latency_budget_ms,
+        collect_diagnostics=False,
     )
     return _TextCompressionResult(
         text=result.compressed_text,
         original_tokens=result.original_tokens,
         compressed_tokens=result.compressed_tokens,
         changed=result.compressed_text != text,
+        warnings=result.warnings,
     )
 
 

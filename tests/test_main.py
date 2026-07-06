@@ -36,6 +36,10 @@ class FakeCompressionService:
         aggressiveness: float,
         include_sections: bool = True,
         tenant_profile: TenantCompressionProfile | None = None,
+        mode: str | None = None,
+        latency_budget_ms: float | None = None,
+        allow_cpu_model_auto: bool | None = None,
+        collect_diagnostics: bool = True,
     ) -> CompressionResult:
         self.calls.append((text, aggressiveness, include_sections))
         self.tenant_profiles.append(tenant_profile)
@@ -43,6 +47,10 @@ class FakeCompressionService:
         self.last_aggressiveness = aggressiveness
         self.last_include_sections = include_sections
         self.last_tenant_profile = tenant_profile
+        self.last_mode = mode
+        self.last_latency_budget_ms = latency_budget_ms
+        self.last_allow_cpu_model_auto = allow_cpu_model_auto
+        self.last_collect_diagnostics = collect_diagnostics
         labels = [
             CompressionToken(text="Prompts", kept=True),
             CompressionToken(text="are", kept=False),
@@ -105,6 +113,8 @@ class FakeCompressionService:
                 llmlingua_called=True,
                 fallback_used=False,
             ),
+            compression_mode=mode or "model_force",
+            compression_path="deterministic_plus_model",
         )
 
 
@@ -117,10 +127,14 @@ def test_index_returns_prompt_compression_ui():
     assert 'href="/benchmark"' in body
     assert 'href="/research"' in body
     assert "Dropped Words Highlighted" in body
+    assert "Diagnostic Logs" in body
     assert "JSON compressed to TOON" in body
     assert "Optional preserve controls" in body
     assert "Tenant Profile" in body
     assert 'id="tenantTestPreset"' in body
+    assert 'id="compressionMode"' in body
+    assert 'id="latencyBudgetMs"' in body
+    assert 'id="allowCpuModelAuto"' in body
     assert "tenant_rick_probe" in body
     assert 'id="tenantId"' in body
     assert 'id="tenantProfileId"' in body
@@ -130,6 +144,11 @@ def test_index_returns_prompt_compression_ui():
     assert "&lt;nocompress&gt;...&lt;/nocompress&gt;" in body
     assert "markdown fences are protected from compression" in body
     assert "requestPayload.include_sections = true" in body
+    assert "requestPayload.include_diagnostics = true" in body
+    assert "requestPayload.mode = compressionModeInput.value" in body
+    assert "requestPayload.latency_budget_ms = latencyBudgetMs" in body
+    assert "requestPayload.allow_cpu_model_auto = true" in body
+    assert "renderDiagnostics" in body
     title_index = body.index("<h2>Original Prompt</h2>")
     input_index = body.index('textarea id="prompt"')
     button_index = body.index('id="compressButton"')
@@ -187,6 +206,15 @@ def test_benchmark_index_returns_benchmark_page():
     assert "Download Raw JSONL" in body
     assert "LLMLingua p50" in body
     assert "Model calls" in body
+    assert "Gate skips" in body
+    assert 'id="compressionModeInput"' in body
+    assert 'id="latencyBudgetInput"' in body
+    assert 'id="allowCpuModelAutoInput"' in body
+    assert "mode: compressionModeInput.value" in body
+    assert "payload.latency_budget_ms" in body
+    assert "payload.allow_cpu_model_auto = true" in body
+    assert "DIAGNOSTICS" in body
+    assert "diagnosticLogFromResponse" in body
 
 
 def test_research_index_returns_research_page():
@@ -279,6 +307,8 @@ def test_compress_response_omits_sections_by_default(monkeypatch):
     )
 
     assert service.last_include_sections is False
+    assert service.last_mode == "model_force"
+    assert service.last_collect_diagnostics is False
     assert response.tenant_id == "default"
     assert response.compression_profile == "default:base"
     assert response.compression_profile_source == "default"
@@ -303,6 +333,26 @@ def test_compress_response_includes_diagnostics_when_requested(monkeypatch):
     assert response.diagnostics is not None
     assert response.diagnostics.timings.llmlingua_ms == 8.0
     assert response.diagnostics.model_segment_count == 1
+    assert service.last_collect_diagnostics is True
+
+
+def test_compress_passes_cpu_model_auto_override(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    main.compress(
+        CompressRequest(
+            text="Prompts are code.",
+            aggressiveness=0.25,
+            mode="model_auto",
+            latency_budget_ms=500.0,
+            allow_cpu_model_auto=True,
+        )
+    )
+
+    assert service.last_mode == "model_auto"
+    assert service.last_latency_budget_ms == 500.0
+    assert service.last_allow_cpu_model_auto is True
 
 
 def test_compress_response_includes_sections_when_requested(monkeypatch):
@@ -388,6 +438,7 @@ def test_v1_compress_returns_compatible_shape(monkeypatch):
     assert service.last_text == "Prompts are code."
     assert service.last_aggressiveness == 0.6
     assert service.last_include_sections is False
+    assert service.last_mode == "deterministic"
     assert response.model_dump() == {
         "output": "Prompts code.",
         "output_tokens": 2,
@@ -420,6 +471,7 @@ def test_v1_compress_defaults_aggressiveness(monkeypatch):
     )
 
     assert service.last_aggressiveness == main.DEFAULT_AGGRESSIVENESS
+    assert service.last_mode == "deterministic"
 
 
 def test_v1_compress_http_accepts_compatible_request(monkeypatch):
@@ -546,6 +598,7 @@ def test_v1_messages_compress_only_compresses_user_text(monkeypatch):
         ("Prompts are code.", 0.35, False),
         ("Prompts are code.", 0.35, False),
     ]
+    assert service.last_mode == "deterministic"
     assert response.messages == [
         {"role": "system", "content": "System stays."},
         {"role": "user", "content": "Prompts code."},
@@ -606,6 +659,97 @@ def test_v1_messages_compress_skips_user_messages_without_text(monkeypatch):
         }
     ]
     assert response.message_stats[0].skipped_reason == "no_text_content"
+
+
+def test_v1_messages_compacts_empty_user_messages_when_enabled(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            model="gpt-test",
+            messages=[
+                {"role": "user", "content": ""},
+                {"role": "user", "content": "Prompts are code."},
+            ],
+            compression_settings=V1CompressionSettings(
+                compact_empty_user_messages=True,
+            ),
+        )
+    )
+
+    assert service.calls == [("Prompts are code.", 0.15, False)]
+    assert response.messages == [
+        {"role": "user", "content": "Prompts code."},
+    ]
+    assert response.message_stats[0].skipped_reason == "empty_user_message_dropped"
+    assert response.message_stats[1].compression_applied is True
+
+
+def test_v1_messages_compacts_duplicate_user_text_parts_when_enabled(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            model="gpt-test",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Prompts are code."},
+                        {"type": "text", "text": "Prompts are code."},
+                        {"type": "image", "source": {"media_type": "image/png"}},
+                    ],
+                },
+                {"role": "user", "content": "Prompts are code."},
+            ],
+            compression_settings=V1CompressionSettings(
+                compact_duplicate_user_text_parts=True,
+            ),
+        )
+    )
+
+    assert service.calls == [("Prompts are code.", 0.15, False)]
+    assert response.messages == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Prompts code."},
+                {"type": "image", "source": {"media_type": "image/png"}},
+            ],
+        },
+    ]
+    assert response.message_stats[0].skipped_reason == (
+        "duplicate_user_text_part_dropped"
+    )
+    assert response.message_stats[1].skipped_reason == "duplicate_user_text_dropped"
+
+
+def test_v1_messages_preserves_empty_and_duplicate_user_content_by_default(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            model="gpt-test",
+            messages=[
+                {"role": "user", "content": ""},
+                {"role": "user", "content": "Prompts are code."},
+                {"role": "user", "content": "Prompts are code."},
+            ],
+        )
+    )
+
+    assert service.calls == [
+        ("Prompts are code.", 0.15, False),
+        ("Prompts are code.", 0.15, False),
+    ]
+    assert response.messages == [
+        {"role": "user", "content": ""},
+        {"role": "user", "content": "Prompts code."},
+        {"role": "user", "content": "Prompts code."},
+    ]
 
 
 def test_v1_messages_compress_applies_tenant_profile_without_forwarding_it(monkeypatch):

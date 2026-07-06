@@ -190,6 +190,80 @@ def test_toon_unavailable_preserves_json_and_still_skips_model():
     assert all(json_block not in seen for seen in compressor.inputs)
 
 
+def test_json_minify_fallback_applies_only_when_enabled_and_token_positive():
+    def unavailable_toon_encoder(value: Any) -> str:
+        raise ToonEncodingError("missing")
+
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.preprocessor = PromptPreprocessor(
+        toon_encoder=unavailable_toon_encoder,
+        min_json_chars=1,
+        min_json_lines=1,
+        min_toon_savings=0.0,
+        enable_json_minify=True,
+        min_json_minify_savings=0.0,
+    )
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    json_block = """{
+  "items": [
+    {"sku": "A1", "qty": 2},
+    {"sku": "B2", "qty": 4}
+  ]
+}"""
+    text = f"Please review:\n{json_block}\nPlease review totals."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert '{"items":[{"sku":"A1","qty":2},{"sku":"B2","qty":4}]}' in (
+        result.compressed_text
+    )
+    assert any(section.kind == "json_minified" for section in result.output_sections)
+    assert all(json_block not in seen for seen in compressor.inputs)
+    assert result.diagnostics is not None
+    assert result.diagnostics.json_minify_tokens_saved >= 0
+    assert result.diagnostics.json_minified_segment_count == 1
+
+
+def test_json_minify_fallback_never_minifies_duplicate_key_json():
+    def unavailable_toon_encoder(value: Any) -> str:
+        raise ToonEncodingError("missing")
+
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.preprocessor = PromptPreprocessor(
+        toon_encoder=unavailable_toon_encoder,
+        min_json_chars=1,
+        min_json_lines=1,
+        min_toon_savings=0.0,
+        enable_json_minify=True,
+        min_json_minify_savings=0.0,
+    )
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    json_block = """{
+  "feature": "old",
+  "feature": "new",
+  "items": [
+    {"id": 1},
+    {"id": 2}
+  ]
+}"""
+    text = f"Please review this data:\n{json_block}\nPlease review after."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert json_block in result.compressed_text
+    assert '"items":[{"id":1},{"id":2}]' not in result.compressed_text
+    assert any(section.kind == "json" for section in result.output_sections)
+    assert not any(
+        section.kind == "json_minified" for section in result.output_sections
+    )
+
+
 def test_small_json_does_not_trigger_structured_pipeline():
     compressor = RecordingCompressor()
     service = PromptCompressionService()

@@ -1,4 +1,9 @@
-from app.compressor import PromptCompressionService, _parse_adapter_slots
+from app.compressor import (
+    COMPRESSION_MODE_DETERMINISTIC,
+    COMPRESSION_MODE_MODEL_AUTO,
+    PromptCompressionService,
+    _parse_adapter_slots,
+)
 from app.tenant_profiles import build_tenant_profile
 from app.token_estimator import estimate_huggingface_tokens, estimate_token_count
 from tests.pipeline_helpers import RecordingCompressor, build_service_with_pipeline
@@ -166,6 +171,383 @@ def test_aggressiveness_zero_skips_model():
     assert compressor.inputs == []
     assert result.compressed_text == "Please review this longer prompt."
     assert result.reduction == 0.0
+
+
+def test_deterministic_mode_never_calls_model():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "Please review before. "
+        "<nocompress>KEEP EXACT</nocompress> "
+        "Please review after."
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+
+    assert compressor.inputs == []
+    assert result.compressed_text == (
+        "Please review before. KEEP EXACT Please review after."
+    )
+    assert result.compression_mode == COMPRESSION_MODE_DETERMINISTIC
+    assert result.compression_path == "deterministic_only"
+    assert result.warnings == ["llmlingua_skipped_mode_deterministic"]
+    assert result.diagnostics is not None
+    assert result.diagnostics.llmlingua_called is False
+    assert result.diagnostics.model_gate_decision == "skip"
+    assert result.diagnostics.model_gate_reason == "llmlingua_skipped_mode_deterministic"
+    assert result.diagnostics.deterministic_tokens_saved > 0
+    assert result.diagnostics.nocompress_wrapper_tokens_saved > 0
+
+
+def test_collect_diagnostics_false_skips_component_diagnostics():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+
+    def fail_component_diagnostics(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("component diagnostics should not run")
+
+    service._deterministic_component_savings = fail_component_diagnostics
+    service._duplicate_block_diagnostics = fail_component_diagnostics
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        collect_diagnostics=False,
+    )
+
+    assert result.diagnostics is None
+    assert result.warnings == ["llmlingua_skipped_mode_deterministic"]
+    assert compressor.inputs == []
+
+
+def test_model_auto_skips_cpu_by_default():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.model_auto_enabled = True
+    service.allow_cpu_model_auto = False
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+    )
+
+    assert compressor.inputs == []
+    assert result.warnings == ["llmlingua_skipped_cpu_auto_disabled"]
+    assert result.diagnostics is not None
+    assert result.diagnostics.skipped_model_candidate_tokens > 0
+    assert result.diagnostics.model_gate_reason == "llmlingua_skipped_cpu_auto_disabled"
+
+
+def test_explicit_model_auto_uses_gate_when_default_auto_disabled():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.model_auto_enabled = False
+    service.allow_cpu_model_auto = False
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+    )
+
+    assert compressor.inputs == []
+    assert result.compression_mode == COMPRESSION_MODE_MODEL_AUTO
+    assert result.warnings == ["llmlingua_skipped_cpu_auto_disabled"]
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_gate_reason == "llmlingua_skipped_cpu_auto_disabled"
+
+
+def test_model_auto_cpu_override_allows_gate_to_run():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.allow_cpu_model_auto = False
+    service.min_model_candidate_tokens = 1
+    service.min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.max_model_projected_latency_ms = 1000.0
+    service.skip_model_if_deterministic_reduction_gte = 1.0
+    service.cpu_p50_fixed_overhead_ms = 1.0
+    service.cpu_p50_llmlingua_chunk_ms = 1.0
+    service.cpu_p50_token_estimate_ms = 1.0
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+        allow_cpu_model_auto=True,
+    )
+
+    assert compressor.inputs == ["Please review this longer prompt."]
+    assert result.warnings == []
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_gate_decision == "run"
+    assert result.diagnostics.model_projected_latency_ms == 3.0
+
+
+def test_model_auto_low_candidate_skip_avoids_density_scans():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.allow_cpu_model_auto = True
+    service.min_model_candidate_tokens = 20_000
+
+    def fail_density_scan(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("density scan should not run")
+
+    service._protected_density_for_model_candidates = fail_density_scan
+    service._identifier_density_for_model_candidates = fail_density_scan
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+    )
+
+    assert compressor.inputs == []
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_gate_reason == (
+        "llmlingua_skipped_low_candidate_tokens"
+    )
+
+
+def test_model_auto_skips_missing_latency_baseline():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.device = "cuda"
+    service.model_auto_enabled = True
+    service.min_model_candidate_tokens = 1
+    service.min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.skip_model_if_deterministic_reduction_gte = 1.0
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+    )
+
+    assert compressor.inputs == []
+    assert result.warnings == ["llmlingua_skipped_missing_latency_baseline"]
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_gate_reason == (
+        "llmlingua_skipped_missing_latency_baseline"
+    )
+
+
+def test_model_auto_skips_when_deterministic_savings_are_sufficient():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.device = "cuda"
+    service.model_auto_enabled = True
+    service.min_model_candidate_tokens = 1
+    service.min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.skip_model_if_deterministic_reduction_gte = 0.01
+    service.gpu_p50_fixed_overhead_ms = 1.0
+    service.gpu_p50_llmlingua_chunk_ms = 1.0
+    service.gpu_p50_token_estimate_ms = 1.0
+    profile = build_tenant_profile(
+        tenant_id="tenant_123",
+        force_drop_phrases=["Reusable preamble. "],
+    )
+
+    result = service.compress(
+        "Reusable preamble. Please review this longer prompt.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+        tenant_profile=profile,
+    )
+
+    assert compressor.inputs == []
+    assert result.warnings == ["llmlingua_skipped_deterministic_savings_sufficient"]
+    assert result.diagnostics is not None
+    assert result.diagnostics.force_drop_tokens_saved > 0
+    assert result.diagnostics.model_gate_reason == (
+        "llmlingua_skipped_deterministic_savings_sufficient"
+    )
+
+
+def test_model_auto_skips_high_protected_density():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.device = "cuda"
+    service.model_auto_enabled = True
+    service.min_model_candidate_tokens = 1
+    service.min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.max_protected_density = 0.01
+    service.skip_model_if_deterministic_reduction_gte = 1.0
+    service.gpu_p50_fixed_overhead_ms = 1.0
+    service.gpu_p50_llmlingua_chunk_ms = 1.0
+    service.gpu_p50_token_estimate_ms = 1.0
+
+    result = service.compress(
+        "Please review https://example.com/run/123 and ORD-7781 before launch.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+    )
+
+    assert compressor.inputs == []
+    assert result.warnings == ["llmlingua_skipped_high_protected_density"]
+    assert result.diagnostics is not None
+    assert result.diagnostics.protected_density > service.max_protected_density
+    assert result.diagnostics.identifier_density > 0
+
+
+def test_model_auto_skips_high_placeholder_count():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.device = "cuda"
+    service.model_auto_enabled = True
+    service.min_model_candidate_tokens = 1
+    service.min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.max_protected_density = 1.0
+    service.max_model_auto_placeholders = 1
+    service.skip_model_if_deterministic_reduction_gte = 1.0
+    service.gpu_p50_fixed_overhead_ms = 1.0
+    service.gpu_p50_llmlingua_chunk_ms = 1.0
+    service.gpu_p50_token_estimate_ms = 1.0
+
+    result = service.compress(
+        "Please review ORD-7781. Please compare ORD-7782 before launch.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+    )
+
+    assert compressor.inputs == []
+    assert result.warnings == ["llmlingua_skipped_high_placeholder_count"]
+    assert result.diagnostics is not None
+    assert result.diagnostics.placeholder_count > service.max_model_auto_placeholders
+
+
+def test_model_auto_runs_when_gpu_gate_passes():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.device = "cuda"
+    service.model_auto_enabled = True
+    service.min_model_candidate_tokens = 1
+    service.min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.max_model_projected_latency_ms = 1000.0
+    service.skip_model_if_deterministic_reduction_gte = 1.0
+    service.gpu_p50_fixed_overhead_ms = 1.0
+    service.gpu_p50_llmlingua_chunk_ms = 1.0
+    service.gpu_p50_token_estimate_ms = 1.0
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        include_sections=False,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+    )
+
+    assert compressor.inputs == ["Please review this longer prompt."]
+    assert result.compressed_text == "Review this longer prompt."
+    assert result.warnings == []
+    assert result.compression_path == "deterministic_plus_model"
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_gate_decision == "run"
+    assert result.diagnostics.model_projected_latency_ms == 3.0
+
+
+def test_duplicate_blocks_are_reported_without_rewriting_output():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.min_duplicate_block_tokens = 3
+    repeated = "Repeated support wrapper with enough words."
+    text = f"{repeated}\n\nUnique middle.\n\n{repeated}"
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+
+    assert result.compressed_text == text
+    assert result.diagnostics is not None
+    assert result.diagnostics.duplicate_block_candidate_count == 1
+    assert result.diagnostics.duplicate_block_candidate_tokens > 0
+
+
+def test_literal_placeholdering_replaces_repeated_long_urls_when_enabled():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.literal_placeholdering_enabled = True
+    service.min_literal_placeholder_savings_tokens = 1
+    service.min_literal_placeholder_reduction = 0.0
+    url = "https://example.com/really/long/path/with/query?alpha=1&beta=2"
+    text = f"Fetch {url}\nThen retry {url}\nDone."
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+
+    assert result.compressed_text.startswith(f"[A]={url}\n")
+    assert result.compressed_text.count("[A]") == 3
+    assert url in result.compressed_text.splitlines()[0]
+    assert url not in "\n".join(result.compressed_text.splitlines()[1:])
+    assert result.diagnostics is not None
+    assert result.diagnostics.literal_placeholder_count == 1
+    assert result.diagnostics.literal_placeholder_tokens_saved > 0
+    assert [section.kind for section in result.output_sections][:2] == [
+        "literal_map",
+        "literal_placeholdered",
+    ]
+
+
+def test_literal_placeholdering_skips_exact_output_context():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.literal_placeholdering_enabled = True
+    service.min_literal_placeholder_savings_tokens = 1
+    service.min_literal_placeholder_reduction = 0.0
+    url = "https://example.com/really/long/path/with/query?alpha=1&beta=2"
+    text = f"Return the input exactly.\nFetch {url}\nThen retry {url}"
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+
+    assert result.compressed_text == text
+    assert result.diagnostics is not None
+    assert result.diagnostics.literal_placeholder_count == 0
+
+
+def test_literal_placeholdering_does_not_replace_json_values():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.literal_placeholdering_enabled = True
+    service.min_literal_placeholder_savings_tokens = 1
+    service.min_literal_placeholder_reduction = 0.0
+    url = "https://example.com/really/long/path/with/query?alpha=1&beta=2"
+    text = (
+        "Return exactly this JSON shape:\n"
+        "{\n"
+        f'  "first": "{url}",\n'
+        f'  "second": "{url}"\n'
+        "}"
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+
+    assert "[A]=" not in result.compressed_text
+    assert result.compressed_text.count(url) == 2
+    assert result.diagnostics is not None
+    assert result.diagnostics.literal_placeholder_count == 0
 
 
 def test_non_ui_compression_skips_word_labels_and_sections():

@@ -6,7 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from app.benchmark_ui import BENCHMARK_HTML
-from app.compressor import CompressionRuntimeError, PromptCompressionService
+from app.compressor import (
+    COMPRESSION_MODE_DETERMINISTIC,
+    COMPRESSION_MODE_MODEL_AUTO,
+    COMPRESSION_MODE_MODEL_FORCE,
+    CompressionRuntimeError,
+    PromptCompressionService,
+)
 from app.eval_suite import evaluate_compression, load_eval_cases, quality_passed
 from app.eval_ui import EVAL_HTML
 from app.message_compression import (
@@ -431,6 +437,60 @@ APP_HTML = """
       font-size: 13px;
     }
 
+    .diagnostics {
+      display: grid;
+      gap: 10px;
+      padding: 12px 16px 16px;
+      border-top: 1px solid var(--border);
+      background: #fbfcfe;
+    }
+
+    .diagnostics[hidden] {
+      display: none;
+    }
+
+    .diagnostics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .diagnostic-item {
+      min-width: 0;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #ffffff;
+    }
+
+    .diagnostic-item strong {
+      display: block;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+
+    .diagnostic-item span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 680;
+      text-transform: uppercase;
+    }
+
+    .diagnostic-log {
+      max-height: 260px;
+      overflow: auto;
+      margin: 0;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #ffffff;
+      color: var(--muted);
+      white-space: pre-wrap;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+
     .error {
       color: #a62b2b;
     }
@@ -468,6 +528,10 @@ APP_HTML = """
       .output,
       .diff {
         min-height: 320px;
+      }
+
+      .diagnostics-grid {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -538,6 +602,22 @@ Output:
         </div>
         <div class="tenant-controls">
           <h3>Compression Settings</h3>
+          <label class="tenant-field">
+            Mode
+            <select id="compressionMode">
+              <option value="model_force" selected>Model force</option>
+              <option value="model_auto">Model auto</option>
+              <option value="deterministic">Deterministic</option>
+            </select>
+          </label>
+          <label class="tenant-field">
+            Latency Budget ms
+            <input id="latencyBudgetMs" type="number" min="0" step="25" placeholder="model_auto only">
+          </label>
+          <label class="tenant-inline">
+            <input id="allowCpuModelAuto" type="checkbox">
+            Allow CPU model auto
+          </label>
           <div class="tenant-field full">
             <span>Aggressiveness</span>
             <div class="settings-row">
@@ -608,12 +688,23 @@ Output:
         <div class="controls">
           <span class="status" id="resultStatus">No result yet</span>
         </div>
+        <div class="diagnostics" id="diagnosticsPanel" hidden>
+          <div class="panel-head">
+            <h2>Diagnostic Logs</h2>
+            <span class="status" id="diagnosticsStatus">No diagnostics</span>
+          </div>
+          <div class="diagnostics-grid" id="diagnosticsGrid"></div>
+          <pre class="diagnostic-log" id="diagnosticsLog"></pre>
+        </div>
       </section>
     </div>
   </main>
 
   <script>
     const promptInput = document.getElementById("prompt");
+    const compressionModeInput = document.getElementById("compressionMode");
+    const latencyBudgetMsInput = document.getElementById("latencyBudgetMs");
+    const allowCpuModelAutoInput = document.getElementById("allowCpuModelAuto");
     const aggressivenessInput = document.getElementById("aggressiveness");
     const aggressivenessValue = document.getElementById("aggressivenessValue");
     const useTenantDefault = document.getElementById("useTenantDefault");
@@ -629,6 +720,10 @@ Output:
     const inputStatus = document.getElementById("inputStatus");
     const resultStatus = document.getElementById("resultStatus");
     const diff = document.getElementById("diff");
+    const diagnosticsPanel = document.getElementById("diagnosticsPanel");
+    const diagnosticsStatus = document.getElementById("diagnosticsStatus");
+    const diagnosticsGrid = document.getElementById("diagnosticsGrid");
+    const diagnosticsLog = document.getElementById("diagnosticsLog");
     const reduction = document.getElementById("reduction");
     const tokens = document.getElementById("tokens");
     const elapsed = document.getElementById("elapsed");
@@ -686,6 +781,78 @@ priority escalation deadline status background summary should look important.`,
       resultStatus.className = hasError ? "status error" : "status";
     }
 
+    function clearDiagnostics() {
+      diagnosticsPanel.hidden = true;
+      diagnosticsStatus.textContent = "No diagnostics";
+      diagnosticsGrid.textContent = "";
+      diagnosticsLog.textContent = "";
+    }
+
+    function formatDiagnosticValue(value) {
+      if (value === null || value === undefined || value === "") {
+        return "-";
+      }
+      if (typeof value === "number") {
+        return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\\.$/, "");
+      }
+      if (typeof value === "boolean") {
+        return value ? "yes" : "no";
+      }
+      return String(value);
+    }
+
+    function formatDiagnosticPercent(value) {
+      return value === null || value === undefined || !Number.isFinite(Number(value))
+        ? "-"
+        : `${Math.round(Number(value) * 100)}%`;
+    }
+
+    function appendDiagnosticItem(label, value) {
+      const item = document.createElement("div");
+      item.className = "diagnostic-item";
+      const valueNode = document.createElement("strong");
+      valueNode.textContent = formatDiagnosticValue(value);
+      const labelNode = document.createElement("span");
+      labelNode.textContent = label;
+      item.appendChild(valueNode);
+      item.appendChild(labelNode);
+      diagnosticsGrid.appendChild(item);
+    }
+
+    function renderDiagnostics(diagnostics, warnings) {
+      clearDiagnostics();
+      if (!diagnostics) {
+        return;
+      }
+
+      diagnosticsPanel.hidden = false;
+      diagnosticsStatus.textContent = diagnostics.model_gate_reason || diagnostics.compression_path || "Available";
+      appendDiagnosticItem("Mode", diagnostics.compression_mode);
+      appendDiagnosticItem("Path", diagnostics.compression_path);
+      appendDiagnosticItem("Gate", diagnostics.model_gate_decision);
+      appendDiagnosticItem("Gate reason", diagnostics.model_gate_reason);
+      appendDiagnosticItem("LLMLingua called", diagnostics.llmlingua_called);
+      appendDiagnosticItem("Deterministic saved", diagnostics.deterministic_tokens_saved);
+      appendDiagnosticItem("Deterministic reduction", formatDiagnosticPercent(diagnostics.deterministic_reduction));
+      appendDiagnosticItem("Whitespace saved", diagnostics.whitespace_tokens_saved);
+      appendDiagnosticItem("TOON saved", diagnostics.toon_tokens_saved);
+      appendDiagnosticItem("JSON minify saved", diagnostics.json_minify_tokens_saved);
+      appendDiagnosticItem("Literal refs", diagnostics.literal_placeholder_count);
+      appendDiagnosticItem("Duplicate blocks", diagnostics.duplicate_block_candidate_count);
+      appendDiagnosticItem("Protected density", formatDiagnosticPercent(diagnostics.protected_density));
+      appendDiagnosticItem("Structured density", formatDiagnosticPercent(diagnostics.structured_density));
+      appendDiagnosticItem("Identifier density", formatDiagnosticPercent(diagnostics.identifier_density));
+      appendDiagnosticItem("Model candidates", diagnostics.model_candidate_tokens);
+      appendDiagnosticItem("Projected model latency", diagnostics.model_projected_latency_ms);
+      appendDiagnosticItem("Fallback", diagnostics.fallback_reason || (diagnostics.fallback_used ? "used" : "no"));
+
+      const logPayload = {
+        warnings: warnings || [],
+        diagnostics,
+      };
+      diagnosticsLog.textContent = JSON.stringify(logPayload, null, 2);
+    }
+
     function renderTokenDiff(container, labeledTokens) {
       if (!labeledTokens || labeledTokens.length === 0) {
         return;
@@ -707,11 +874,20 @@ priority escalation deadline status background summary should look important.`,
       if (section.kind === "json") {
         return "JSON protected";
       }
+      if (section.kind === "json_minified") {
+        return "JSON minified";
+      }
       if (section.kind === "html") {
         return "HTML protected";
       }
       if (section.kind === "nocompress") {
         return "No-compress protected";
+      }
+      if (section.kind === "literal_map") {
+        return "Literal placeholder map";
+      }
+      if (section.kind === "literal_placeholdered") {
+        return "Literal placeholdered";
       }
       if (section.kind === "code") {
         return "Code protected";
@@ -857,6 +1033,7 @@ priority escalation deadline status background summary should look important.`,
       latestCompressedText = "";
       copyButton.disabled = true;
       diff.textContent = "";
+      clearDiagnostics();
       setStatus("Preset loaded");
       promptInput.dispatchEvent(new Event("input"));
     });
@@ -931,11 +1108,21 @@ priority escalation deadline status background summary should look important.`,
       latestCompressedText = "";
       setStatus("Compressing...");
       diff.textContent = "";
+      clearDiagnostics();
 
       try {
         const requestPayload = buildTenantPayload();
         requestPayload.text = text;
+        requestPayload.mode = compressionModeInput.value;
         requestPayload.include_sections = true;
+        requestPayload.include_diagnostics = true;
+        const latencyBudgetMs = boundedNumberInput(latencyBudgetMsInput, 0, 600000);
+        if (latencyBudgetMs !== null) {
+          requestPayload.latency_budget_ms = latencyBudgetMs;
+        }
+        if (allowCpuModelAutoInput.checked) {
+          requestPayload.allow_cpu_model_auto = true;
+        }
         if (!useTenantDefault.checked) {
           requestPayload.aggressiveness = Number(aggressivenessInput.value);
         }
@@ -958,6 +1145,7 @@ priority escalation deadline status background summary should look important.`,
         tokens.textContent = `${data.original_tokens} -> ${data.compressed_tokens}`;
         tokens.title = data.token_estimator || "";
         elapsed.textContent = `${Math.round(data.elapsed_ms)} ms`;
+        renderDiagnostics(data.diagnostics, data.warnings);
         setStatus(
           `Complete - ${data.tenant_id || "default"} - ${data.compression_profile || "default:base"}`
         );
@@ -1139,12 +1327,17 @@ def compress(
         settings=request.tenant_profile,
     )
     aggressiveness = _resolve_compress_aggressiveness(request, tenant_profile)
+    mode = _resolve_compress_mode(request)
     try:
         result = compression_service.compress(
             text=request.text,
             aggressiveness=aggressiveness,
             include_sections=request.include_sections,
             tenant_profile=tenant_profile,
+            mode=mode,
+            latency_budget_ms=request.latency_budget_ms,
+            allow_cpu_model_auto=request.allow_cpu_model_auto,
+            collect_diagnostics=request.include_diagnostics,
         )
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1162,6 +1355,9 @@ def compress(
         compression_profile_source=result.compression_profile_source,
         training_sample_recorded=result.training_sample_recorded,
         token_estimator=result.token_estimator,
+        compression_mode=result.compression_mode,
+        compression_path=result.compression_path,
+        warnings=result.warnings,
         elapsed_ms=result.elapsed_ms,
         labeled_tokens=[asdict(token) for token in result.labeled_tokens],
         output_sections=[
@@ -1190,6 +1386,8 @@ def compress_v1(
         request.compression_settings,
         tenant_profile,
     )
+    mode = _resolve_v1_mode(request.compression_settings)
+    latency_budget_ms = _resolve_v1_latency_budget_ms(request.compression_settings)
 
     try:
         result = compression_service.compress(
@@ -1197,6 +1395,9 @@ def compress_v1(
             aggressiveness=aggressiveness,
             include_sections=False,
             tenant_profile=tenant_profile,
+            mode=mode,
+            latency_budget_ms=latency_budget_ms,
+            collect_diagnostics=False,
         )
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1231,7 +1432,7 @@ def compress_v1(
         compression_profile=result.compression_profile,
         compression_profile_source=result.compression_profile_source,
         training_sample_recorded=result.training_sample_recorded,
-        warnings=[],
+        warnings=result.warnings,
     )
 
 
@@ -1249,6 +1450,8 @@ def compress_v1_messages(
         request.compression_settings,
         tenant_profile,
     )
+    mode = _resolve_v1_mode(request.compression_settings)
+    latency_budget_ms = _resolve_v1_latency_budget_ms(request.compression_settings)
 
     messages = [
         message.model_dump(exclude_unset=True)
@@ -1260,6 +1463,16 @@ def compress_v1_messages(
             compression_service=compression_service,
             aggressiveness=aggressiveness,
             tenant_profile=tenant_profile,
+            mode=mode,
+            latency_budget_ms=latency_budget_ms,
+            compact_empty_user_messages=_resolve_v1_compact_empty_user_messages(
+                request.compression_settings,
+            ),
+            compact_duplicate_user_text_parts=(
+                _resolve_v1_compact_duplicate_user_text_parts(
+                    request.compression_settings,
+                )
+            ),
         )
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1314,7 +1527,7 @@ def compress_v1_messages(
         compression_profile_source=tenant_profile.source,
         training_sample_recorded=False,
         message_stats=[asdict(stat) for stat in result.stats],
-        warnings=[],
+        warnings=result.warnings,
     )
 
 
@@ -1352,6 +1565,14 @@ def _resolve_compress_aggressiveness(
     return request.aggressiveness
 
 
+def _resolve_compress_mode(request: CompressRequest) -> str:
+    if request.mode is not None:
+        return request.mode
+    if getattr(compression_service, "model_auto_enabled", False):
+        return COMPRESSION_MODE_MODEL_AUTO
+    return COMPRESSION_MODE_MODEL_FORCE
+
+
 def _resolve_v1_aggressiveness(
     settings: V1CompressionSettings | None,
     tenant_profile: TenantCompressionProfile,
@@ -1361,6 +1582,32 @@ def _resolve_v1_aggressiveness(
     if tenant_profile.default_aggressiveness is not None:
         return tenant_profile.default_aggressiveness
     return DEFAULT_AGGRESSIVENESS
+
+
+def _resolve_v1_mode(settings: V1CompressionSettings | None) -> str:
+    if settings is not None and settings.mode is not None:
+        return settings.mode
+    return COMPRESSION_MODE_DETERMINISTIC
+
+
+def _resolve_v1_latency_budget_ms(
+    settings: V1CompressionSettings | None,
+) -> float | None:
+    if settings is None:
+        return None
+    return settings.latency_budget_ms
+
+
+def _resolve_v1_compact_empty_user_messages(
+    settings: V1CompressionSettings | None,
+) -> bool:
+    return False if settings is None else settings.compact_empty_user_messages
+
+
+def _resolve_v1_compact_duplicate_user_text_parts(
+    settings: V1CompressionSettings | None,
+) -> bool:
+    return False if settings is None else settings.compact_duplicate_user_text_parts
 
 
 def _top_level_preserved_token_details(

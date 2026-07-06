@@ -6,11 +6,19 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.toon_adapter import ToonEncodingError, encode_toon
-from app.whitespace_normalizer import normalize_whitespace
+from app.whitespace_normalizer import (
+    ENABLE_STRICT_PROSE_WHITESPACE,
+    normalize_whitespace,
+)
 
 MIN_JSON_CHARS = int(os.getenv("COMPRESSOR_MIN_JSON_CHARS", "300"))
 MIN_JSON_LINES = int(os.getenv("COMPRESSOR_MIN_JSON_LINES", "4"))
 MIN_TOON_SAVINGS = float(os.getenv("COMPRESSOR_MIN_TOON_SAVINGS", "0.08"))
+ENABLE_JSON_MINIFY = os.getenv(
+    "COMPRESSOR_ENABLE_JSON_MINIFY",
+    "false",
+).lower() in {"1", "true", "yes", "on"}
+MIN_JSON_MINIFY_SAVINGS = float(os.getenv("COMPRESSOR_MIN_JSON_MINIFY_SAVINGS", "0.05"))
 
 NOCOMPRESS_PATTERN = re.compile(
     r"<nocompress>(?P<body>.*?)</nocompress>",
@@ -71,6 +79,7 @@ class CompressionSegment:
     text: str
     compressible: bool
     kind: str
+    source_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,11 +95,17 @@ class PromptPreprocessor:
         min_json_chars: int = MIN_JSON_CHARS,
         min_json_lines: int = MIN_JSON_LINES,
         min_toon_savings: float = MIN_TOON_SAVINGS,
+        enable_json_minify: bool = ENABLE_JSON_MINIFY,
+        min_json_minify_savings: float = MIN_JSON_MINIFY_SAVINGS,
+        strict_prose_whitespace: bool = ENABLE_STRICT_PROSE_WHITESPACE,
     ) -> None:
         self.toon_encoder = toon_encoder
         self.min_json_chars = min_json_chars
         self.min_json_lines = min_json_lines
         self.min_toon_savings = min_toon_savings
+        self.enable_json_minify = enable_json_minify
+        self.min_json_minify_savings = min_json_minify_savings
+        self.strict_prose_whitespace = strict_prose_whitespace
 
     def prepare(self, text: str) -> list[CompressionSegment]:
         segments: list[CompressionSegment] = []
@@ -101,7 +116,12 @@ class PromptPreprocessor:
             body = match.group("body")
             if body:
                 segments.append(
-                    CompressionSegment(text=body, compressible=False, kind="nocompress")
+                    CompressionSegment(
+                        text=body,
+                        compressible=False,
+                        kind="nocompress",
+                        source_text=match.group(0),
+                    )
                 )
             cursor = match.end()
 
@@ -119,6 +139,7 @@ class PromptPreprocessor:
                     text=text[span.start : span.end],
                     compressible=False,
                     kind="verbatim",
+                    source_text=text[span.start : span.end],
                 )
             )
             cursor = span.end
@@ -145,6 +166,7 @@ class PromptPreprocessor:
                         text=match.group(0),
                         compressible=False,
                         kind="code",
+                        source_text=match.group(0),
                     )
                 )
                 cursor = match.end()
@@ -170,6 +192,7 @@ class PromptPreprocessor:
                         ),
                         compressible=False,
                         kind="toon",
+                        source_text=match.group(0),
                     )
                 )
             else:
@@ -178,6 +201,7 @@ class PromptPreprocessor:
                         text=match.group(0),
                         compressible=False,
                         kind="json",
+                        source_text=match.group(0),
                     )
                 )
             cursor = match.end()
@@ -310,7 +334,10 @@ class PromptPreprocessor:
         if not text:
             return None
 
-        normalized = normalize_whitespace(text)
+        normalized = normalize_whitespace(
+            text,
+            strict_prose=self.strict_prose_whitespace,
+        )
         if not normalized.text:
             return None
 
@@ -318,6 +345,7 @@ class PromptPreprocessor:
             text=normalized.text,
             compressible=normalized.compressible,
             kind=normalized.kind,
+            source_text=text,
         )
 
     def _json_segment_for_candidate(
@@ -340,21 +368,69 @@ class PromptPreprocessor:
             or self._contains_llm_tool_exchange(parsed)
             or self._contains_duplicate_json_keys(candidate)
         ):
-            return CompressionSegment(text=candidate, compressible=False, kind="json")
+            return CompressionSegment(
+                text=candidate,
+                compressible=False,
+                kind="json",
+                source_text=candidate,
+            )
 
         try:
             toon = self.toon_encoder(parsed)
         except ToonEncodingError:
-            return CompressionSegment(text=candidate, compressible=False, kind="json")
+            return self._json_fallback_segment(candidate, parsed)
 
         if not toon.strip():
-            return CompressionSegment(text=candidate, compressible=False, kind="json")
+            return self._json_fallback_segment(candidate, parsed)
 
         savings = 1.0 - (len(toon) / len(candidate))
         if savings < self.min_toon_savings:
-            return CompressionSegment(text=candidate, compressible=False, kind="json")
+            return self._json_fallback_segment(candidate, parsed)
 
-        return CompressionSegment(text=toon, compressible=False, kind="toon")
+        return CompressionSegment(
+            text=toon,
+            compressible=False,
+            kind="toon",
+            source_text=candidate,
+        )
+
+    def _json_fallback_segment(
+        self,
+        candidate: str,
+        parsed: Any,
+    ) -> CompressionSegment:
+        if not self.enable_json_minify:
+            return CompressionSegment(
+                text=candidate,
+                compressible=False,
+                kind="json",
+                source_text=candidate,
+            )
+
+        minified = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False)
+        if not minified.strip():
+            return CompressionSegment(
+                text=candidate,
+                compressible=False,
+                kind="json",
+                source_text=candidate,
+            )
+
+        savings = 1.0 - (len(minified) / len(candidate))
+        if savings < self.min_json_minify_savings:
+            return CompressionSegment(
+                text=candidate,
+                compressible=False,
+                kind="json",
+                source_text=candidate,
+            )
+
+        return CompressionSegment(
+            text=minified,
+            compressible=False,
+            kind="json_minified",
+            source_text=candidate,
+        )
 
     def _contains_llm_tool_exchange(self, value: Any) -> bool:
         if isinstance(value, list):

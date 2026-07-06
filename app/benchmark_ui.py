@@ -138,6 +138,7 @@ BENCHMARK_HTML = """
     }
 
     .field input[type="text"],
+    .field select,
     .field input[type="number"] {
       width: 100%;
       min-height: 34px;
@@ -374,6 +375,22 @@ BENCHMARK_HTML = """
         <input id="concurrencyInput" type="number" min="1" max="8" step="1" value="1">
       </label>
       <label class="field">
+        Mode
+        <select id="compressionModeInput">
+          <option value="model_force" selected>Model force</option>
+          <option value="model_auto">Model auto</option>
+          <option value="deterministic">Deterministic</option>
+        </select>
+      </label>
+      <label class="field">
+        Latency budget ms
+        <input id="latencyBudgetInput" type="number" min="0" step="25" placeholder="model_auto only">
+      </label>
+      <label class="inline">
+        <input id="allowCpuModelAutoInput" type="checkbox">
+        Allow CPU model auto
+      </label>
+      <label class="field">
         Aggressiveness <strong id="aggressivenessValue">0.25</strong>
         <input id="aggressivenessInput" type="range" min="0" max="1" step="0.05" value="0.25">
       </label>
@@ -407,6 +424,7 @@ BENCHMARK_HTML = """
                 <th>Preprocess p50</th>
                 <th>Selection p50</th>
                 <th>Model calls</th>
+                <th>Gate skips</th>
                 <th>LLMLingua p50</th>
                 <th>Token est. p50</th>
                 <th>Reduction avg</th>
@@ -435,6 +453,9 @@ BENCHMARK_HTML = """
                 <th>LLMLingua</th>
                 <th>In tokens</th>
                 <th>Out tokens</th>
+                <th>Mode</th>
+                <th>Path</th>
+                <th>Gate</th>
                 <th>Error</th>
               </tr>
             </thead>
@@ -468,6 +489,8 @@ BENCHMARK_HTML = """
       "model_expand_ms",
       "uncompressed_expand_ms",
       "token_estimate_ms",
+      "model_gate_ms",
+      "diagnostics_ms",
       "other_ms",
     ];
     const letterOrNumberPattern = /[\\p{L}\\p{N}]/u;
@@ -482,6 +505,9 @@ BENCHMARK_HTML = """
     const repeatsInput = document.getElementById("repeatsInput");
     const warmupInput = document.getElementById("warmupInput");
     const concurrencyInput = document.getElementById("concurrencyInput");
+    const compressionModeInput = document.getElementById("compressionModeInput");
+    const latencyBudgetInput = document.getElementById("latencyBudgetInput");
+    const allowCpuModelAutoInput = document.getElementById("allowCpuModelAutoInput");
     const aggressivenessInput = document.getElementById("aggressivenessInput");
     const aggressivenessValue = document.getElementById("aggressivenessValue");
     const includeSectionsInput = document.getElementById("includeSectionsInput");
@@ -511,6 +537,69 @@ BENCHMARK_HTML = """
       const stamp = new Date().toISOString().slice(11, 19);
       logNode.textContent += `[${stamp}] ${message}\\n`;
       logNode.scrollTop = logNode.scrollHeight;
+    }
+
+    function compactNumber(value) {
+      if (value === null || value === undefined || value === "") {
+        return "-";
+      }
+      if (typeof value === "number") {
+        return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\\.$/, "");
+      }
+      return String(value);
+    }
+
+    function compactPercent(value) {
+      return value === null || value === undefined || !Number.isFinite(Number(value))
+        ? "-"
+        : `${Math.round(Number(value) * 100)}%`;
+    }
+
+    function diagnosticLogFromResponse(data, diagnostics) {
+      if (!diagnostics || Object.keys(diagnostics).length === 0) {
+        return "diagnostics=unavailable";
+      }
+      const timings = diagnostics.timings || {};
+      const warnings = Array.isArray(data.warnings) && data.warnings.length
+        ? ` warnings=${data.warnings.join("|")}`
+        : "";
+      return [
+        (
+          `mode=${diagnostics.compression_mode || data.compression_mode || "-"} ` +
+          `path=${diagnostics.compression_path || data.compression_path || "-"} ` +
+          `gate=${diagnostics.model_gate_decision || "-"} ` +
+          `reason=${diagnostics.model_gate_reason || "-"}${warnings}`
+        ),
+        (
+          `tokens deterministic_saved=${compactNumber(diagnostics.deterministic_tokens_saved)} ` +
+          `deterministic_reduction=${compactPercent(diagnostics.deterministic_reduction)} ` +
+          `model_incremental_saved=${compactNumber(diagnostics.model_incremental_tokens_saved)} ` +
+          `model_incremental_reduction=${compactPercent(diagnostics.model_incremental_reduction)}`
+        ),
+        (
+          `components whitespace=${compactNumber(diagnostics.whitespace_tokens_saved)} ` +
+          `force_drop=${compactNumber(diagnostics.force_drop_tokens_saved)} ` +
+          `toon=${compactNumber(diagnostics.toon_tokens_saved)} ` +
+          `json_minify=${compactNumber(diagnostics.json_minify_tokens_saved)} ` +
+          `literal=${compactNumber(diagnostics.literal_placeholder_tokens_saved)}`
+        ),
+        (
+          `shape segments=${compactNumber(diagnostics.segment_count)} ` +
+          `model_segments=${compactNumber(diagnostics.model_segment_count)} ` +
+          `protected_density=${compactPercent(diagnostics.protected_density)} ` +
+          `structured_density=${compactPercent(diagnostics.structured_density)} ` +
+          `identifier_density=${compactPercent(diagnostics.identifier_density)}`
+        ),
+        (
+          `timing total=${compactNumber(timings.total_ms)}ms ` +
+          `preprocess=${compactNumber(timings.preprocessing_ms)}ms ` +
+          `selection=${compactNumber(timings.segment_selection_ms)}ms ` +
+          `gate=${compactNumber(timings.model_gate_ms)}ms ` +
+          `diagnostics=${compactNumber(timings.diagnostics_ms)}ms ` +
+          `llmlingua=${compactNumber(timings.llmlingua_ms)}ms ` +
+          `token_estimate=${compactNumber(timings.token_estimate_ms)}ms`
+        ),
+      ].join("\\n");
     }
 
     function parseNumberList(value, parser) {
@@ -671,20 +760,33 @@ BENCHMARK_HTML = """
     async function runOne(task) {
       const testCase = buildCase(task.targetTokens, task.jsonRatio);
       const row = baseRow(testCase, task.repeat, task.measured);
+      row.requested_compression_mode = compressionModeInput.value;
+      row.allow_cpu_model_auto_override = allowCpuModelAutoInput.checked;
+      row.latency_budget_ms = latencyBudgetInput.value.trim() || "";
       const controller = new AbortController();
       activeControllers.add(controller);
       const started = performance.now();
       try {
+        const payload = {
+          text: testCase.text,
+          aggressiveness: Number(aggressivenessInput.value),
+          mode: compressionModeInput.value,
+          include_sections: includeSectionsInput.checked,
+          include_diagnostics: true,
+        };
+        const latencyBudget = Number(latencyBudgetInput.value);
+        if (latencyBudgetInput.value.trim() && Number.isFinite(latencyBudget)) {
+          payload.latency_budget_ms = Math.max(0, latencyBudget);
+        }
+        if (allowCpuModelAutoInput.checked) {
+          payload.allow_cpu_model_auto = true;
+        }
+
         const response = await fetch("/compress", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-          body: JSON.stringify({
-            text: testCase.text,
-            aggressiveness: Number(aggressivenessInput.value),
-            include_sections: includeSectionsInput.checked,
-            include_diagnostics: true,
-          }),
+          body: JSON.stringify(payload),
         });
         row.http_status = response.status;
         row.client_wall_ms = performance.now() - started;
@@ -725,6 +827,9 @@ BENCHMARK_HTML = """
       row.token_estimator = data.token_estimator || "";
       row.output_chars = String(data.compressed_text || "").length;
       row.diagnostics_present = Boolean(data.diagnostics);
+      row.diagnostics = diagnostics;
+      row.warnings = data.warnings || [];
+      row.diagnostic_log = diagnosticLogFromResponse(data, diagnostics);
       row.segment_count = diagnostics.segment_count;
       row.compressible_segment_count = diagnostics.compressible_segment_count;
       row.model_segment_count = diagnostics.model_segment_count;
@@ -740,6 +845,27 @@ BENCHMARK_HTML = """
       row.chunk_chars_max = diagnostics.chunk_chars_max;
       row.fallback_used = diagnostics.fallback_used;
       row.fallback_reason = diagnostics.fallback_reason || "";
+      row.compression_mode = diagnostics.compression_mode || data.compression_mode || "";
+      row.compression_path = diagnostics.compression_path || data.compression_path || "";
+      row.deterministic_tokens_saved = diagnostics.deterministic_tokens_saved;
+      row.deterministic_reduction = diagnostics.deterministic_reduction;
+      row.whitespace_tokens_saved = diagnostics.whitespace_tokens_saved;
+      row.force_drop_tokens_saved = diagnostics.force_drop_tokens_saved;
+      row.toon_tokens_saved = diagnostics.toon_tokens_saved;
+      row.json_minify_tokens_saved = diagnostics.json_minify_tokens_saved;
+      row.literal_placeholder_count = diagnostics.literal_placeholder_count;
+      row.literal_placeholder_tokens_saved = diagnostics.literal_placeholder_tokens_saved;
+      row.duplicate_block_candidate_count = diagnostics.duplicate_block_candidate_count;
+      row.duplicate_block_candidate_tokens = diagnostics.duplicate_block_candidate_tokens;
+      row.model_gate_decision = diagnostics.model_gate_decision || "";
+      row.model_gate_reason = diagnostics.model_gate_reason || "";
+      row.model_candidate_tokens = diagnostics.model_candidate_tokens;
+      row.model_expected_incremental_savings_tokens = diagnostics.model_expected_incremental_savings_tokens;
+      row.model_expected_incremental_reduction = diagnostics.model_expected_incremental_reduction;
+      row.model_projected_latency_ms = diagnostics.model_projected_latency_ms;
+      row.protected_density = diagnostics.protected_density;
+      row.structured_density = diagnostics.structured_density;
+      row.identifier_density = diagnostics.identifier_density;
       row.segment_kinds_json = JSON.stringify(diagnostics.segment_kinds || {});
       for (const key of TIMING_KEYS) {
         row[`timing_${key}`] = timings[key];
@@ -762,6 +888,9 @@ BENCHMARK_HTML = """
           renderSummary();
           updateTopStats();
           log(`${row.status.toUpperCase()} ${row.case_id} repeat=${row.repeat}`);
+          if (row.status === "ok") {
+            log(`DIAGNOSTICS ${row.case_id} repeat=${row.repeat}\\n${row.diagnostic_log}`);
+          }
         }
       }
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
@@ -835,6 +964,7 @@ BENCHMARK_HTML = """
           const okRows = groupRows.filter((row) => row.status === "ok");
           const modelRows = okRows.filter((row) => row.llmlingua_called === true);
           const modelCallCount = sum(numericValues(okRows, "llmlingua_call_count"));
+          const modelGateSkipCount = okRows.filter((row) => row.model_gate_decision === "skip").length;
           return {
             case_id: `tok${targetTokens}_json${formatRatio(Number(jsonRatio))}`,
             target_tokens: Number(targetTokens),
@@ -843,6 +973,7 @@ BENCHMARK_HTML = """
             success_count: okRows.length,
             error_count: groupRows.length - okRows.length,
             model_call_count: modelCallCount,
+            model_gate_skip_count: modelGateSkipCount,
             client_wall_ms_p50: percentile(numericValues(okRows, "client_wall_ms"), 0.5),
             server_elapsed_ms_p50: percentile(numericValues(okRows, "server_elapsed_ms"), 0.5),
             timing_preprocessing_ms_p50: percentile(numericValues(okRows, "timing_preprocessing_ms"), 0.5),
@@ -867,6 +998,7 @@ BENCHMARK_HTML = """
         appendCell(row, formatMs(item.timing_preprocessing_ms_p50));
         appendCell(row, formatMs(item.timing_segment_selection_ms_p50));
         appendCell(row, `${item.model_call_count}/${item.success_count}`);
+        appendCell(row, `${item.model_gate_skip_count}/${item.success_count}`);
         appendCell(row, formatMs(item.timing_llmlingua_ms_p50));
         appendCell(row, formatMs(item.timing_token_estimate_ms_p50));
         appendCell(row, formatPercent(item.reduction_mean));
@@ -888,6 +1020,9 @@ BENCHMARK_HTML = """
       appendCell(row, item.llmlingua_called === true ? formatMs(item.timing_llmlingua_ms) : "-");
       appendCell(row, item.response_original_tokens ?? "-");
       appendCell(row, item.response_compressed_tokens ?? "-");
+      appendCell(row, item.compression_mode || "-");
+      appendCell(row, item.compression_path || "-");
+      appendCell(row, item.model_gate_reason || item.model_gate_decision || "-");
       appendCell(row, item.error || "");
       rawBody.appendChild(row);
       runStatus.textContent = `${rows.length} rows`;
@@ -960,6 +1095,9 @@ BENCHMARK_HTML = """
       repeatsInput.disabled = running;
       warmupInput.disabled = running;
       concurrencyInput.disabled = running;
+      compressionModeInput.disabled = running;
+      latencyBudgetInput.disabled = running;
+      allowCpuModelAutoInput.disabled = running;
       includeSectionsInput.disabled = running;
     }
 
