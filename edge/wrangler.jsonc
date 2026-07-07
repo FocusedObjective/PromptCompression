@@ -1,0 +1,84 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "prompt-compression-edge",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-06",
+  "workers_dev": true,
+  "ratelimits": [
+    {
+      "name": "RATE_LIMIT_HEALTH",
+      "namespace_id": "910101",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "RATE_LIMIT_ESTIMATE",
+      "namespace_id": "910102",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "RATE_LIMIT_COMPRESS",
+      "namespace_id": "910103",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "RATE_LIMIT_COMPRESS_STRICT",
+      "namespace_id": "910105",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "RATE_LIMIT_COMPRESS_TRUSTED",
+      "namespace_id": "910106",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "RATE_LIMIT_MESSAGES",
+      "namespace_id": "910104",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    },
+    {
+      "name": "RATE_LIMIT_MESSAGES_STRICT",
+      "namespace_id": "910107",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    },
+    {
+      "name": "RATE_LIMIT_MESSAGES_TRUSTED",
+      "namespace_id": "910108",
+      "simple": {
+        "limit": 80,
+        "period": 60
+      }
+    }
+  ],
+  "vars": {
+    "EDGE_ENV": "prod",
+    "ORIGIN_AUTH_MODE": "none",
+    "MAX_BODY_BYTES": "1048576",
+    "ORIGIN_TIMEOUT_MS": "25000",
+    "CACHE_ENABLED": "true",
+    "CACHE_TTL_SECONDS": "300",
+    "RATE_LIMIT_ENABLED": "true",
+    "RATE_LIMIT_LOCAL_FALLBACK": "true",
+    "RATE_LIMIT_TENANT_TIERS": "{}"
+  }
+}

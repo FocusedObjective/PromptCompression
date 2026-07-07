@@ -10,3 +10,8 @@ __pycache__/
 .vscode/.ropeproject/
 models/
 .huggingface/
+edge/node_modules/
+edge/.wrangler/
+edge/dist/
+edge/.dev.vars
+edge/wrangler-tail.tmp.log*

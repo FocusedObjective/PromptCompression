@@ -232,11 +232,11 @@ python scripts\smoke_test.py
 
 ## Environment Configuration
 
-Worker configuration should be explicit and environment-specific:
+Worker configuration should be explicit:
 
 ```text
 ORIGIN_BASE_URL=https://prompt-compression-...run.app
-EDGE_ENV=dev|staging|prod
+EDGE_ENV=prod
 MAX_BODY_BYTES=1048576
 CACHE_TTL_SECONDS=300
 CACHE_ENABLED=true
@@ -405,8 +405,8 @@ the route decision used a non-deterministic feature
 Suggested first TTL:
 
 ```text
-staging: 60 seconds
-prod: 300 seconds
+workers.dev default: 300 seconds
+custom production domain: 300 seconds
 ```
 
 Cache-hit responses must include:
@@ -641,6 +641,24 @@ npx wrangler dev
 npx wrangler deploy
 ```
 
+Use the default Worker service, not a Wrangler `--env staging` service:
+
+```text
+prompt-compression-edge
+```
+
+Cloudflare still provides production and preview deployments for that one
+Worker. While `usagetap.com` is not connected to Cloudflare, the stable public
+URL is:
+
+```text
+https://prompt-compression-edge.troy-magennis.workers.dev
+```
+
+Preview deployments, when enabled by Cloudflare, use generated preview URLs for
+the same Worker. Avoid `npx wrangler deploy --env staging` unless a deliberately
+separate Worker service is needed again.
+
 Set secrets with:
 
 ```powershell
@@ -685,3 +703,193 @@ staging deploy notes
 
 After that works, add rate limiting and exact-response caching. Only then add
 skip heuristics and deterministic edge transforms.
+
+## Current Worker Scaffold
+
+The repository now includes an initial `edge/` Worker package that implements
+the first milestone plus a conservative deterministic fallback path.
+
+Implemented routes:
+
+```text
+GET  /health
+POST /compress
+POST /v1/compress
+POST /v1/messages/compress
+POST /tokens/estimate
+```
+
+Routing behavior:
+
+```text
+/compress defaults to origin because the Python API defaults to model_force
+/compress with mode=deterministic is answered at the edge
+/v1/compress and /v1/messages/compress default to edge deterministic mode
+supported JSON record-array deterministic requests are transformed at the edge
+unsupported complex deterministic and tenant_profile requests delegate to ORIGIN_BASE_URL when configured
+model_force and model_auto requests proxy to ORIGIN_BASE_URL
+origin network failures and origin 5xx responses fall back to edge deterministic mode
+/tokens/estimate is answered at the edge with the regex token estimator
+successful 200 JSON responses use exact-response Cloudflare Cache API caching
+tenant-aware rate limits run before cache/origin work
+```
+
+The edge deterministic implementation intentionally handles only a small safe
+subset:
+
+```text
+remove <nocompress> wrappers while preserving inner content
+trim trailing line whitespace
+collapse 3+ blank lines to 2 blank lines
+trim leading/trailing request text
+avoid whitespace rewriting inside obvious code/script/style/template/svg blocks
+convert safe medium/large JSON record arrays to compact TOON-like text
+```
+
+This does not replace the full Python deterministic pipeline. Full JSON-to-TOON
+coverage, HTML-to-Markdown, protected span handling, broad duplicate-key
+handling, and model gate diagnostics should stay in Cloud Run until parity tests
+exist for a wider TypeScript port.
+
+The Worker now has a narrow JSON edge subset modeled after the Python
+preprocessor: it scans balanced JSON candidates inside the prompt, applies the
+same medium/large threshold shape, refuses exact/verbatim JSON contexts,
+duplicate-key JSON, schemas, tool/function exchanges, and unsupported nested
+objects, and only transforms homogeneous arrays of scalar records. Unsupported
+deterministic requests that include tenant_profile overrides, HTML,
+markdown/code fences, schemas, tool/function exchanges, or `include_sections` /
+`include_diagnostics` requests still delegate to Cloud Run when `ORIGIN_BASE_URL`
+is configured. If the origin is unavailable, the Worker returns a
+schema-compatible deterministic fallback with an edge warning header/body signal
+rather than returning a blanket 503.
+
+Current Worker tests cover route allowlisting, CORS preflight, content-type
+validation, invalid JSON, body-size rejection, request ID propagation, mode and
+settings validation, token estimation, origin pass-through, origin 4xx
+pass-through, origin 5xx/network fallback, shared-secret origin forwarding,
+edge deterministic response shapes, generic deterministic text cases, complex
+deterministic origin delegation, tenant_profile origin delegation/fallback, and
+the supported/unsupported JSON edge-transform cases.
+
+The Worker uses `caches.default` for short-lived exact-response caching. Cache
+keys are synthetic GET URLs built from a SHA-256 hash of canonical JSON that
+includes:
+
+```text
+cache schema version
+route
+X-Tenant-ID
+canonical request body
+```
+
+The cache key does not include raw authorization tokens or raw prompt text.
+
+Cache behavior:
+
+```text
+CACHE_ENABLED=true enables cache when Cloudflare Cache API is available
+CACHE_TTL_SECONDS controls response TTL
+default TTL is 300 seconds
+Cache-Control: no-store bypasses cache
+include_diagnostics=true bypasses cache
+debug=true bypasses cache
+only 200 JSON responses are stored
+fallback-deterministic responses are not stored
+```
+
+Cache response headers:
+
+```text
+X-Edge-Cache: hit|miss|store|bypass|disabled
+X-Edge-Decision: cache-hit on cache hits
+```
+
+Rate limiting behavior:
+
+```text
+RATE_LIMIT_ENABLED=true enables rate limiting
+RATE_LIMIT_LOCAL_FALLBACK=true enables per-isolate fallback buckets
+native Cloudflare rate limit bindings are used when configured
+rate limits run before cache hits are served
+RATE_LIMIT_TENANT_TIERS maps tenant ids to blocked|strict|default|trusted
+```
+
+Rate-limit key priority:
+
+```text
+Authorization header hash
+tenant_id from JSON body
+X-Tenant-ID header
+CF-Connecting-IP / X-Forwarded-For
+```
+
+Default local fallback policies:
+
+```text
+/health: 120 requests per minute
+/tokens/estimate: 120 requests per minute
+/compress and /v1/compress: 30 requests per minute
+/v1/messages/compress: 20 requests per minute
+```
+
+Native tenant tiers:
+
+```text
+default compress: 30 requests per minute
+strict compress: 10 requests per minute
+trusted compress: 120 requests per minute
+default messages: 20 requests per minute
+strict messages: 5 requests per minute
+trusted messages: 80 requests per minute
+```
+
+Example tenant tier config:
+
+```json
+{
+  "trial_tenant_123": "strict",
+  "enterprise_tenant_456": "trusted",
+  "abusive_tenant_789": "blocked"
+}
+```
+
+The local fallback is an immediate safety net, not strong distributed quota
+enforcement. For production-grade abuse protection, configure Cloudflare native
+rate limit bindings and bind them as:
+
+```text
+RATE_LIMIT_HEALTH
+RATE_LIMIT_ESTIMATE
+RATE_LIMIT_COMPRESS
+RATE_LIMIT_COMPRESS_STRICT
+RATE_LIMIT_COMPRESS_TRUSTED
+RATE_LIMIT_MESSAGES
+RATE_LIMIT_MESSAGES_STRICT
+RATE_LIMIT_MESSAGES_TRUSTED
+```
+
+Cloudflare's Rate Limiting binding is fast and useful for abuse protection, but
+it is intentionally permissive and eventually consistent per Cloudflare
+location. It should not be treated as a billing or exact quota ledger.
+
+Rate-limited responses return:
+
+```text
+HTTP 429
+X-Edge-Decision: reject
+Retry-After: <seconds> when known
+```
+
+Important deployment rule: `ORIGIN_BASE_URL` must be the raw Cloud Run service
+URL or another non-Cloudflare origin URL. Do not set it to
+`https://compress.usagetap.com`, because that hostname is the Worker route after
+cutover and would proxy back into the Worker.
+
+Local validation:
+
+```powershell
+cd edge
+npm install
+npm test
+npm run typecheck
+```
