@@ -48,7 +48,8 @@ describe("tenant-aware rate limiting", () => {
       startMs: Date.now(),
       decision: "reject" as const,
       cache: "bypass" as const,
-      rateLimit: "not-checked" as const
+      rateLimit: "not-checked" as const,
+      auth: "not-checked" as const
     };
     let result = await checkRateLimit(
       new Request("https://edge.test/v1/messages/compress", {
@@ -82,7 +83,8 @@ describe("tenant-aware rate limiting", () => {
       startMs: Date.now(),
       decision: "reject" as const,
       cache: "bypass" as const,
-      rateLimit: "not-checked" as const
+      rateLimit: "not-checked" as const,
+      auth: "not-checked" as const
     };
 
     const result = await checkRateLimit(
@@ -107,7 +109,8 @@ describe("tenant-aware rate limiting", () => {
       startMs: Date.now(),
       decision: "reject" as const,
       cache: "bypass" as const,
-      rateLimit: "not-checked" as const
+      rateLimit: "not-checked" as const,
+      auth: "not-checked" as const
     };
     const strictCalls: Array<{ key: string }> = [];
     const trustedCalls: Array<{ key: string }> = [];

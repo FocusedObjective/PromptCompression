@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { resetLocalRateLimits } from "../src/rateLimit";
 
+const LONG_MODEL_TEXT = Array.from({ length: 80 }, (_, index) => {
+  return `This is reusable operational context sentence ${index} with enough ordinary prose for model compression decisions.`;
+}).join(" ");
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -119,12 +123,73 @@ describe("worker routes", () => {
     expect(body.tokenizer_backed).toBe(false);
   });
 
+  it("allows missing API keys while auth is permissive", async () => {
+    const response = await worker.fetch(new Request("https://edge.test/compress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hello\n\n\nworld", mode: "deterministic" })
+    }), { AUTH_REQUIRED: "false" });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-edge-auth")).toBe("permissive");
+    expect(body.compressed_text).toBe("hello\n\nworld");
+  });
+
+  it("can require an API key when auth enforcement is enabled", async () => {
+    const response = await worker.fetch(new Request("https://edge.test/compress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hello", mode: "deterministic" })
+    }), { AUTH_REQUIRED: "true" });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("x-edge-auth")).toBe("missing");
+    expect(body.error).toBe("unauthorized");
+  });
+
+  it("caches stub authorization decisions and denies future requests before compression cache", async () => {
+    installMemoryCache();
+    const rawBody = JSON.stringify({ text: "hello", mode: "deterministic", tenant_id: "tenant_denied" });
+    const first = await worker.fetch(new Request("https://edge.test/compress", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer denied-key",
+        "content-type": "application/json"
+      },
+      body: rawBody
+    }), {
+      AUTH_STUB_APPROVED: "false",
+      CACHE_ENABLED: "true"
+    });
+    const second = await worker.fetch(new Request("https://edge.test/compress", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer denied-key",
+        "content-type": "application/json"
+      },
+      body: rawBody
+    }), {
+      AUTH_STUB_APPROVED: "false",
+      CACHE_ENABLED: "true"
+    });
+    const secondBody = await second.json() as Record<string, unknown>;
+
+    expect(first.status).toBe(200);
+    expect(first.headers.get("x-edge-auth")).toBe("stub-allowed");
+    expect(second.status).toBe(401);
+    expect(second.headers.get("x-edge-auth")).toBe("denied");
+    expect(second.headers.get("x-edge-cache")).toBe("bypass");
+    expect(secondBody.error).toBe("unauthorized");
+  });
+
   it("proxies model requests to the configured origin", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(
       JSON.stringify({ compressed_text: "origin result" }),
       { status: 200, headers: { "content-type": "application/json" } }
     ));
-    const rawBody = JSON.stringify({ text: "hello", mode: "model_force" });
+    const rawBody = JSON.stringify({ text: LONG_MODEL_TEXT, mode: "model_force" });
     const response = await worker.fetch(new Request("https://edge.test/compress", {
       method: "POST",
       headers: {
@@ -164,7 +229,7 @@ describe("worker routes", () => {
     const response = await worker.fetch(new Request("https://edge.test/compress", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: "hello", mode: "model_force" })
+      body: JSON.stringify({ text: LONG_MODEL_TEXT, mode: "model_force" })
     }), { ORIGIN_BASE_URL: "https://origin.test" });
     const body = await response.json() as Record<string, unknown>;
 
@@ -179,13 +244,13 @@ describe("worker routes", () => {
     const response = await worker.fetch(new Request("https://edge.test/compress", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: "hello\n\n\nworld" })
+      body: JSON.stringify({ text: `${LONG_MODEL_TEXT}\n\n\n${LONG_MODEL_TEXT}`, mode: "model_force" })
     }), { ORIGIN_BASE_URL: "https://origin.test" });
     const body = await response.json() as Record<string, unknown>;
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-edge-decision")).toBe("fallback-deterministic");
-    expect(body.compressed_text).toBe("hello\n\nworld");
+    expect(body.compressed_text).toBe(`${LONG_MODEL_TEXT}\n\n${LONG_MODEL_TEXT}`);
     expect(body.warnings).toContain("edge_origin_unavailable_deterministic_fallback");
     expect(fetchMock).toHaveBeenCalledOnce();
   });
@@ -199,16 +264,36 @@ describe("worker routes", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        input: "hello\n\n\nworld",
-        compression_settings: { mode: "model_auto" }
+        input: `${LONG_MODEL_TEXT}\n\n\n${LONG_MODEL_TEXT}`,
+        compression_settings: { mode: "model_force" }
       })
     }), { ORIGIN_BASE_URL: "https://origin.test" });
     const body = await response.json() as Record<string, unknown>;
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-edge-decision")).toBe("fallback-deterministic");
-    expect(body.output).toBe("hello\n\nworld");
+    expect(body.output).toBe(`${LONG_MODEL_TEXT}\n\n${LONG_MODEL_TEXT}`);
     expect(body.warnings).toContain("edge_origin_unavailable_deterministic_fallback");
+  });
+
+  it("skips origin for low-value model_auto requests", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    const response = await worker.fetch(new Request("https://edge.test/v1/compress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        input: "Short prompt that is not worth a Cloud Run model call.",
+        compression_settings: { mode: "model_auto" }
+      })
+    }), { ORIGIN_BASE_URL: "https://origin.test" });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-edge-decision")).toBe("edge-deterministic");
+    expect(body.output).toBe("Short prompt that is not worth a Cloud Run model call.");
+    expect(body.warnings).toContain("edge_skipped_no_candidate_prose");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("delegates complex deterministic inputs to origin when configured", async () => {
@@ -345,7 +430,7 @@ describe("worker routes", () => {
       JSON.stringify({ compressed_text: "cached origin result" }),
       { status: 200, headers: { "content-type": "application/json" } }
     ));
-    const rawBody = JSON.stringify({ text: "hello", mode: "model_force" });
+    const rawBody = JSON.stringify({ text: LONG_MODEL_TEXT, mode: "model_force" });
 
     const first = await worker.fetch(new Request("https://edge.test/compress", {
       method: "POST",
@@ -378,7 +463,7 @@ describe("worker routes", () => {
         status: 200,
         headers: { "content-type": "application/json" }
       }));
-    const rawBody = JSON.stringify({ text: "hello", mode: "model_force" });
+    const rawBody = JSON.stringify({ text: LONG_MODEL_TEXT, mode: "model_force" });
 
     const first = await worker.fetch(new Request("https://edge.test/compress", {
       method: "POST",
@@ -403,7 +488,7 @@ describe("worker routes", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response("down", { status: 503 }))
       .mockResolvedValueOnce(new Response("down", { status: 503 }));
-    const rawBody = JSON.stringify({ text: "hello\n\n\nworld", mode: "model_force" });
+    const rawBody = JSON.stringify({ text: `${LONG_MODEL_TEXT}\n\n\n${LONG_MODEL_TEXT}`, mode: "model_force" });
 
     const first = await worker.fetch(new Request("https://edge.test/compress", {
       method: "POST",

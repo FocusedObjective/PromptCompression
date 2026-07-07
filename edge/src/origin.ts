@@ -40,7 +40,12 @@ export async function fetchOrigin(
     proxiedHeaders.set("x-request-id", context.requestId);
     proxiedHeaders.set("x-edge-decision", "origin");
     proxiedHeaders.set("x-edge-cache", "bypass");
+    proxiedHeaders.set("x-edge-ratelimit", context.rateLimit);
+    proxiedHeaders.set("x-edge-auth", context.auth);
     proxiedHeaders.set("x-origin-status", String(response.status));
+    proxiedHeaders.set("access-control-allow-origin", "*");
+    proxiedHeaders.set("access-control-allow-methods", "GET, POST, OPTIONS");
+    proxiedHeaders.set("access-control-allow-headers", "authorization, content-type, x-api-key, x-request-id, x-tenant-id");
 
     return new Response(response.body, {
       status: response.status,

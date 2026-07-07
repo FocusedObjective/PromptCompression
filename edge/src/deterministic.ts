@@ -11,6 +11,20 @@ import { requiresOriginForJsonText, transformJsonSegmentsForEdge } from "./jsonT
 const EDGE_MODEL = "edge-deterministic";
 const DEFAULT_AGGRESSIVENESS = 0.15;
 const VALID_COMPRESSION_MODES = new Set(["deterministic", "model_auto", "model_force"]);
+const MIN_MODEL_SEGMENT_CHARS = 160;
+const MIN_MODEL_SEGMENT_TOKENS = 24;
+const MIN_MODEL_AUTO_CANDIDATE_TOKENS = 20000;
+const MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS = 2000;
+const MIN_MODEL_INCREMENTAL_REDUCTION = 0.05;
+const MAX_PROTECTED_DENSITY = 0.20;
+const MAX_STRUCTURED_DENSITY = 0.35;
+const SKIP_MODEL_IF_DETERMINISTIC_REDUCTION_GTE = 0.12;
+const COLD_MODEL_TIGHT_LATENCY_BUDGET_MS = 1000;
+
+export interface EdgeOriginGate {
+  useOrigin: boolean;
+  reason: string | null;
+}
 
 export function resolveTenantProfile(body: JsonObject, headerTenantId: string | null): TenantProfile {
   const tenantProfile = isObject(body.tenant_profile) ? body.tenant_profile : {};
@@ -56,6 +70,96 @@ export function resolveAggressiveness(body: JsonObject, route: string): number {
 export function shouldUseOrigin(body: JsonObject, route: string): boolean {
   const mode = resolveCompressMode(body, route);
   return mode === "model_auto" || mode === "model_force";
+}
+
+export function evaluateEdgeOriginGate(
+  body: JsonObject,
+  route: string,
+  headerTenantId: string | null
+): EdgeOriginGate {
+  const mode = resolveCompressMode(body, route);
+  if (mode === "deterministic") {
+    return skip("edge_skipped_mode_deterministic");
+  }
+  if (mode !== "model_auto" && mode !== "model_force") {
+    return skip("edge_skipped_no_origin_mode");
+  }
+
+  const tenant = resolveTenantProfile(body, headerTenantId);
+  const target = targetRate(resolveAggressiveness(body, route), tenant);
+  if (target >= 1.0) {
+    return skip("edge_skipped_aggressiveness_zero");
+  }
+
+  const texts = compressibleTexts(body, route);
+  if (texts.length === 0) {
+    return skip("edge_skipped_no_candidate_prose");
+  }
+  if (texts.some(requestRequiresExactOutput)) {
+    return skip("edge_skipped_exact_output_context");
+  }
+
+  const candidates = texts
+    .map((text) => {
+      return { text, tokens: estimateRegexTokens(text).count };
+    })
+    .filter((candidate) => {
+      return candidate.text.trim().length >= MIN_MODEL_SEGMENT_CHARS
+        && candidate.tokens >= MIN_MODEL_SEGMENT_TOKENS;
+    });
+
+  if (candidates.length === 0) {
+    return skip("edge_skipped_no_candidate_prose");
+  }
+
+  if (mode === "model_force") {
+    return run();
+  }
+
+  const candidateTokens = candidates.reduce((sum, candidate) => sum + candidate.tokens, 0);
+  if (candidateTokens < MIN_MODEL_AUTO_CANDIDATE_TOKENS) {
+    return skip("edge_skipped_low_candidate_tokens");
+  }
+
+  const deterministicReduction = deterministicReductionForTexts(candidates.map((candidate) => candidate.text), tenant);
+  if (deterministicReduction >= SKIP_MODEL_IF_DETERMINISTIC_REDUCTION_GTE) {
+    return skip("edge_skipped_deterministic_savings_sufficient");
+  }
+
+  const candidateText = candidates.map((candidate) => candidate.text).join("\n");
+  const protectedDensityValue = protectedDensityForText(candidateText);
+  if (protectedDensityValue > MAX_PROTECTED_DENSITY) {
+    return skip("edge_skipped_high_protected_density");
+  }
+
+  const structuredDensity = structuredDensityForTexts(texts);
+  if (structuredDensity > MAX_STRUCTURED_DENSITY) {
+    return skip("edge_skipped_high_structured_density");
+  }
+
+  const latencyBudgetMs = resolveLatencyBudgetMs(body, route);
+  if (latencyBudgetMs !== null && latencyBudgetMs <= COLD_MODEL_TIGHT_LATENCY_BUDGET_MS) {
+    return skip("edge_skipped_tight_latency_budget");
+  }
+
+  const identifierDensity = identifierDensityForText(candidateText);
+  const averageSegmentTokens = candidateTokens / candidates.length;
+  const expectedIncrementalReduction = expectedModelReduction(
+    deterministicReduction,
+    protectedDensityValue,
+    identifierDensity,
+    structuredDensity,
+    averageSegmentTokens
+  );
+  const expectedIncrementalSavingsTokens = Math.floor(candidateTokens * expectedIncrementalReduction);
+  if (
+    expectedIncrementalSavingsTokens < MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS
+    || expectedIncrementalReduction < MIN_MODEL_INCREMENTAL_REDUCTION
+  ) {
+    return skip("edge_skipped_low_expected_incremental_savings");
+  }
+
+  return run();
 }
 
 export function validateRequestBody(body: JsonObject, route: string): void {
@@ -465,6 +569,135 @@ function looksTooComplexForEdgeSubset(text: string): boolean {
     || (/^[\[{]/.test(trimmed) && requiresOriginForJsonText(trimmed))
     || (!/^[\[{]/.test(trimmed) && /"\s*(tool_calls|function_call|messages|schema|properties)"\s*:/.test(text))
   );
+}
+
+function requestRequiresExactOutput(text: string): boolean {
+  const lowered = text.toLowerCase();
+  return [
+    "byte-stable",
+    "byte stable",
+    "byte-exact",
+    "byte exact",
+    "return exactly as written",
+    "return exactly as provided",
+    "return the input exactly",
+    "output the input exactly",
+    "preserve formatting exactly",
+    "preserve whitespace exactly",
+    "verbatim output",
+    "do not modify the text",
+    "do not change the text"
+  ].some((term) => lowered.includes(term));
+}
+
+function deterministicReductionForTexts(texts: string[], tenant: TenantProfile): number {
+  const original = texts.reduce((sum, text) => sum + estimateRegexTokens(text).count, 0);
+  if (original <= 0) {
+    return 0;
+  }
+  const deterministic = texts.reduce((sum, text) => {
+    return sum + estimateRegexTokens(deterministicText(text, tenant)).count;
+  }, 0);
+  return Math.max(0, 1 - deterministic / original);
+}
+
+function resolveLatencyBudgetMs(body: JsonObject, route: string): number | null {
+  if (route === "/compress") {
+    return typeof body.latency_budget_ms === "number" ? body.latency_budget_ms : null;
+  }
+  const settings = isObject(body.compression_settings) ? body.compression_settings : {};
+  return typeof settings.latency_budget_ms === "number" ? settings.latency_budget_ms : null;
+}
+
+function protectedDensityForText(text: string): number {
+  if (!text) {
+    return 0;
+  }
+  const protectedChars = sumMatchLengths(text, [
+    /https?:\/\/[^\s"'<>]+/gi,
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    /```[\s\S]*?```|~~~[\s\S]*?~~~/g,
+    /<(pre|code|script|style|template|svg)\b[\s\S]*?<\/\1>/gi,
+    /<\/?nocompress>/gi
+  ]);
+  return protectedChars / text.length;
+}
+
+function identifierDensityForText(text: string): number {
+  if (!text) {
+    return 0;
+  }
+  const identifierChars = sumMatchLengths(text, [
+    /https?:\/\/[^\s"'<>]+/gi,
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    /\b[A-Z]{2,}[_-][A-Z0-9_-]{6,}\b/g,
+    /\b[a-z][a-z0-9]*[_-][a-z0-9_-]{8,}\b/gi,
+    /\b\d+(?:[.,:/-]\d+){1,}\b/g,
+    /\$[0-9][0-9,]*(?:\.\d+)?/g
+  ]);
+  return identifierChars / text.length;
+}
+
+function structuredDensityForTexts(texts: string[]): number {
+  const totalChars = texts.reduce((sum, text) => sum + text.length, 0);
+  if (totalChars <= 0) {
+    return 0;
+  }
+  const structuredChars = texts.reduce((sum, text) => {
+    if (isStructuredText(text)) {
+      return sum + text.length;
+    }
+    return sum;
+  }, 0);
+  return structuredChars / totalChars;
+}
+
+function isStructuredText(text: string): boolean {
+  return requiresOriginForJsonText(text)
+    || /```|~~~/.test(text)
+    || /<(html|body|main|article|section|div|p|table|thead|tbody|tr|td|th|ul|ol|li|pre|code|script|style|template|svg)\b/i.test(text)
+    || /"\s*(tool_calls|function_call|messages|schema|properties)"\s*:/.test(text);
+}
+
+function expectedModelReduction(
+  deterministicReduction: number,
+  protectedDensityValue: number,
+  identifierDensityValue: number,
+  structuredDensityValue: number,
+  averageSegmentTokens: number
+): number {
+  let expected = structuredDensityValue < 0.10 ? 0.08 : 0.05;
+  if (protectedDensityValue > 0.10) {
+    expected -= 0.02;
+  }
+  if (identifierDensityValue > 0.10) {
+    expected -= 0.02;
+  }
+  if (averageSegmentTokens > 0 && averageSegmentTokens < 120) {
+    expected -= 0.02;
+  }
+  if (deterministicReduction >= 0.10) {
+    expected -= 0.02;
+  }
+  return Math.max(0, expected);
+}
+
+function sumMatchLengths(text: string, patterns: RegExp[]): number {
+  let total = 0;
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      total += match[0].length;
+    }
+  }
+  return Math.min(total, text.length);
+}
+
+function skip(reason: string): EdgeOriginGate {
+  return { useOrigin: false, reason };
+}
+
+function run(): EdgeOriginGate {
+  return { useOrigin: true, reason: null };
 }
 
 function targetRate(aggressiveness: number, tenant: TenantProfile): number {

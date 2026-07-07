@@ -47,6 +47,7 @@ export async function storeEdgeCache(
   headers.set("x-request-id", context.requestId);
   headers.set("x-edge-decision", context.decision);
   headers.set("x-edge-ratelimit", context.rateLimit);
+  headers.set("x-edge-auth", context.auth);
 
   const cacheable = new Response(response.clone().body, {
     status: response.status,
@@ -128,9 +129,10 @@ function withEdgeHeaders(response: Response, context: EdgeContext): Response {
   headers.set("x-edge-decision", context.decision);
   headers.set("x-edge-cache", context.cache);
   headers.set("x-edge-ratelimit", context.rateLimit);
+  headers.set("x-edge-auth", context.auth);
   headers.set("access-control-allow-origin", "*");
   headers.set("access-control-allow-methods", "GET, POST, OPTIONS");
-  headers.set("access-control-allow-headers", "authorization, content-type, x-request-id, x-tenant-id");
+  headers.set("access-control-allow-headers", "authorization, content-type, x-api-key, x-request-id, x-tenant-id");
 
   return new Response(response.body, {
     status: response.status,

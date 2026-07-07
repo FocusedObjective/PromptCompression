@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "prompt-compression-edge",
   "main": "src/index.ts",
-  "compatibility_date": "2026-07-06",
+  "compatibility_date": "2026-07-07",
   "workers_dev": true,
   "ratelimits": [
     {
@@ -72,6 +72,15 @@
   ],
   "vars": {
     "EDGE_ENV": "prod",
+    "AUTH_ENABLED": "true",
+    "AUTH_REQUIRED": "false",
+    "AUTH_MODE": "stub",
+    "AUTH_STUB_APPROVED": "true",
+    "AUTH_API_BASE_URL": "https://api.usagetap.com",
+    "AUTH_API_PATH": "/v1/api-keys/authorize",
+    "AUTH_TIMEOUT_MS": "1500",
+    "AUTH_CACHE_TTL_SECONDS": "900",
+    "AUTH_DENY_CACHE_TTL_SECONDS": "60",
     "ORIGIN_AUTH_MODE": "none",
     "MAX_BODY_BYTES": "1048576",
     "ORIGIN_TIMEOUT_MS": "25000",

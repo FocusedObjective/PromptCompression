@@ -4,11 +4,13 @@ import {
   buildMessagesResponse,
   buildTokenEstimateResponse,
   buildV1CompressResponse,
+  evaluateEdgeOriginGate,
   needsOriginForDeterministic,
   resolveTenantProfile,
   shouldUseOrigin,
   validateRequestBody
 } from "./deterministic";
+import { authorizeRequest } from "./auth";
 import { matchEdgeCache, storeEdgeCache } from "./cache";
 import { fetchOrigin } from "./origin";
 import { checkRateLimit } from "./rateLimit";
@@ -22,17 +24,18 @@ const POST_ROUTES = new Set([
 ]);
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const context: EdgeContext = {
       requestId: request.headers.get("x-request-id") || crypto.randomUUID(),
       startMs: Date.now(),
       decision: "reject",
       cache: "bypass",
-      rateLimit: "not-checked"
+      rateLimit: "not-checked",
+      auth: "not-checked"
     };
 
     try {
-      return await handleRequest(request, env, context);
+      return await handleRequest(request, env, context, ctx);
     } catch (error) {
       if (error instanceof RequestShapeError || error instanceof SyntaxError) {
         context.decision = "reject";
@@ -52,7 +55,12 @@ export default {
   }
 };
 
-export async function handleRequest(request: Request, env: Env, context: EdgeContext): Promise<Response> {
+export async function handleRequest(
+  request: Request,
+  env: Env,
+  context: EdgeContext,
+  ctx?: ExecutionContext
+): Promise<Response> {
   const url = new URL(request.url);
   const route = normalizePath(url.pathname);
 
@@ -108,6 +116,17 @@ export async function handleRequest(request: Request, env: Env, context: EdgeCon
   }
   validateRequestBody(body, route);
 
+  const auth = await authorizeRequest(request, env, body, context, ctx);
+  if (!auth.allowed) {
+    context.decision = "reject";
+    context.cache = "bypass";
+    return jsonResponse({
+      error: "unauthorized",
+      message: auth.reason === "api_key_missing" ? "API key is required." : "API key is not authorized for this tenant.",
+      request_id: context.requestId
+    }, 401, context);
+  }
+
   if (route === "/tokens/estimate") {
     const rateLimit = await checkRateLimit(request, env, route, body, context);
     if (!rateLimit.allowed) {
@@ -136,13 +155,22 @@ export async function handleRequest(request: Request, env: Env, context: EdgeCon
   }
 
   if (shouldUseOrigin(body, route)) {
-    context.decision = "origin";
-    const originResponse = await fetchOrigin(request, env, route, rawBody, context);
-    if (originResponse) {
-      return storeEdgeCache(handle, originResponse, context);
+    const originGate = evaluateEdgeOriginGate(body, route, request.headers.get("x-tenant-id"));
+    if (originGate.useOrigin) {
+      context.decision = "origin";
+      const originResponse = await fetchOrigin(request, env, route, rawBody, context);
+      if (originResponse) {
+        return storeEdgeCache(handle, originResponse, context);
+      }
+      context.decision = "fallback-deterministic";
+      return deterministicResponse(route, body, request, context, ["edge_origin_unavailable_deterministic_fallback"]);
     }
-    context.decision = "fallback-deterministic";
-    return deterministicResponse(route, body, request, context, ["edge_origin_unavailable_deterministic_fallback"]);
+    context.decision = "edge-deterministic";
+    return storeEdgeCache(
+      handle,
+      deterministicResponse(route, body, request, context, originGate.reason ? [originGate.reason] : []),
+      context
+    );
   }
 
   if (needsOriginForDeterministic(body, route)) {
@@ -193,9 +221,10 @@ function jsonResponse(body: JsonObject, status: number, context: EdgeContext): R
     "x-edge-decision": context.decision,
     "x-edge-cache": context.cache,
     "x-edge-ratelimit": context.rateLimit,
+    "x-edge-auth": context.auth,
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type, x-request-id, x-tenant-id"
+    "access-control-allow-headers": "authorization, content-type, x-api-key, x-request-id, x-tenant-id"
   });
 
   return new Response(JSON.stringify(body), { status, headers });
@@ -209,9 +238,10 @@ function corsPreflightResponse(context: EdgeContext): Response {
       "x-edge-decision": context.decision,
       "x-edge-cache": context.cache,
       "x-edge-ratelimit": context.rateLimit,
+      "x-edge-auth": context.auth,
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET, POST, OPTIONS",
-      "access-control-allow-headers": "authorization, content-type, x-request-id, x-tenant-id",
+      "access-control-allow-headers": "authorization, content-type, x-api-key, x-request-id, x-tenant-id",
       "access-control-max-age": "86400"
     }
   });

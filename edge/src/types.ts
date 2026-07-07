@@ -1,5 +1,14 @@
 export interface Env {
   EDGE_ENV?: string;
+  AUTH_ENABLED?: string;
+  AUTH_REQUIRED?: string;
+  AUTH_MODE?: "stub" | "live";
+  AUTH_API_BASE_URL?: string;
+  AUTH_API_PATH?: string;
+  AUTH_TIMEOUT_MS?: string;
+  AUTH_CACHE_TTL_SECONDS?: string;
+  AUTH_DENY_CACHE_TTL_SECONDS?: string;
+  AUTH_STUB_APPROVED?: string;
   ORIGIN_BASE_URL?: string;
   ORIGIN_AUTH_MODE?: "none" | "shared-secret" | "google-iam";
   ORIGIN_SHARED_SECRET?: string;
@@ -38,6 +47,7 @@ export interface EdgeContext {
   decision: "origin" | "edge-deterministic" | "fallback-deterministic" | "cache-hit" | "reject";
   cache: "hit" | "miss" | "store" | "bypass" | "disabled";
   rateLimit: "native" | "local" | "blocked" | "disabled" | "not-checked";
+  auth: "allowed" | "denied" | "permissive" | "stub-allowed" | "missing" | "disabled" | "not-checked";
 }
 
 export type JsonObject = Record<string, unknown>;

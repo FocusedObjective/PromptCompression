@@ -4,11 +4,16 @@ import {
   buildMessagesResponse,
   buildV1CompressResponse,
   deterministicText,
+  evaluateEdgeOriginGate,
   needsOriginForDeterministic,
   resolveTenantProfile,
   shouldUseOrigin,
   validateRequestBody
 } from "../src/deterministic";
+
+const LONG_MODEL_TEXT = Array.from({ length: 80 }, (_, index) => {
+  return `This is reusable operational context sentence ${index} with enough ordinary prose for model compression decisions.`;
+}).join(" ");
 
 describe("deterministic edge compression", () => {
   it("uses model origin only for model modes", () => {
@@ -99,6 +104,49 @@ describe("deterministic edge compression", () => {
         { role: "user", content: [{ type: "text", text: "```json\n{}\n```" }] }
       ]
     }, "/v1/messages/compress")).toBe(true);
+  });
+
+  it("skips model_auto origin calls for low-value edge candidates", () => {
+    const decision = evaluateEdgeOriginGate({
+      input: "Short prompt that is not worth a Cloud Run model call.",
+      compression_settings: { mode: "model_auto" }
+    }, "/v1/compress", null);
+
+    expect(decision.useOrigin).toBe(false);
+    expect(decision.reason).toBe("edge_skipped_no_candidate_prose");
+  });
+
+  it("keeps model_force available for candidate-sized prose", () => {
+    const decision = evaluateEdgeOriginGate({
+      text: LONG_MODEL_TEXT,
+      mode: "model_force"
+    }, "/compress", null);
+
+    expect(decision.useOrigin).toBe(true);
+    expect(decision.reason).toBeNull();
+  });
+
+  it("hard-skips model origin for exact-output requests", () => {
+    const decision = evaluateEdgeOriginGate({
+      text: `Preserve whitespace exactly.\n\n${LONG_MODEL_TEXT}`,
+      mode: "model_force"
+    }, "/compress", null);
+
+    expect(decision.useOrigin).toBe(false);
+    expect(decision.reason).toBe("edge_skipped_exact_output_context");
+  });
+
+  it("skips message origin calls when there is no user text candidate", () => {
+    const decision = evaluateEdgeOriginGate({
+      messages: [
+        { role: "system", content: LONG_MODEL_TEXT },
+        { role: "assistant", content: LONG_MODEL_TEXT }
+      ],
+      compression_settings: { mode: "model_auto" }
+    }, "/v1/messages/compress", null);
+
+    expect(decision.useOrigin).toBe(false);
+    expect(decision.reason).toBe("edge_skipped_no_candidate_prose");
   });
 
   it("returns /compress compatible deterministic shape", () => {
