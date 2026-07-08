@@ -33,6 +33,14 @@ describe("deterministic edge compression", () => {
     expect(() => validateRequestBody({ text: "hello", mode: "bad" }, "/compress")).toThrow("mode must be one of");
     expect(() => validateRequestBody({ input: "hello", compression_settings: { aggressiveness: 2 } }, "/v1/compress")).toThrow("compression_settings.aggressiveness");
     expect(() => validateRequestBody({ messages: [{ content: "hello" }] }, "/v1/messages/compress")).toThrow("message.role");
+    expect(() => validateRequestBody({
+      messages: [{ role: "user", content: "hello" }],
+      compression_settings: { aggressiveness: { user: 0.4, system: 0.2, tool: 0.8 } }
+    }, "/v1/messages/compress")).not.toThrow();
+    expect(() => validateRequestBody({
+      messages: [{ role: "user", content: "hello" }],
+      compression_settings: { aggressiveness: { user: 2 } }
+    }, "/v1/messages/compress")).toThrow("compression_settings.aggressiveness.user");
     expect(() => validateRequestBody({ text: 12 }, "/tokens/estimate")).toThrow("text must be a string");
   });
 
@@ -192,6 +200,7 @@ describe("deterministic edge compression", () => {
       messages: [
         { role: "system", content: "System stays" },
         { role: "user", content: "  User text\n\n\nnext  " },
+        { role: "tool", content: "Tool stays" },
         { role: "assistant", content: "Assistant stays" }
       ]
     }, tenant, 1);
@@ -199,10 +208,47 @@ describe("deterministic edge compression", () => {
     expect(response.messages).toEqual([
       { role: "system", content: "System stays" },
       { role: "user", content: "User text\n\nnext" },
+      { role: "tool", content: "Tool stays" },
       { role: "assistant", content: "Assistant stays" }
     ]);
     expect(response.compressed_request).not.toHaveProperty("compression_settings");
-    expect(response.message_stats).toHaveLength(3);
+    expect(response.message_stats).toMatchObject([
+      { role: "system", skipped_reason: "aggressiveness_zero" },
+      { role: "user", compression_applied: true },
+      { role: "tool", skipped_reason: "aggressiveness_zero" },
+      { role: "assistant", skipped_reason: "role_preserved" }
+    ]);
+  });
+
+  it("compresses per-role message text when aggressiveness is an object", () => {
+    const tenant = resolveTenantProfile({}, null);
+    const response = buildMessagesResponse({
+      messages: [
+        { role: "system", content: " System text\n\n\nnext " },
+        { role: "user", content: " User text\n\n\nnext " },
+        { role: "tool", content: " Tool text\n\n\nnext " },
+        { role: "assistant", content: " Assistant stays\n\n\nnext " }
+      ],
+      compression_settings: {
+        aggressiveness: { system: 0.2, user: 0.5, tool: 0.8 }
+      }
+    }, tenant, 1);
+
+    expect(response.messages).toEqual([
+      { role: "system", content: "System text\n\nnext" },
+      { role: "user", content: "User text\n\nnext" },
+      { role: "tool", content: "Tool text\n\nnext" },
+      { role: "assistant", content: " Assistant stays\n\n\nnext " }
+    ]);
+    expect(response.input_tokens).toBe(12);
+    expect(response.output_tokens).toBe(12);
+    expect(response.non_user_tokens_preserved).toBe(3);
+    expect(response.message_stats).toMatchObject([
+      { role: "system", compression_applied: true },
+      { role: "user", compression_applied: true },
+      { role: "tool", compression_applied: true },
+      { role: "assistant", skipped_reason: "role_preserved" }
+    ]);
   });
 
   it("compresses user message text parts and preserves non-text parts", () => {

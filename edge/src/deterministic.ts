@@ -10,6 +10,11 @@ import { requiresOriginForJsonText, transformJsonSegmentsForEdge } from "./jsonT
 
 const EDGE_MODEL = "edge-deterministic";
 const DEFAULT_AGGRESSIVENESS = 0.15;
+const DEFAULT_ROLE_AGGRESSIVENESS: Record<string, number> = {
+  system: 0,
+  tool: 0,
+  user: DEFAULT_AGGRESSIVENESS
+};
 const VALID_COMPRESSION_MODES = new Set(["deterministic", "model_auto", "model_force"]);
 const MIN_MODEL_SEGMENT_CHARS = 160;
 const MIN_MODEL_SEGMENT_TOKENS = 24;
@@ -64,7 +69,14 @@ export function resolveAggressiveness(body: JsonObject, route: string): number {
     return typeof body.aggressiveness === "number" ? body.aggressiveness : DEFAULT_AGGRESSIVENESS;
   }
   const settings = isObject(body.compression_settings) ? body.compression_settings : {};
-  return typeof settings.aggressiveness === "number" ? settings.aggressiveness : DEFAULT_AGGRESSIVENESS;
+  if (typeof settings.aggressiveness === "number") {
+    return settings.aggressiveness;
+  }
+  if (isRoleAggressiveness(settings.aggressiveness)) {
+    const values = Object.values(resolveRoleAggressiveness(body));
+    return values.length > 0 ? Math.max(...values) : DEFAULT_AGGRESSIVENESS;
+  }
+  return DEFAULT_AGGRESSIVENESS;
 }
 
 export function shouldUseOrigin(body: JsonObject, route: string): boolean {
@@ -307,6 +319,8 @@ export function buildMessagesResponse(
   const seenUserTexts = new Set<string>();
   const outputMessages: JsonObject[] = [];
   const stats: JsonObject[] = [];
+  let compressedRoleInputTokens = 0;
+  let compressedRoleOutputTokens = 0;
   let userInputTokens = 0;
   let userOutputTokens = 0;
   let nonUserTokens = 0;
@@ -317,31 +331,49 @@ export function buildMessagesResponse(
     }
 
     const role = typeof raw.role === "string" ? raw.role : "";
+    const normalizedRole = role.toLowerCase();
     const originalMessage = raw as JsonObject;
     const originalContent = originalMessage.content;
     const originalEstimate = estimateContentTokens(originalContent);
 
-    if (role !== "user") {
+    const roleAggressiveness = resolveRoleAggressiveness(body)[normalizedRole];
+    if (roleAggressiveness === undefined || roleAggressiveness <= 0) {
       outputMessages.push(cloneObject(originalMessage));
       nonUserTokens += originalEstimate.count;
-      stats.push(messageStat(index, role, originalEstimate.count, originalEstimate.count, false, false, 0, 0, "role_preserved"));
+      stats.push(messageStat(
+        index,
+        role,
+        originalEstimate.count,
+        originalEstimate.count,
+        false,
+        false,
+        0,
+        0,
+        roleAggressiveness === undefined ? "role_preserved" : "aggressiveness_zero"
+      ));
       return;
     }
 
     if (typeof originalContent === "string") {
-      if (originalContent.length === 0 && compactEmpty) {
+      if (normalizedRole === "user" && originalContent.length === 0 && compactEmpty) {
         stats.push(messageStat(index, role, 0, 0, false, false, 0, 0, "empty_user_message_dropped"));
         return;
       }
-      if (compactDuplicate && seenUserTexts.has(originalContent)) {
+      if (normalizedRole === "user" && compactDuplicate && seenUserTexts.has(originalContent)) {
         stats.push(messageStat(index, role, originalEstimate.count, 0, false, false, 1, 0, "duplicate_user_text_dropped"));
         return;
       }
-      seenUserTexts.add(originalContent);
+      if (normalizedRole === "user") {
+        seenUserTexts.add(originalContent);
+      }
       const compressedText = deterministicText(originalContent, tenant);
       const compressedEstimate = estimateRegexTokens(compressedText);
-      userInputTokens += originalEstimate.count;
-      userOutputTokens += compressedEstimate.count;
+      compressedRoleInputTokens += originalEstimate.count;
+      compressedRoleOutputTokens += compressedEstimate.count;
+      if (normalizedRole === "user") {
+        userInputTokens += originalEstimate.count;
+        userOutputTokens += compressedEstimate.count;
+      }
       outputMessages.push({ ...cloneObject(originalMessage), content: compressedText });
       stats.push(messageStat(index, role, originalEstimate.count, compressedEstimate.count, true, compressedText !== originalContent, 1, 1));
       return;
@@ -359,16 +391,22 @@ export function buildMessagesResponse(
           continue;
         }
         textParts += 1;
-        if (compactDuplicate && seenUserTexts.has(part.text)) {
+        if (normalizedRole === "user" && compactDuplicate && seenUserTexts.has(part.text)) {
           droppedDuplicate = true;
           continue;
         }
-        seenUserTexts.add(part.text);
+        if (normalizedRole === "user") {
+          seenUserTexts.add(part.text);
+        }
         const compressedText = deterministicText(part.text, tenant);
         const originalPartTokens = estimateRegexTokens(part.text).count;
         const compressedPartTokens = estimateRegexTokens(compressedText).count;
-        userInputTokens += originalPartTokens;
-        userOutputTokens += compressedPartTokens;
+        compressedRoleInputTokens += originalPartTokens;
+        compressedRoleOutputTokens += compressedPartTokens;
+        if (normalizedRole === "user") {
+          userInputTokens += originalPartTokens;
+          userOutputTokens += compressedPartTokens;
+        }
         compressedTextParts += 1;
         newParts.push({ ...cloneObject(part), text: compressedText });
       }
@@ -395,8 +433,8 @@ export function buildMessagesResponse(
   });
 
   const topLevelPreserved = estimateTopLevelPreservedTokens(body);
-  const inputTokens = userInputTokens + nonUserTokens + topLevelPreserved.count;
-  const outputTokens = userOutputTokens + nonUserTokens + topLevelPreserved.count;
+  const inputTokens = compressedRoleInputTokens + nonUserTokens + topLevelPreserved.count;
+  const outputTokens = compressedRoleOutputTokens + nonUserTokens + topLevelPreserved.count;
   const compressedRequest = cloneObject(body);
   delete compressedRequest.compression_settings;
   delete compressedRequest.tenant_id;
@@ -468,7 +506,7 @@ function validateCompressionSettings(value: unknown): void {
     throw new RequestShapeError("compression_settings must be an object");
   }
   validateMode(value.mode);
-  validateNumberRange(value.aggressiveness, "compression_settings.aggressiveness", 0, 1);
+  validateAggressiveness(value.aggressiveness, "compression_settings.aggressiveness");
   validateNumberRange(value.latency_budget_ms, "compression_settings.latency_budget_ms", 0, Number.POSITIVE_INFINITY);
 }
 
@@ -491,6 +529,25 @@ function validateMode(value: unknown): void {
   }
   if (typeof value !== "string" || !VALID_COMPRESSION_MODES.has(value)) {
     throw new RequestShapeError("mode must be one of deterministic, model_auto, model_force");
+  }
+}
+
+function validateAggressiveness(value: unknown, field: string): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (typeof value === "number") {
+    validateNumberRange(value, field, 0, 1);
+    return;
+  }
+  if (!isObject(value)) {
+    throw new RequestShapeError(`${field} must be a number or per-role object`);
+  }
+  for (const [role, aggressiveness] of Object.entries(value)) {
+    if (typeof role !== "string" || role.trim().length === 0) {
+      throw new RequestShapeError(`${field} roles must be non-empty strings`);
+    }
+    validateNumberRange(aggressiveness, `${field}.${role}`, 0, 1);
   }
 }
 
@@ -534,7 +591,7 @@ function compressibleTexts(body: JsonObject, route: string): string[] {
 
   const texts: string[] = [];
   for (const message of body.messages) {
-    if (!isObject(message) || message.role !== "user") {
+    if (!isObject(message) || !shouldCompressRole(message.role, body)) {
       continue;
     }
     if (typeof message.content === "string") {
@@ -768,6 +825,34 @@ function requireString(value: unknown, field: string): string {
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRoleAggressiveness(value: unknown): value is Record<string, number> {
+  return isObject(value) && Object.values(value).every((item) => {
+    return typeof item === "number" && Number.isFinite(item);
+  });
+}
+
+function shouldCompressRole(role: unknown, body: JsonObject): boolean {
+  const normalizedRole = typeof role === "string" ? role.toLowerCase() : "";
+  const roleAggressiveness = resolveRoleAggressiveness(body)[normalizedRole];
+  return roleAggressiveness !== undefined && roleAggressiveness > 0;
+}
+
+function resolveRoleAggressiveness(body: JsonObject): Record<string, number> {
+  const settings = isObject(body.compression_settings) ? body.compression_settings : {};
+  const defaults = { ...DEFAULT_ROLE_AGGRESSIVENESS };
+  if (typeof settings.aggressiveness === "number") {
+    defaults.user = settings.aggressiveness;
+    return defaults;
+  }
+  if (!isRoleAggressiveness(settings.aggressiveness)) {
+    return defaults;
+  }
+  for (const [role, aggressiveness] of Object.entries(settings.aggressiveness)) {
+    defaults[role.toLowerCase()] = aggressiveness;
+  }
+  return defaults;
 }
 
 function cloneObject(value: JsonObject): JsonObject {

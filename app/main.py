@@ -1507,6 +1507,9 @@ def compress_v1_messages(
         request.compression_settings,
         tenant_profile,
     )
+    role_aggressiveness = _resolve_v1_role_aggressiveness(
+        request.compression_settings,
+    )
     mode = _resolve_v1_mode(request.compression_settings)
     latency_budget_ms = _resolve_v1_latency_budget_ms(request.compression_settings)
 
@@ -1519,6 +1522,7 @@ def compress_v1_messages(
             messages,
             compression_service=compression_service,
             aggressiveness=aggressiveness,
+            role_aggressiveness=role_aggressiveness,
             tenant_profile=tenant_profile,
             mode=mode,
             latency_budget_ms=latency_budget_ms,
@@ -1634,11 +1638,39 @@ def _resolve_v1_aggressiveness(
     settings: V1CompressionSettings | None,
     tenant_profile: TenantCompressionProfile,
 ) -> float:
-    if settings is not None and settings.aggressiveness is not None:
+    if (
+        settings is not None
+        and settings.aggressiveness is not None
+        and not isinstance(settings.aggressiveness, dict)
+    ):
         return settings.aggressiveness
+    if (
+        settings is not None
+        and isinstance(settings.aggressiveness, dict)
+        and "user" in settings.aggressiveness
+    ):
+        return settings.aggressiveness["user"]
     if tenant_profile.default_aggressiveness is not None:
         return tenant_profile.default_aggressiveness
     return DEFAULT_AGGRESSIVENESS
+
+
+def _resolve_v1_role_aggressiveness(
+    settings: V1CompressionSettings | None,
+) -> dict[str, float] | None:
+    if settings is None or settings.aggressiveness is None:
+        return None
+    if not isinstance(settings.aggressiveness, dict):
+        return None
+
+    if not settings.aggressiveness:
+        return None
+
+    return {
+        role.strip().lower(): aggressiveness
+        for role, aggressiveness in settings.aggressiveness.items()
+        if role.strip()
+    }
 
 
 def _resolve_v1_mode(settings: V1CompressionSettings | None) -> str:

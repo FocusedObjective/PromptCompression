@@ -1,11 +1,13 @@
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.token_estimator import REGEX_TOKEN_ESTIMATOR
 
 DEFAULT_AGGRESSIVENESS = 0.15
 CompressionMode = Literal["deterministic", "model_auto", "model_force"]
+AggressivenessValue = Annotated[float, Field(ge=0.0, le=1.0)]
+RoleAggressivenessSettings = dict[str, AggressivenessValue]
 
 
 class TenantCompressionSettings(BaseModel):
@@ -210,11 +212,13 @@ class V1CompressionSettings(BaseModel):
             "model_force runs LLMLingua when safety and segment gates allow."
         ),
     )
-    aggressiveness: float | None = Field(
+    aggressiveness: AggressivenessValue | RoleAggressivenessSettings | None = Field(
         default=None,
-        ge=0.0,
-        le=1.0,
-        description="0.0 keeps almost everything; 1.0 is most aggressive.",
+        description=(
+            "0.0 keeps almost everything; 1.0 is most aggressive. "
+            "For /v1/messages/compress, may be a per-role object such as "
+            '{"user": 0.5, "system": 0.5, "tool": 0.5}.'
+        ),
     )
     latency_budget_ms: float | None = Field(
         default=None,
@@ -229,6 +233,18 @@ class V1CompressionSettings(BaseModel):
         default=False,
         description="Drop exact duplicate user text parts within the same request.",
     )
+
+    @field_validator("aggressiveness")
+    @classmethod
+    def validate_role_aggressiveness_keys(
+        cls,
+        value: AggressivenessValue | RoleAggressivenessSettings | None,
+    ) -> AggressivenessValue | RoleAggressivenessSettings | None:
+        if not isinstance(value, dict):
+            return value
+        if any(not role.strip() for role in value):
+            raise ValueError("aggressiveness role keys must be non-empty strings")
+        return value
 
 
 class V1CompressRequest(BaseModel):

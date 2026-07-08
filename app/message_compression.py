@@ -1,7 +1,7 @@
 import copy
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from app.compressor import PromptCompressionService
 from app.tenant_profiles import TenantCompressionProfile
@@ -13,6 +13,8 @@ from app.token_estimator import (
 )
 
 TEXT_PART_TYPES = {"text", "input_text"}
+DEFAULT_SYSTEM_AGGRESSIVENESS = 0.0
+DEFAULT_TOOL_AGGRESSIVENESS = 0.0
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ def compress_user_messages(
     messages: list[dict[str, Any]],
     compression_service: PromptCompressionService,
     aggressiveness: float,
+    role_aggressiveness: Mapping[str, float] | None = None,
     tenant_profile: TenantCompressionProfile | None = None,
     mode: str | None = None,
     latency_budget_ms: float | None = None,
@@ -77,9 +80,14 @@ def compress_user_messages(
         compression_service,
         tenant_profile,
     )
+    normalized_role_aggressiveness = _normalize_role_aggressiveness(
+        role_aggressiveness,
+        default_user_aggressiveness=aggressiveness,
+    )
 
     for index, message in enumerate(messages):
         role = str(message.get("role", ""))
+        normalized_role = role.lower()
         content = message.get("content")
         original_estimate = estimate_content_token_details(
             content,
@@ -89,7 +97,10 @@ def compress_user_messages(
         estimator_names.append(original_estimate.estimator)
         input_tokens += original_tokens
 
-        if role.lower() != "user":
+        role_aggressiveness_value = normalized_role_aggressiveness.get(
+            normalized_role,
+        )
+        if role_aggressiveness_value is None or role_aggressiveness_value <= 0.0:
             compressed_messages.append(copy.deepcopy(message))
             output_tokens += original_tokens
             non_user_tokens_preserved += original_tokens
@@ -104,12 +115,20 @@ def compress_user_messages(
                     compressed=False,
                     text_parts=count_text_parts(content),
                     compressed_text_parts=0,
-                    skipped_reason="role_preserved",
+                    skipped_reason=(
+                        "aggressiveness_zero"
+                        if role_aggressiveness_value is not None
+                        else "role_preserved"
+                    ),
                 )
             )
             continue
 
-        if compact_empty_user_messages and _is_empty_user_content(content):
+        if (
+            normalized_role == "user"
+            and compact_empty_user_messages
+            and _is_empty_user_content(content)
+        ):
             user_input_tokens += original_tokens
             stats.append(
                 MessageCompressionStats(
@@ -129,11 +148,13 @@ def compress_user_messages(
 
         content_to_compress, duplicate_text_parts_dropped = (
             _drop_duplicate_user_text_parts(content, seen_user_text_parts)
-            if compact_duplicate_user_text_parts
+            if normalized_role == "user" and compact_duplicate_user_text_parts
             else (content, 0)
         )
-        if compact_duplicate_user_text_parts and _is_empty_user_content(
-            content_to_compress,
+        if (
+            normalized_role == "user"
+            and compact_duplicate_user_text_parts
+            and _is_empty_user_content(content_to_compress)
         ):
             stats.append(
                 MessageCompressionStats(
@@ -163,7 +184,7 @@ def compress_user_messages(
             _compress_user_content(
                 content_to_compress,
                 compression_service=compression_service,
-                aggressiveness=aggressiveness,
+                aggressiveness=role_aggressiveness_value,
                 tenant_profile=tenant_profile,
                 mode=mode,
                 latency_budget_ms=latency_budget_ms,
@@ -184,8 +205,9 @@ def compress_user_messages(
         estimator_names.append(compressed_estimate.estimator)
         tokens_saved = max(0, original_tokens - compressed_tokens)
         output_tokens += compressed_tokens
-        user_input_tokens += original_tokens
-        user_output_tokens += compressed_tokens
+        if normalized_role == "user":
+            user_input_tokens += original_tokens
+            user_output_tokens += compressed_tokens
         stats.append(
             MessageCompressionStats(
                 index=index,
@@ -217,6 +239,26 @@ def compress_user_messages(
         token_estimator=merge_token_estimator_names(estimator_names),
         warnings=warnings,
     )
+
+
+def _normalize_role_aggressiveness(
+    role_aggressiveness: Mapping[str, float] | None,
+    *,
+    default_user_aggressiveness: float,
+) -> dict[str, float]:
+    defaults = {
+        "system": DEFAULT_SYSTEM_AGGRESSIVENESS,
+        "tool": DEFAULT_TOOL_AGGRESSIVENESS,
+        "user": default_user_aggressiveness,
+    }
+    if role_aggressiveness is None:
+        return defaults
+
+    defaults.update({
+        str(role).lower(): aggressiveness
+        for role, aggressiveness in role_aggressiveness.items()
+    })
+    return defaults
 
 
 def estimate_content_tokens(content: Any) -> int:

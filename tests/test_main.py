@@ -588,6 +588,7 @@ def test_v1_messages_compress_only_compresses_user_text(monkeypatch):
             messages=[
                 {"role": "system", "content": "System stays."},
                 {"role": "user", "content": "Prompts are code."},
+                {"role": "tool", "content": "Tool stays."},
                 {"role": "assistant", "content": "Assistant stays."},
                 {
                     "role": "user",
@@ -609,6 +610,7 @@ def test_v1_messages_compress_only_compresses_user_text(monkeypatch):
     assert response.messages == [
         {"role": "system", "content": "System stays."},
         {"role": "user", "content": "Prompts code."},
+        {"role": "tool", "content": "Tool stays."},
         {"role": "assistant", "content": "Assistant stays."},
         {
             "role": "user",
@@ -625,17 +627,75 @@ def test_v1_messages_compress_only_compresses_user_text(monkeypatch):
     assert response.compression_profile == "default:base"
     assert response.compression_profile_source == "default"
     assert response.training_sample_recorded is False
-    assert response.input_tokens == 17
-    assert response.output_tokens == 15
+    assert response.input_tokens == 20
+    assert response.output_tokens == 18
     assert response.tokens_saved == 2
     assert response.user_input_tokens == 8
     assert response.user_output_tokens == 6
     assert response.user_tokens_saved == 2
-    assert response.non_user_tokens_preserved == 9
-    assert response.message_stats[0].skipped_reason == "role_preserved"
+    assert response.non_user_tokens_preserved == 12
+    assert response.message_stats[0].skipped_reason == "aggressiveness_zero"
     assert response.message_stats[1].compression_applied is True
     assert response.message_stats[1].compressed is True
-    assert response.message_stats[3].text_parts == 1
+    assert response.message_stats[2].skipped_reason == "aggressiveness_zero"
+    assert response.message_stats[4].text_parts == 1
+
+
+def test_v1_messages_compress_accepts_per_role_aggressiveness(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            model="gpt-test",
+            messages=[
+                {"role": "system", "content": "System prompt text."},
+                {"role": "user", "content": "Prompts are code."},
+                {"role": "tool", "content": "Tool result text."},
+                {"role": "assistant", "content": "Assistant stays."},
+            ],
+            compression_settings=V1CompressionSettings(
+                aggressiveness={"system": 0.2, "user": 0.5, "tool": 0.8},
+            ),
+        )
+    )
+
+    assert service.calls == [
+        ("System prompt text.", 0.2, False),
+        ("Prompts are code.", 0.5, False),
+        ("Tool result text.", 0.8, False),
+    ]
+    assert response.messages == [
+        {"role": "system", "content": "Prompts code."},
+        {"role": "user", "content": "Prompts code."},
+        {"role": "tool", "content": "Prompts code."},
+        {"role": "assistant", "content": "Assistant stays."},
+    ]
+    assert response.user_input_tokens == 4
+    assert response.user_output_tokens == 3
+    assert response.non_user_tokens_preserved == 3
+    assert response.message_stats[0].compression_applied is True
+    assert response.message_stats[2].compression_applied is True
+    assert response.message_stats[3].skipped_reason == "role_preserved"
+
+
+def test_v1_messages_compress_http_rejects_invalid_role_aggressiveness(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/v1/messages/compress",
+        headers={"Authorization": "Bearer test-key"},
+        json={
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "Prompts are code."}],
+            "compression_settings": {"aggressiveness": {"user": 1.2}},
+        },
+    )
+
+    assert response.status_code == 422
+    assert service.calls == []
 
 
 def test_v1_messages_compress_skips_user_messages_without_text(monkeypatch):
