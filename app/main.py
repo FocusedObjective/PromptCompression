@@ -15,6 +15,7 @@ from app.compressor import (
 )
 from app.eval_suite import evaluate_compression, load_eval_cases, quality_passed
 from app.eval_ui import EVAL_HTML
+from app.embed_ui import EMBED_HTML
 from app.message_compression import (
     compress_user_messages,
     estimate_content_token_details,
@@ -206,6 +207,33 @@ APP_HTML = """
       padding: 12px 16px;
       border-top: 1px solid var(--border);
       flex-wrap: wrap;
+    }
+
+    .example-controls {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      flex-wrap: wrap;
+    }
+
+    .example-button {
+      min-height: 32px;
+      padding: 0 10px;
+      background: #e8f1f8;
+      color: var(--accent);
+      font-size: 12px;
+    }
+
+    .example-button:hover {
+      background: #dbeaf6;
+    }
+
+    #compressButton {
+      margin-left: auto;
     }
 
     .tenant-controls {
@@ -598,7 +626,12 @@ Output:
 - Blockers and owner
 - Next three actions</textarea>
         <div class="controls">
-          <button class="copy-button" id="loadHtmlExampleButton" type="button">HTML Page Example</button>
+          <div class="example-controls" aria-label="Load an example">
+            <span>Try an example:</span>
+            <button class="example-button" id="loadTextJsonExampleButton" type="button">Text + JSON</button>
+            <button class="example-button" id="loadHtmlExampleButton" type="button">HTML Page</button>
+            <button class="example-button" id="loadTranscriptExampleButton" type="button">Meeting Transcript</button>
+          </div>
           <button id="compressButton" type="button">Compress</button>
         </div>
         <div class="tenant-controls">
@@ -718,7 +751,9 @@ Output:
     const tenantForceKeepTokensInput = document.getElementById("tenantForceKeepTokens");
     const tenantForceDropPhrasesInput = document.getElementById("tenantForceDropPhrases");
     const compressButton = document.getElementById("compressButton");
+    const loadTextJsonExampleButton = document.getElementById("loadTextJsonExampleButton");
     const loadHtmlExampleButton = document.getElementById("loadHtmlExampleButton");
+    const loadTranscriptExampleButton = document.getElementById("loadTranscriptExampleButton");
     const copyButton = document.getElementById("copyButton");
     const inputStatus = document.getElementById("inputStatus");
     const resultStatus = document.getElementById("resultStatus");
@@ -731,6 +766,7 @@ Output:
     const tokens = document.getElementById("tokens");
     const elapsed = document.getElementById("elapsed");
     let latestCompressedText = "";
+    const TEXT_AND_JSON_EXAMPLE = promptInput.value;
     const TENANT_TEST_PRESETS = {
       uppercase_base: {
         tenantId: "",
@@ -816,6 +852,22 @@ priority escalation deadline status background summary should look important.`,
   <footer>Copyright 2026 Example Corp</footer>
 </body>
 </html>`;
+    const MEETING_TRANSCRIPT_EXAMPLE = `Create a concise escalation summary from this customer operations meeting. Keep owners, dates, incident IDs, URLs, and exact limits.
+
+Maya (Support): Acme Retail has reported intermittent checkout timeouts since the July 8 deployment window. They opened INC-1042 yesterday and their account executive needs an update before Friday.
+
+Leo (Engineering): We saw the issue in the payments dashboard at https://example.com/dashboards/payments. The error rate peaks around 10:00 Pacific. The working theory is retry storms, but we have not confirmed it yet.
+
+Maya (Support): The customer has contacted us three times. Their renewal is in September, and they are concerned another outage will affect the launch campaign.
+
+Priya (Payments): I will compare the July 8 deployment changes with retry metrics and post findings by 2026-08-15. Do not raise retry_count above 3; that is a hard safety limit.
+
+Leo (Engineering): I can add targeted logging today. We do not need a rollback yet, and I do not want to promise a root cause before we have the traces.
+
+Output:
+- Executive summary
+- Blocker and owner
+- Next three actions`;
 
     function setStatus(message, isError) {
       const hasError = isError === true;
@@ -1121,16 +1173,20 @@ priority escalation deadline status background summary should look important.`,
     });
     refreshTokenEstimate();
 
-    loadHtmlExampleButton.addEventListener("click", () => {
-      promptInput.value = HTML_PAGE_EXAMPLE;
+    function loadExample(text, name) {
+      promptInput.value = text;
       tenantTestPresetInput.value = "";
       latestCompressedText = "";
       copyButton.disabled = true;
       diff.textContent = "";
       clearDiagnostics();
-      setStatus("HTML example loaded");
+      setStatus(`${name} example loaded`);
       promptInput.dispatchEvent(new Event("input"));
-    });
+    }
+
+    loadTextJsonExampleButton.addEventListener("click", () => loadExample(TEXT_AND_JSON_EXAMPLE, "Text + JSON"));
+    loadHtmlExampleButton.addEventListener("click", () => loadExample(HTML_PAGE_EXAMPLE, "HTML page"));
+    loadTranscriptExampleButton.addEventListener("click", () => loadExample(MEETING_TRANSCRIPT_EXAMPLE, "Meeting transcript"));
 
     copyButton.addEventListener("click", async () => {
       if (!latestCompressedText) {
@@ -1236,6 +1292,11 @@ eval_cases = load_eval_cases()
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(content=APP_HTML, headers=DASHBOARD_EMBED_HEADERS)
+
+
+@app.get("/embed", response_class=HTMLResponse)
+def embed_index() -> HTMLResponse:
+    return HTMLResponse(content=EMBED_HTML, headers=DASHBOARD_EMBED_HEADERS)
 
 
 @app.on_event("startup")

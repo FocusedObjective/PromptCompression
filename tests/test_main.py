@@ -133,12 +133,19 @@ def test_index_returns_prompt_compression_ui():
     assert "Tenant Profile" in body
     assert 'id="tenantTestPreset"' in body
     assert 'id="compressionMode"' in body
+    assert 'id="loadTextJsonExampleButton"' in body
     assert 'id="loadHtmlExampleButton"' in body
-    assert "HTML Page Example" in body
+    assert 'id="loadTranscriptExampleButton"' in body
+    assert "Text + JSON" in body
+    assert "Meeting Transcript" in body
+    assert 'class="example-controls"' in body
+    assert 'class="example-button" id="loadTextJsonExampleButton"' in body
+    assert "#compressButton" in body
     assert "HTML page converted to Markdown" in body
     assert "Prompt Compression Guide" in body
+    assert '<option value="model_force" selected>Model force</option>' in body
     assert 'id="latencyBudgetMs"' in body
-    assert 'id="allowCpuModelAuto"' in body
+    assert 'id="allowCpuModelAuto" type="checkbox">' in body
     assert "tenant_rick_probe" in body
     assert 'id="tenantId"' in body
     assert 'id="tenantProfileId"' in body
@@ -171,6 +178,37 @@ def test_index_http_allows_iframe_embedding():
     assert response.status_code == 200
     assert response.headers["content-security-policy"] == "frame-ancestors *"
     assert "x-frame-options" not in response.headers
+
+
+def test_embed_returns_streamlined_iframe_ui():
+    client = TestClient(main.app)
+
+    response = client.get("/embed")
+    body = response.text
+
+    assert response.status_code == 200
+    assert response.headers["content-security-policy"] == "frame-ancestors *"
+    assert "Prompt Compression" in body
+    assert 'id="prompt"' in body
+    assert 'id="aggressiveness"' in body
+    assert 'id="aggressiveness" type="range" min="0" max="1" step="0.05" value="0.30"' in body
+    assert 'id="compressButton"' in body
+    assert 'id="copyButton"' in body
+    assert 'id="elapsed"' not in body
+    assert ">Elapsed<" not in body
+    assert "Eval Suite" not in body
+    assert "Benchmark" not in body
+    assert "Compression Settings" not in body
+    assert "Tenant Profile" not in body
+    assert 'id="loadJsonExampleButton"' in body
+    assert 'id="loadHtmlExampleButton"' in body
+    assert 'id="loadTranscriptExampleButton"' in body
+    assert "HTML Page" in body
+    assert "Meeting Transcript" in body
+    assert "Text + JSON" in body
+    assert "promptInput.value = JSON_EXAMPLE" in body
+    assert "include_diagnostics:false" in body
+    assert "tenant_profile" not in body
 
 
 def test_health_includes_deployment_version():
@@ -215,8 +253,9 @@ def test_benchmark_index_returns_benchmark_page():
     assert "HTML ratios" in body
     assert "html_markdown" in body
     assert 'id="compressionModeInput"' in body
+    assert '<option value="model_auto" selected>Model auto</option>' in body
     assert 'id="latencyBudgetInput"' in body
-    assert 'id="allowCpuModelAutoInput"' in body
+    assert 'id="allowCpuModelAutoInput" type="checkbox" checked' in body
     assert "mode: compressionModeInput.value" in body
     assert "payload.latency_budget_ms" in body
     assert "payload.allow_cpu_model_auto = true" in body

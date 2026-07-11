@@ -381,8 +381,8 @@ BENCHMARK_HTML = """
       <label class="field">
         Mode
         <select id="compressionModeInput">
-          <option value="model_force" selected>Model force</option>
-          <option value="model_auto">Model auto</option>
+          <option value="model_force">Model force</option>
+          <option value="model_auto" selected>Model auto</option>
           <option value="deterministic">Deterministic</option>
         </select>
       </label>
@@ -391,7 +391,7 @@ BENCHMARK_HTML = """
         <input id="latencyBudgetInput" type="number" min="0" step="25" placeholder="model_auto only">
       </label>
       <label class="inline">
-        <input id="allowCpuModelAutoInput" type="checkbox">
+        <input id="allowCpuModelAutoInput" type="checkbox" checked>
         Allow CPU model auto
       </label>
       <label class="field">
