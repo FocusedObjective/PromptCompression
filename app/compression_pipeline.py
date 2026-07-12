@@ -433,12 +433,20 @@ class PromptPreprocessor:
         allow_toon: bool = True,
         leading_context: str = "",
     ) -> CompressionSegment | None:
-        if not self._is_medium_large_json(candidate):
-            return None
-
         parsed = self._parse_json(candidate)
         if parsed is None:
             return None
+
+        # Size determines whether TOON is worth attempting, not whether valid
+        # JSON is safe to expose to probabilistic model compression. Preserve
+        # small JSON verbatim as a protected structured segment.
+        if not self._is_medium_large_json(candidate):
+            return CompressionSegment(
+                text=candidate,
+                compressible=False,
+                kind="json",
+                source_text=candidate,
+            )
 
         if (
             not allow_toon

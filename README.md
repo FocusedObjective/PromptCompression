@@ -138,6 +138,37 @@ Tenant fields are optional. They are request scoped and are not loaded from a
 local database. If `aggressiveness` is omitted, `tenant_profile.default_aggressiveness`
 is used when provided.
 
+Tagged JSON can opt into tenant-approved compression of selected long string
+values while keeping keys, types, arrays, and all other values deterministic:
+
+```json
+{
+  "tenant_profile": {
+    "json_compression_policy_id": "issue-v1",
+    "json_value_compression_paths": [
+      "$.description",
+      "$.comments[*].body"
+    ],
+    "json_value_min_tokens": 200,
+    "json_value_max_reduction": 0.25,
+    "json_value_max_values": 8
+  },
+  "text": "Review this issue:\n<compress-json policy=\"issue-v1\">{\"id\":\"ISSUE-73\",\"description\":\"Long narrative...\"}</compress-json>"
+}
+```
+
+The tag cannot authorize fields by itself: its policy must match the tenant
+profile and only allowlisted string paths are eligible. Each accepted value is
+compressed independently and JSON-escaped during reconstruction. The rebuilt
+object is then TOON-encoded when beneficial, or otherwise protected verbatim
+before any outer model-compression call. Invalid JSON, duplicate keys,
+unapproved policies, unlisted paths, and values that fail the token or maximum
+reduction gates are not model-compressed.
+
+See [Tagged JSON Compression](docs/tagged-json-compression.md) for the complete
+tag grammar, tenant schema, supported path syntax, safety gates, mode behavior,
+fallback warnings, and operational guidance.
+
 Set `include_sections` to `true` only for UI/debug views that need per-section
 labels and protected-block rendering. It defaults to `false` to keep responses
 small and skip word-label generation.

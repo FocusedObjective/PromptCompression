@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from app.benchmark_ui import BENCHMARK_HTML
+from app.changelog_ui import CHANGELOG_HTML
 from app.compressor import (
     COMPRESSION_MODE_DETERMINISTIC,
     COMPRESSION_MODE_MODEL_AUTO,
@@ -575,6 +576,7 @@ APP_HTML = """
           <a class="nav-link" href="/eval">Eval Suite</a>
           <a class="nav-link" href="/benchmark">Benchmark</a>
           <a class="nav-link" href="/research">Research</a>
+          <a class="nav-link" href="/changelog">Changelog</a>
         </nav>
       </div>
       <div class="stats" aria-live="polite">
@@ -1320,6 +1322,11 @@ def benchmark_index() -> HTMLResponse:
     return HTMLResponse(content=BENCHMARK_HTML, headers=DASHBOARD_EMBED_HEADERS)
 
 
+@app.get("/changelog", response_class=HTMLResponse)
+def changelog_index() -> HTMLResponse:
+    return HTMLResponse(content=CHANGELOG_HTML, headers=DASHBOARD_EMBED_HEADERS)
+
+
 @app.get("/eval/cases", response_model=list[EvalCaseResponse])
 def list_eval_cases() -> list[EvalCaseResponse]:
     return [
@@ -1681,6 +1688,21 @@ def _tenant_profile_from_request(
         min_rate=None if settings is None else settings.min_rate,
         force_keep_tokens=() if settings is None else settings.force_keep_tokens,
         force_drop_phrases=() if settings is None else settings.force_drop_phrases,
+        json_compression_policy_id=(
+            None if settings is None else settings.json_compression_policy_id
+        ),
+        json_value_compression_paths=(
+            () if settings is None else settings.json_value_compression_paths
+        ),
+        json_value_min_tokens=(
+            200 if settings is None else settings.json_value_min_tokens
+        ),
+        json_value_max_reduction=(
+            0.25 if settings is None else settings.json_value_max_reduction
+        ),
+        json_value_max_values=(
+            8 if settings is None else settings.json_value_max_values
+        ),
     )
 
 

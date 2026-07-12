@@ -141,6 +141,7 @@ def test_index_returns_prompt_compression_ui():
     assert "Eval Suite" in body
     assert 'href="/benchmark"' in body
     assert 'href="/research"' in body
+    assert 'href="/changelog"' in body
     assert "Dropped Words Highlighted" in body
     assert "Diagnostic Logs" in body
     assert "JSON compressed to TOON" in body
@@ -250,6 +251,7 @@ def test_eval_index_returns_eval_ui():
     assert "Run Selected" in body
     assert 'href="/benchmark"' in body
     assert 'href="/research"' in body
+    assert 'href="/changelog"' in body
     assert "/eval/run" in body
 
 
@@ -259,6 +261,7 @@ def test_benchmark_index_returns_benchmark_page():
 
     assert "Performance Benchmark" in body
     assert 'href="/eval"' in body
+    assert 'href="/changelog"' in body
     assert "include_diagnostics" in body
     assert "Download Raw JSONL" in body
     assert "LLMLingua p50" in body
@@ -284,12 +287,25 @@ def test_research_index_returns_research_page():
 
     assert "Prompt Compression Research" in body
     assert 'href="/benchmark"' in body
+    assert 'href="/changelog"' in body
     assert "LLMLingua-2 BERT-base" in body
     assert "PCToolkit Assessment" in body
     assert "not as a production runtime dependency" in body
     assert "SCOPE: A Generative Approach" in body
     assert "Toolkit for Prompt Compression" in body
     assert "Hugging Face PEFT" in body
+
+
+def test_changelog_index_returns_project_history():
+    response = main.changelog_index()
+    body = response.body.decode()
+
+    assert "Prompt Compression Changelog" in body
+    assert "Added JSON protection and selective text compression based on tenant schema" in body
+    assert "Added TOON and deterministic whitespace pipelines" in body
+    assert 'href="/eval"' in body
+    assert 'href="/benchmark"' in body
+    assert 'href="/research"' in body
 
 
 def test_eval_cases_endpoint_returns_fixture_cases():
@@ -488,6 +504,14 @@ def test_compress_uses_request_supplied_tenant_profile(monkeypatch):
                 min_rate=0.6,
                 force_keep_tokens=["AcmeTerm", "AcmeTerm", "  SKU-77  "],
                 force_drop_phrases=["Reusable preamble", ""],
+                json_compression_policy_id="issue-v1",
+                json_value_compression_paths=[
+                    "$.description",
+                    "$.comments[*].body",
+                ],
+                json_value_min_tokens=120,
+                json_value_max_reduction=0.2,
+                json_value_max_values=4,
             ),
             text="Prompts are code.",
         )
@@ -502,6 +526,14 @@ def test_compress_uses_request_supplied_tenant_profile(monkeypatch):
     assert profile.min_rate == 0.6
     assert profile.force_keep_tokens == ("AcmeTerm", "SKU-77")
     assert profile.force_drop_phrases == ("Reusable preamble",)
+    assert profile.json_compression_policy_id == "issue-v1"
+    assert profile.json_value_compression_paths == (
+        "$.description",
+        "$.comments[*].body",
+    )
+    assert profile.json_value_min_tokens == 120
+    assert profile.json_value_max_reduction == 0.2
+    assert profile.json_value_max_values == 4
     assert response.tenant_id == "tenant_123"
     assert response.compression_profile == "tenant_123:v1"
     assert response.compression_profile_source == "api"
