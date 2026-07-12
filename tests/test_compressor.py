@@ -3,6 +3,7 @@ from app.compressor import (
     COMPRESSION_MODE_MODEL_AUTO,
     PromptCompressionService,
     _parse_adapter_slots,
+    build_token_savings,
 )
 from app.tenant_profiles import build_tenant_profile
 from app.token_estimator import estimate_huggingface_tokens, estimate_token_count
@@ -221,8 +222,75 @@ def test_collect_diagnostics_false_skips_component_diagnostics():
     )
 
     assert result.diagnostics is None
+    assert result.token_savings is not None
+    assert result.token_savings.model_ran is False
+    assert result.token_savings.token_estimator == result.token_estimator
     assert result.warnings == ["llmlingua_skipped_mode_deterministic"]
     assert compressor.inputs == []
+
+
+def test_token_savings_arithmetic_for_all_normal_paths():
+    cases = [
+        (1000, 850, 600, True, 150, 250, 400, 0.15, 250 / 850, 0.4),
+        (1000, 850, 850, False, 150, 0, 150, 0.15, 0.0, 0.15),
+        (1000, 1000, 1000, False, 0, 0, 0, 0.0, 0.0, 0.0),
+    ]
+
+    for (
+        original,
+        deterministic,
+        final,
+        model_ran,
+        det_saved,
+        model_saved,
+        total_saved,
+        det_reduction,
+        model_reduction,
+        total_reduction,
+    ) in cases:
+        savings = build_token_savings(
+            original_tokens=original,
+            after_deterministic_tokens=deterministic,
+            final_tokens=final,
+            model_ran=model_ran,
+            fallback_used=False,
+            token_estimator="test-tokenizer",
+        )
+
+        assert savings.deterministic_tokens_saved == det_saved
+        assert savings.model_incremental_tokens_saved == model_saved
+        assert savings.total_tokens_saved == total_saved
+        assert savings.deterministic_reduction == det_reduction
+        assert savings.model_incremental_reduction == model_reduction
+        assert savings.total_reduction == total_reduction
+        assert savings.attribution_residual_tokens == 0
+
+
+def test_token_savings_fallback_and_zero_input_are_finite():
+    fallback = build_token_savings(
+        original_tokens=1000,
+        after_deterministic_tokens=850,
+        final_tokens=850,
+        model_ran=True,
+        fallback_used=True,
+        token_estimator="test-tokenizer",
+    )
+    empty = build_token_savings(
+        original_tokens=0,
+        after_deterministic_tokens=0,
+        final_tokens=0,
+        model_ran=False,
+        fallback_used=False,
+        token_estimator="test-tokenizer",
+    )
+
+    assert fallback.model_ran is True
+    assert fallback.fallback_used is True
+    assert fallback.model_incremental_tokens_saved == 0
+    assert fallback.total_tokens_saved == 150
+    assert empty.deterministic_reduction == 0.0
+    assert empty.model_incremental_reduction == 0.0
+    assert empty.total_reduction == 0.0
 
 
 def test_model_auto_skips_cpu_by_default():

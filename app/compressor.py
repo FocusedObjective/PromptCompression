@@ -165,6 +165,77 @@ class CompressionOutputSection:
 
 
 @dataclass(frozen=True)
+class TokenSavings:
+    original_tokens: int
+    after_deterministic_tokens: int
+    final_tokens: int
+    deterministic_tokens_saved: int
+    model_incremental_tokens_saved: int
+    total_tokens_saved: int
+    deterministic_reduction: float
+    model_incremental_reduction: float
+    total_reduction: float
+    model_stage: str
+    model_ran: bool
+    fallback_used: bool
+    attribution_residual_tokens: int
+    token_estimator: str
+
+
+def build_token_savings(
+    *,
+    original_tokens: int,
+    after_deterministic_tokens: int,
+    final_tokens: int,
+    model_ran: bool,
+    fallback_used: bool,
+    token_estimator: str,
+) -> TokenSavings:
+    deterministic_tokens_saved = max(
+        0,
+        original_tokens - after_deterministic_tokens,
+    )
+    model_incremental_tokens_saved = max(
+        0,
+        after_deterministic_tokens - final_tokens,
+    )
+    total_tokens_saved = max(0, original_tokens - final_tokens)
+    deterministic_reduction = (
+        0.0
+        if original_tokens <= 0
+        else deterministic_tokens_saved / original_tokens
+    )
+    model_incremental_reduction = (
+        0.0
+        if after_deterministic_tokens <= 0
+        else model_incremental_tokens_saved / after_deterministic_tokens
+    )
+    total_reduction = (
+        0.0 if original_tokens <= 0 else total_tokens_saved / original_tokens
+    )
+    return TokenSavings(
+        original_tokens=original_tokens,
+        after_deterministic_tokens=after_deterministic_tokens,
+        final_tokens=final_tokens,
+        deterministic_tokens_saved=deterministic_tokens_saved,
+        model_incremental_tokens_saved=model_incremental_tokens_saved,
+        total_tokens_saved=total_tokens_saved,
+        deterministic_reduction=deterministic_reduction,
+        model_incremental_reduction=model_incremental_reduction,
+        total_reduction=total_reduction,
+        model_stage="llmlingua2",
+        model_ran=model_ran,
+        fallback_used=fallback_used,
+        attribution_residual_tokens=(
+            total_tokens_saved
+            - deterministic_tokens_saved
+            - model_incremental_tokens_saved
+        ),
+        token_estimator=token_estimator,
+    )
+
+
+@dataclass(frozen=True)
 class CompressionResult:
     compressed_text: str
     original_tokens: int
@@ -185,6 +256,7 @@ class CompressionResult:
     compression_mode: str = COMPRESSION_MODE_MODEL_FORCE
     compression_path: str = COMPRESSION_PATH_UNCHANGED
     warnings: list[str] = field(default_factory=list)
+    token_savings: TokenSavings | None = None
 
 
 @dataclass(frozen=True)
@@ -2227,6 +2299,23 @@ class PromptCompressionService:
             deterministic_text=deterministic_text,
             llmlingua_called=llmlingua_called,
         )
+        token_estimator = merge_token_estimator_names(
+            [
+                original_estimate.estimator,
+                preprocessed_estimate.estimator,
+                force_dropped_estimate.estimator,
+                deterministic_estimate.estimator,
+                compressed_estimate.estimator,
+            ]
+        )
+        token_savings = build_token_savings(
+            original_tokens=original_estimate.count,
+            after_deterministic_tokens=deterministic_estimate.count,
+            final_tokens=compressed_estimate.count,
+            model_ran=llmlingua_called,
+            fallback_used=fallback_used,
+            token_estimator=token_estimator,
+        )
         diagnostics = None
         if collect_diagnostics:
             phase_start = time.perf_counter()
@@ -2244,11 +2333,10 @@ class PromptCompressionService:
                 fallback_reason=fallback_reason,
                 deterministic_original_tokens=original_estimate.count,
                 deterministic_output_tokens=deterministic_estimate.count,
-                deterministic_tokens_saved=max(
-                    0,
-                    original_estimate.count - deterministic_estimate.count,
+                deterministic_tokens_saved=(
+                    token_savings.deterministic_tokens_saved
                 ),
-                deterministic_reduction=deterministic_reduction,
+                deterministic_reduction=token_savings.deterministic_reduction,
                 deterministic_input_chars=len(text),
                 deterministic_output_chars=len(deterministic_text),
                 preprocessing_tokens_saved=preprocessing_tokens_saved,
@@ -2267,18 +2355,11 @@ class PromptCompressionService:
                 ),
                 literal_placeholder_count=literal_placeholdering.placeholder_count,
                 literal_placeholder_tokens_saved=literal_placeholdering.tokens_saved,
-                model_incremental_tokens_saved=max(
-                    0,
-                    deterministic_estimate.count - compressed_estimate.count,
+                model_incremental_tokens_saved=(
+                    token_savings.model_incremental_tokens_saved
                 ),
                 model_incremental_reduction=(
-                    0.0
-                    if deterministic_estimate.count <= 0
-                    else max(
-                        0.0,
-                        1.0
-                        - (compressed_estimate.count / deterministic_estimate.count),
-                    )
+                    token_savings.model_incremental_reduction
                 ),
                 duplicate_block_candidate_count=duplicate_blocks.candidate_count,
                 duplicate_block_candidate_tokens=duplicate_blocks.candidate_tokens,
@@ -2308,19 +2389,12 @@ class PromptCompressionService:
             compression_profile=profile.profile_id,
             compression_profile_source=profile.source,
             training_sample_recorded=False,
-            token_estimator=merge_token_estimator_names(
-                [
-                    original_estimate.estimator,
-                    preprocessed_estimate.estimator,
-                    force_dropped_estimate.estimator,
-                    deterministic_estimate.estimator,
-                    compressed_estimate.estimator,
-                ]
-            ),
+            token_estimator=token_estimator,
             diagnostics=diagnostics,
             compression_mode=compression_mode,
             compression_path=compression_path,
             warnings=warnings,
+            token_savings=token_savings,
         )
 
     def _build_diagnostics(

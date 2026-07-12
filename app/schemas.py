@@ -182,6 +182,23 @@ class CompressionDiagnosticsResponse(BaseModel):
     identifier_density: float = 0.0
 
 
+class TokenSavingsResponse(BaseModel):
+    original_tokens: int
+    after_deterministic_tokens: int
+    final_tokens: int
+    deterministic_tokens_saved: int
+    model_incremental_tokens_saved: int
+    total_tokens_saved: int
+    deterministic_reduction: float
+    model_incremental_reduction: float
+    total_reduction: float
+    model_stage: str
+    model_ran: bool
+    fallback_used: bool
+    attribution_residual_tokens: int
+    token_estimator: str
+
+
 class CompressResponse(BaseModel):
     compressed_text: str
     original_tokens: int
@@ -197,6 +214,7 @@ class CompressResponse(BaseModel):
     token_estimator: str = Field(default=REGEX_TOKEN_ESTIMATOR)
     compression_mode: str = "model_force"
     compression_path: str = "unchanged"
+    token_savings: TokenSavingsResponse
     warnings: list[str] = Field(default_factory=list)
     elapsed_ms: float
     labeled_tokens: list[LabeledToken] = Field(default_factory=list)

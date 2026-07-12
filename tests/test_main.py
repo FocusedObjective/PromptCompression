@@ -7,6 +7,7 @@ from app.compressor import (
     CompressionResult,
     CompressionTiming,
     CompressionToken,
+    build_token_savings,
 )
 from app.eval_suite import EvalCase
 from app.schemas import (
@@ -112,9 +113,23 @@ class FakeCompressionService:
                 segment_kinds={"prose": 1},
                 llmlingua_called=True,
                 fallback_used=False,
+                deterministic_original_tokens=4,
+                deterministic_output_tokens=3,
+                deterministic_tokens_saved=1,
+                deterministic_reduction=0.25,
+                model_incremental_tokens_saved=1,
+                model_incremental_reduction=1 / 3,
             ),
             compression_mode=mode or "model_force",
             compression_path="deterministic_plus_model",
+            token_savings=build_token_savings(
+                original_tokens=4,
+                after_deterministic_tokens=3,
+                final_tokens=2,
+                model_ran=True,
+                fallback_used=False,
+                token_estimator="regex:unicode-word-or-non-space",
+            ),
         )
 
 
@@ -362,6 +377,24 @@ def test_compress_response_omits_sections_by_default(monkeypatch):
     assert [token.model_dump() for token in response.labeled_tokens] == []
     assert response.output_sections == []
     assert response.diagnostics is None
+    assert response.token_savings.model_dump() == {
+        "original_tokens": 4,
+        "after_deterministic_tokens": 3,
+        "final_tokens": 2,
+        "deterministic_tokens_saved": 1,
+        "model_incremental_tokens_saved": 1,
+        "total_tokens_saved": 2,
+        "deterministic_reduction": 0.25,
+        "model_incremental_reduction": 1 / 3,
+        "total_reduction": 0.5,
+        "model_stage": "llmlingua2",
+        "model_ran": True,
+        "fallback_used": False,
+        "attribution_residual_tokens": 0,
+        "token_estimator": "regex:unicode-word-or-non-space",
+    }
+    assert "NaN" not in response.model_dump_json()
+    assert "Infinity" not in response.model_dump_json()
 
 
 def test_compress_response_includes_diagnostics_when_requested(monkeypatch):
@@ -379,6 +412,14 @@ def test_compress_response_includes_diagnostics_when_requested(monkeypatch):
     assert response.diagnostics is not None
     assert response.diagnostics.timings.llmlingua_ms == 8.0
     assert response.diagnostics.model_segment_count == 1
+    assert (
+        response.token_savings.deterministic_tokens_saved
+        == response.diagnostics.deterministic_tokens_saved
+    )
+    assert (
+        response.token_savings.model_incremental_tokens_saved
+        == response.diagnostics.model_incremental_tokens_saved
+    )
     assert service.last_collect_diagnostics is True
 
 

@@ -33,6 +33,7 @@ from app.schemas import (
     TenantCompressionSettings,
     TokenEstimateRequest,
     TokenEstimateResponse,
+    TokenSavingsResponse,
     V1CompressRequest,
     V1CompressResponse,
     V1CompressionSettings,
@@ -1460,6 +1461,12 @@ def compress(
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    if result.token_savings is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Compression result did not include token-savings attribution.",
+        )
+
     return CompressResponse(
         compressed_text=result.compressed_text,
         original_tokens=result.original_tokens,
@@ -1475,6 +1482,7 @@ def compress(
         token_estimator=result.token_estimator,
         compression_mode=result.compression_mode,
         compression_path=result.compression_path,
+        token_savings=TokenSavingsResponse(**asdict(result.token_savings)),
         warnings=result.warnings,
         elapsed_ms=result.elapsed_ms,
         labeled_tokens=[asdict(token) for token in result.labeled_tokens],

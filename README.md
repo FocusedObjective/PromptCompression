@@ -158,16 +158,60 @@ Response:
   "compression_profile_source": "api",
   "training_sample_recorded": false,
   "token_estimator": "huggingface:microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
+  "compression_mode": "model_force",
+  "compression_path": "deterministic_plus_model",
+  "token_savings": {
+    "original_tokens": 12,
+    "after_deterministic_tokens": 10,
+    "final_tokens": 8,
+    "deterministic_tokens_saved": 2,
+    "model_incremental_tokens_saved": 2,
+    "total_tokens_saved": 4,
+    "deterministic_reduction": 0.1666666667,
+    "model_incremental_reduction": 0.2,
+    "total_reduction": 0.3333333333,
+    "model_stage": "llmlingua2",
+    "model_ran": true,
+    "fallback_used": false,
+    "attribution_residual_tokens": 0,
+    "token_estimator": "huggingface:microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+  },
   "elapsed_ms": 123.4,
   "labeled_tokens": [],
   "output_sections": []
 }
 ```
 
+`token_savings` is always returned. `original_tokens`,
+`after_deterministic_tokens`, and `final_tokens` are the counts before
+compression, after deterministic transforms, and in the returned output.
+The three `*_tokens_saved` fields are the corresponding differences, while
+the reductions divide deterministic savings by the original count, incremental
+model savings by the deterministic count, and total savings by the original
+count. Zero denominators produce `0.0`. `model_ran` reports whether LLMLingua2
+was actually called, `fallback_used` reports whether a model chunk fell back,
+and `attribution_residual_tokens` checks that the two stages reconcile with the
+total. Every value uses the returned `token_estimator`.
+
+For a deterministic-only path from 1,000 to 850 tokens, deterministic savings
+are 150 and incremental model savings are zero. For a deterministic-plus-model
+path from 1,000 to 850 to 600 tokens, deterministic savings are 150 and model
+savings are 250. Model savings are incremental relative to the deterministic
+output, not relative to the original input.
+
 Set `include_diagnostics` to `true` for benchmark runs. The response then
 includes phase-level timings for preprocessing, segment selection/token gating,
 model load, LLMLingua2, placeholder expansion, uncompressed-output expansion,
 and final token estimates, plus segment counts and model-input sizes.
+Detailed diagnostics are off by default because collecting component-level
+measurements adds work. Enable them explicitly in the request with:
+
+```json
+{
+  "text": "Prompts are production code. Manage them that way.",
+  "include_diagnostics": true
+}
+```
 
 ### `POST /tokens/estimate`
 
