@@ -1,6 +1,7 @@
 import os
 import time
-from dataclasses import dataclass, field
+from collections import Counter
+from dataclasses import dataclass, field, replace
 import logging
 import math
 from pathlib import Path
@@ -14,6 +15,7 @@ from app.protected_spans import (
     force_tokens_for_text,
     protected_spans_for_text,
 )
+from app.structured_json import TaggedJsonTransformResult, transform_tagged_json
 from app.tenant_profiles import (
     DEFAULT_PROFILE_ID,
     DEFAULT_PROFILE_SOURCE,
@@ -2122,6 +2124,79 @@ class PromptCompressionService:
                 break
         return f"[{label}]"
 
+    def _compress_tagged_json_values(
+        self,
+        text: str,
+        *,
+        aggressiveness: float,
+        profile: TenantCompressionProfile,
+        mode: str,
+        latency_budget_ms: float | None,
+        allow_cpu_model_auto: bool | None,
+    ) -> TaggedJsonTransformResult:
+        if "<compress-json" not in text.lower():
+            return TaggedJsonTransformResult(text=text)
+
+        value_profile = replace(
+            profile,
+            json_compression_policy_id=None,
+            json_value_compression_paths=(),
+        )
+
+        def compress_value(_path: str, value: str) -> str | None:
+            if "<compress-json" in value.lower():
+                return None
+
+            original_estimate = self.estimate_compression_tokens(
+                value,
+                value_profile,
+            )
+            if original_estimate.count < profile.json_value_min_tokens:
+                return None
+
+            result = self.compress(
+                text=value,
+                aggressiveness=aggressiveness,
+                include_sections=False,
+                tenant_profile=value_profile,
+                mode=mode,
+                latency_budget_ms=latency_budget_ms,
+                allow_cpu_model_auto=allow_cpu_model_auto,
+                collect_diagnostics=False,
+            )
+            if (
+                not result.compressed_text.strip()
+                or result.compressed_tokens >= result.original_tokens
+                or result.reduction > profile.json_value_max_reduction
+                or not self._preserves_protected_span_values(
+                    value,
+                    result.compressed_text,
+                )
+            ):
+                return None
+            return result.compressed_text
+
+        return transform_tagged_json(
+            text,
+            policy_id=profile.json_compression_policy_id,
+            value_paths=profile.json_value_compression_paths,
+            max_values=profile.json_value_max_values,
+            compress_value=compress_value,
+        )
+
+    def _preserves_protected_span_values(
+        self,
+        original_text: str,
+        compressed_text: str,
+    ) -> bool:
+        required = Counter(
+            span.text for span in protected_spans_for_text(original_text)
+        )
+        return all(
+            compressed_text.count(value) >= count
+            for value, count in required.items()
+        )
+
     def compress(
         self,
         text: str,
@@ -2146,7 +2221,15 @@ class PromptCompressionService:
         timings["target_rate_ms"] = _elapsed_ms(phase_start)
 
         phase_start = time.perf_counter()
-        prepared_segments = self.preprocessor.prepare(text)
+        tagged_json = self._compress_tagged_json_values(
+            text,
+            aggressiveness=aggressiveness,
+            profile=profile,
+            mode=compression_mode,
+            latency_budget_ms=latency_budget_ms,
+            allow_cpu_model_auto=allow_cpu_model_auto,
+        )
+        prepared_segments = self.preprocessor.prepare(tagged_json.text)
         timings["preprocessing_ms"] = _elapsed_ms(phase_start)
         preprocessed_text = "".join(segment.text for segment in prepared_segments)
 
@@ -2368,11 +2451,10 @@ class PromptCompressionService:
                 model_gate=model_gate,
             )
             timings["diagnostics_ms"] += _elapsed_ms(phase_start)
-        warnings = (
-            [model_gate.reason]
-            if model_gate.decision == "skip" and model_gate.reason is not None
-            else []
-        )
+        warnings = list(tagged_json.warnings)
+        if model_gate.decision == "skip" and model_gate.reason is not None:
+            warnings.append(model_gate.reason)
+        warnings = list(dict.fromkeys(warnings))
 
         return CompressionResult(
             compressed_text=compressed_text,

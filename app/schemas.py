@@ -42,6 +42,41 @@ class TenantCompressionSettings(BaseModel):
         default_factory=list,
         description="Exact compressible boilerplate phrases to drop before model compression.",
     )
+    json_compression_policy_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_.:-]+$",
+        description=(
+            "Tenant-approved policy referenced by <compress-json policy=\"...\"> "
+            "blocks. Tags cannot authorize paths that are absent from this profile."
+        ),
+    )
+    json_value_compression_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allowlisted JSONPath subset for compressible string leaves, such as "
+            "$.description or $.comments[*].body. All other values remain exact."
+        ),
+    )
+    json_value_min_tokens: int = Field(
+        default=200,
+        ge=1,
+        le=1_000_000,
+        description="Minimum estimated tokens before an allowlisted string is considered.",
+    )
+    json_value_max_reduction: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=1.0,
+        description="Maximum accepted token reduction for each allowlisted JSON string.",
+    )
+    json_value_max_values: int = Field(
+        default=8,
+        ge=1,
+        le=100,
+        description="Maximum JSON string values compressed within one request.",
+    )
 
 
 class CompressRequest(BaseModel):

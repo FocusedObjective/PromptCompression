@@ -3,6 +3,7 @@ __pycache__
 .pytest_cache
 .pytest-tmp
 pytest-tmp
+outputs
 .ruff_cache
 .git
 .agents

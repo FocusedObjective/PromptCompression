@@ -389,6 +389,7 @@ EVAL_HTML = """
           <a class="nav-link" href="/">Compression UI</a>
           <a class="nav-link" href="/benchmark">Benchmark</a>
           <a class="nav-link" href="/research">Research</a>
+          <a class="nav-link" href="/changelog">Changelog</a>
         </nav>
       </div>
       <div class="stats" aria-live="polite">

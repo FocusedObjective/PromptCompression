@@ -1,7 +1,10 @@
 from typing import Any
 
+import pytest
+
 from app.compression_pipeline import PromptPreprocessor
 from app.compressor import PromptCompressionService
+from app.tenant_profiles import build_tenant_profile
 from app.toon_adapter import ToonEncodingError
 from tests.pipeline_helpers import (
     RecordingCompressor,
@@ -264,7 +267,40 @@ def test_json_minify_fallback_never_minifies_duplicate_key_json():
     )
 
 
-def test_small_json_does_not_trigger_structured_pipeline():
+@pytest.mark.parametrize("json_value", ['{"ok": true}', "[]", "{}"])
+def test_small_json_is_protected_verbatim_without_attempting_toon(
+    json_value: str,
+):
+    def unexpected_toon_encoder(_value: Any) -> str:
+        raise AssertionError("small JSON should not be sent to the TOON encoder")
+
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.preprocessor = PromptPreprocessor(
+        toon_encoder=unexpected_toon_encoder,
+        min_json_chars=100,
+        min_json_lines=4,
+        min_toon_savings=0.0,
+    )
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    text = f"Please review {json_value} after."
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert compressor.inputs == ["Please review __CK_KEEP_0000__ after."]
+    assert result.compressed_text == f"Review {json_value} after."
+    assert [section.kind for section in result.output_sections] == [
+        "prose",
+        "json",
+        "prose",
+    ]
+    assert result.output_sections[1].protected is True
+    assert result.output_sections[1].compressed is False
+
+
+def test_model_auto_protects_small_json_when_model_gate_runs():
     compressor = RecordingCompressor()
     service = PromptCompressionService()
     service._compressor = compressor
@@ -276,11 +312,163 @@ def test_small_json_does_not_trigger_structured_pipeline():
     )
     service.min_segment_chars = 1
     service.min_segment_tokens = 1
+    service.device = "cuda"
+    service.model_auto_enabled = True
+    service.min_model_candidate_tokens = 1
+    service.min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.max_model_projected_latency_ms = 1000.0
+    service.max_protected_density = 1.0
+    service.max_structured_density = 1.0
+    service.skip_model_if_deterministic_reduction_gte = 1.0
+    service.gpu_p50_fixed_overhead_ms = 1.0
+    service.gpu_p50_llmlingua_chunk_ms = 1.0
+    service.gpu_p50_token_estimate_ms = 1.0
     text = 'Please review {"ok": true} after.'
 
-    service.compress(text, aggressiveness=0.25)
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode="model_auto",
+    )
 
-    assert compressor.inputs == [text]
+    assert compressor.inputs == ["Please review __CK_KEEP_0000__ after."]
+    assert result.compressed_text == 'Review {"ok": true} after.'
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_gate_decision == "run"
+
+
+def test_tagged_json_compresses_allowlisted_strings_then_protects_structure():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.preprocessor = PromptPreprocessor(
+        toon_encoder=fake_toon_encoder,
+        min_json_chars=10_000,
+        min_json_lines=100,
+    )
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(
+        tenant_id="tenant_123",
+        json_compression_policy_id="issue-v1",
+        json_value_compression_paths=["$.description"],
+        json_value_min_tokens=1,
+        json_value_max_reduction=0.9,
+    )
+    text = (
+        "Please review tagged data.\n"
+        '<compress-json policy="issue-v1">'
+        '{"id":"ISSUE-73","title":"Please review exact title",'
+        '"description":"Please review this detailed narrative before launch."}'
+        "</compress-json>\n"
+        "Please review after."
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        tenant_profile=profile,
+        mode="model_force",
+    )
+
+    assert compressor.inputs[0] == (
+        "Please review this detailed narrative before launch."
+    )
+    assert compressor.inputs[-1] == (
+        "Please review tagged data.\n__CK_KEEP_0000__\nPlease review after."
+    )
+    assert "<compress-json" not in result.compressed_text
+    assert '"id":"ISSUE-73"' in result.compressed_text
+    assert '"title":"Please review exact title"' in result.compressed_text
+    assert '"description":"Review this detailed narrative before launch."' in (
+        result.compressed_text
+    )
+
+
+def test_tagged_json_rejects_value_compression_over_reduction_limit():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.preprocessor = PromptPreprocessor(
+        toon_encoder=fake_toon_encoder,
+        min_json_chars=10_000,
+        min_json_lines=100,
+    )
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(
+        tenant_id="tenant_123",
+        json_compression_policy_id="issue-v1",
+        json_value_compression_paths=["$.description"],
+        json_value_min_tokens=1,
+        json_value_max_reduction=0.0,
+    )
+    original_value = "Please review this detailed narrative before launch."
+    text = (
+        '<compress-json policy="issue-v1">'
+        f'{{"description":"{original_value}"}}'
+        "</compress-json>"
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        tenant_profile=profile,
+        mode="model_force",
+    )
+
+    assert f'"description":"{original_value}"' in result.compressed_text
+
+
+def test_tagged_json_selective_values_are_rebuilt_before_toon_protection():
+    encoded_values: list[Any] = []
+
+    def recording_toon_encoder(value: Any) -> str:
+        encoded_values.append(value)
+        return "i{id,d}:\n  ISSUE-73,Review"
+
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.preprocessor = PromptPreprocessor(
+        toon_encoder=recording_toon_encoder,
+        min_json_chars=1,
+        min_json_lines=1,
+        min_toon_savings=0.0,
+    )
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(
+        tenant_id="tenant_123",
+        json_compression_policy_id="issue-v1",
+        json_value_compression_paths=["$.description"],
+        json_value_min_tokens=1,
+        json_value_max_reduction=0.9,
+    )
+    text = (
+        "Please review before.\n"
+        '<compress-json policy="issue-v1">'
+        '{"id":"ISSUE-73","description":"Please review narrative"}'
+        "</compress-json>\n"
+        "Please review after."
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        tenant_profile=profile,
+        mode="model_force",
+    )
+
+    assert encoded_values == [
+        {"id": "ISSUE-73", "description": "Review narrative"}
+    ]
+    assert "i{id,d}" in result.compressed_text
+    assert compressor.inputs[-1] == (
+        "Please review before.\n__CK_KEEP_0000__\nPlease review after."
+    )
+    assert "ISSUE-73" not in compressor.inputs[-1]
 
 
 def test_llm_tool_call_json_is_not_toonified():
