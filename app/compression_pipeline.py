@@ -284,12 +284,10 @@ class PromptPreprocessor:
         while search_cursor < len(text):
             start = self._find_json_start(text, search_cursor)
             if start is None:
-                segments.extend(self._prose_segments(text[cursor:]))
                 break
 
             end = self._find_balanced_json_end(text, start)
             if end is None:
-                segments.extend(self._prose_segments(text[cursor:]))
                 break
 
             candidate = text[start:end]
@@ -309,6 +307,10 @@ class PromptPreprocessor:
             cursor = end
             search_cursor = end
 
+        # JSON-looking bracketed syntax such as ``[[rapItem: ...]]`` is not
+        # necessarily JSON.  Keep every byte that was not emitted as a JSON
+        # segment; advancing ``search_cursor`` above is only speculative.
+        segments.extend(self._prose_segments(text[cursor:]))
         return segments
 
     def _prose_segments(self, text: str) -> list[CompressionSegment]:

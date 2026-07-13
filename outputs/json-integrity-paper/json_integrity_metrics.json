@@ -1,0 +1,81 @@
+{
+  "paired_rows": 39,
+  "same_original_rows": 39,
+  "field_unique_total": 1878,
+  "field_unique_before": 1878,
+  "field_unique_after": 1878,
+  "field_occ_total": 10562,
+  "field_occ_before": 9092,
+  "field_occ_after": 9092,
+  "number_total": 4103,
+  "number_before": 4094,
+  "number_after": 4103,
+  "uuid_total": 621,
+  "uuid_before": 616,
+  "uuid_after": 621,
+  "original_tokens": 318770,
+  "before_tokens": 301654,
+  "after_tokens": 301945,
+  "changed_outputs": 14,
+  "before_savings_pct": 5.369388587382752,
+  "after_savings_pct": 5.278100197634658,
+  "field_unique_before_pct": 100.0,
+  "field_unique_after_pct": 100.0,
+  "field_occ_before_pct": 86.08218140503692,
+  "field_occ_after_pct": 86.08218140503692,
+  "number_before_pct": 99.78064830611747,
+  "number_after_pct": 100.0,
+  "uuid_before_pct": 99.19484702093398,
+  "uuid_after_pct": 100.0,
+  "recovered_number_examples": [
+    {
+      "pair": [
+        "12e6f3d0-87b9-4ce8-b733-db52cb21be83",
+        "0"
+      ],
+      "recovered": [
+        "-4534",
+        "-952"
+      ]
+    },
+    {
+      "pair": [
+        "399d485b-776f-4e09-9a25-ec1c2c4a0300",
+        "0"
+      ],
+      "recovered": [
+        "-62722",
+        "-9359"
+      ]
+    },
+    {
+      "pair": [
+        "fb2653c8-abb3-48ea-b975-c3c88a1fbc1e",
+        "0"
+      ],
+      "recovered": [
+        "-4534",
+        "-952"
+      ]
+    },
+    {
+      "pair": [
+        "fc26b61c-c0bf-4b98-a8d0-fe746dfea716",
+        "0"
+      ],
+      "recovered": [
+        "-11820"
+      ]
+    },
+    {
+      "pair": [
+        "fedc2af9-5389-4a67-b6fe-2c9ec97e5456",
+        "0"
+      ],
+      "recovered": [
+        "-4534",
+        "-952"
+      ]
+    }
+  ]
+}

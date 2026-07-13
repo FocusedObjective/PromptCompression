@@ -55,6 +55,23 @@ CRITICAL_WORDS = [
 ]
 
 PROTECTED_PATTERN_SPECS = [
+    # Markdown and templating syntax are executable/structural data, not prose
+    # for a language model to rewrite. Tenant-specific output formats should
+    # use <nocompress> rather than expanding this global list.
+    (
+        "markdown_link",
+        re.compile(r"!?\[[^\]\r\n]+\]\([^\s)\r\n]+\)"),
+    ),
+    ("citation", re.compile(r"\[citation:[^\]\r\n]+\]", re.IGNORECASE)),
+    (
+        "template",
+        re.compile(
+            r"\{\{[-~]?\s*[^{}\r\n]+?\s*[-~]?\}\}"
+            r"|\{%[-~]?\s*[^%\r\n]+?\s*[-~]?%\}"
+            r"|\$\{[^}\r\n]+\}"
+            r"|\{[A-Za-z_][A-Za-z0-9_.-]*\}"
+        ),
+    ),
     ("url", re.compile(r"https?://\S+", re.IGNORECASE)),
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
     ("inline_code", re.compile(r"`[^`]+`")),

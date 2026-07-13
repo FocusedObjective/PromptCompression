@@ -43,3 +43,22 @@ def test_protected_spans_keep_longest_non_overlapping_match():
     spans = protected_spans_for_text(text)
 
     assert [span.text for span in spans] == ["ORD-7781", "$15,000"]
+
+
+def test_protected_spans_include_markdown_citations_and_templates():
+    text = (
+        'Return [the guide](https://example.com/guide), '
+        '[citation: Guide.pdf, page: 8], {{ customer.name }}, '
+        '${account_id}, {request_id}, and {% if enabled %}.'
+    )
+
+    spans = protected_spans_for_text(text)
+
+    assert [(span.text, span.kind) for span in spans] == [
+        ("[the guide](https://example.com/guide)", "markdown_link"),
+        ("[citation: Guide.pdf, page: 8]", "citation"),
+        ("{{ customer.name }}", "template"),
+        ("${account_id}", "template"),
+        ("{request_id}", "template"),
+        ("{% if enabled %}", "template"),
+    ]

@@ -846,6 +846,28 @@ def test_protected_prose_spans_are_placeholdered_before_model_call():
     assert "2026-08-15" in result.compressed_text
 
 
+def test_markdown_and_templates_are_placeholdered_before_model_call():
+    compressor = ManglingProtectedTextCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    protected_text = (
+        '[guide](https://example.com/guide) '
+        '{{ customer.name }} {request_id}'
+    )
+
+    result = service.compress(
+        f"Follow the output contract: {protected_text}",
+        aggressiveness=0.35,
+    )
+
+    assert protected_text not in compressor.inputs[0]
+    assert protected_text in result.compressed_text
+    assert result.diagnostics is not None
+    assert result.diagnostics.placeholder_count > 0
+
+
 def test_non_ui_placeholder_compression_still_uses_one_model_call():
     compressor = RecordingCompressor()
     service = build_service_with_pipeline(compressor)

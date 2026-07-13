@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Task-aware information-loss evaluation for the first five prompt-compression benchmark records.">
+  <title>Information-Loss Evaluation Report</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #667085;
+      --blue: #245f97;
+      --blue-dark: #173f66;
+      --line: #d8e0ea;
+      --panel: #f6f8fb;
+      --pass: #256029;
+      --pass-bg: #e7f4e4;
+      --warn: #735600;
+      --warn-bg: #fff4ce;
+      --fail: #9b1c1c;
+      --fail-bg: #fde9e7;
+      --shadow: 0 12px 34px rgba(23, 32, 51, .09);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #edf2f7;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.58;
+    }
+    .shell { display: grid; grid-template-columns: 240px minmax(0, 860px); gap: 34px; max-width: 1170px; margin: 0 auto; padding: 32px 22px 64px; }
+    nav { position: sticky; top: 24px; align-self: start; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: var(--shadow); backdrop-filter: blur(10px); }
+    nav .nav-title { margin: 0 0 10px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    nav a { display: block; padding: 7px 9px; border-radius: 7px; color: var(--blue-dark); font-size: 14px; text-decoration: none; }
+    nav a:hover, nav a:focus-visible { background: #eaf1f8; outline: none; }
+    main { min-width: 0; background: white; border: 1px solid var(--line); border-radius: 18px; padding: 54px 62px 72px; box-shadow: var(--shadow); }
+    .eyebrow { margin: 0 0 10px; color: var(--blue); font-size: 12px; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }
+    .report-title { margin: 0; color: var(--blue-dark); font-size: clamp(34px, 5vw, 50px); line-height: 1.07; letter-spacing: -.035em; }
+    .subtitle { margin: 14px 0 26px; color: var(--muted); font-size: 20px; line-height: 1.35; }
+    h2 { margin: 48px 0 14px; color: var(--blue); font-size: 28px; line-height: 1.22; letter-spacing: -.02em; }
+    h2.prompt-heading { margin-top: 68px; padding-top: 22px; border-top: 3px solid var(--blue); color: var(--blue-dark); font-size: 34px; }
+    h3 { margin: 32px 0 10px; color: var(--blue); font-size: 21px; line-height: 1.3; }
+    h4 { margin: 26px 0 9px; color: var(--blue-dark); font-size: 17px; line-height: 1.35; }
+    p { margin: 0 0 11px; }
+    strong { color: var(--blue-dark); }
+    .verdict { display: flex; gap: 12px; align-items: flex-start; margin: 15px 0 20px; padding: 14px 16px; border-left: 5px solid; border-radius: 8px; }
+    .verdict-label { flex: 0 0 auto; min-width: 94px; font-weight: 900; letter-spacing: .04em; }
+    .verdict.pass { color: var(--pass); background: var(--pass-bg); border-color: var(--pass); }
+    .verdict.fail { color: var(--fail); background: var(--fail-bg); border-color: var(--fail); }
+    .verdict.conditional { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
+    .table-wrap { margin: 22px 0 30px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.42; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+    th { background: #f0f4f8; color: var(--blue-dark); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td { background: #fafcff; }
+    .source-note { margin-top: 44px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 880px) {
+      .shell { display: block; padding: 0; }
+      nav { position: static; border-radius: 0; box-shadow: none; border-width: 0 0 1px; padding: 12px 18px; white-space: nowrap; overflow-x: auto; }
+      nav .nav-title { display: none; }
+      nav a { display: inline-block; }
+      main { border: 0; border-radius: 0; padding: 38px 22px 58px; box-shadow: none; }
+      .verdict { display: block; }
+      .verdict-label { display: block; margin-bottom: 4px; }
+    }
+    @media print {
+      body { background: white; font-size: 10.5pt; }
+      .shell { display: block; max-width: none; padding: 0; }
+      nav { display: none; }
+      main { border: 0; border-radius: 0; padding: 0; box-shadow: none; }
+      h2.prompt-heading { break-before: page; }
+      h2, h3, h4 { break-after: avoid; }
+      .verdict, .table-wrap { break-inside: avoid; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav aria-label="Report navigation">
+      <p class="nav-title">Jump to</p>
+      <a href="#executive-finding">Executive finding</a>
+      <a href="#how-to-run-the-evaluation">Method</a>
+      <a href="#prompt-1">Prompt 1</a>
+      <a href="#prompt-2">Prompt 2</a>
+      <a href="#prompt-3">Prompt 3</a>
+      <a href="#prompt-4">Prompt 4</a>
+      <a href="#prompt-5">Prompt 5</a>
+      <a href="#cross-prompt-conclusions">Conclusions</a>
+    </nav>
+    <main>
+      <p class="eyebrow">Prompt compression quality evaluation</p>
+      <h1 class="report-title">Information-Loss Evaluation Report</h1>
+<p class="subtitle">Original vs. compressed prompts | First five benchmark records</p>
+<p><strong>Source:</strong> prompt-compression-savings-2026-07-12T03_21_22.817Z.csv</p>
+<p><strong>Evaluation objective:</strong> Determine whether compression preserved enough information for a downstream model to perform the original task faithfully.</p>
+<h2 id="executive-finding" class="section-heading">Executive finding</h2>
+<p>Two of five prompt pairs fail the proposed fidelity gate. Prompts 1 and 3 lose decision-critical labels or qualifiers. Prompts 2 and 4 pass. Prompt 5 is acceptable for its narrow summary task but fails if provenance or assessment-score fidelity is required.</p>
+<div class="table-wrap"><table><tr><th>Prompt</th><th>Savings</th><th>Verdict</th><th>Severity</th><th>Primary finding</th></tr><tr><td>1</td><td>21.0%</td><td>FAIL</td><td>High</td><td>Metric labels were deleted, making several retained values impossible to map reliably.</td></tr><tr><td>2</td><td>14.8%</td><td>PASS</td><td>Low</td><td>Decision-relevant metadata and evidence gaps remain available; identifier spacing is noisier.</td></tr><tr><td>3</td><td>13.2%</td><td>FAIL</td><td>High</td><td>The central signal &#x27;very quickly with few commits&#x27; was weakened to the non-equivalent &#x27;with commits.&#x27;</td></tr><tr><td>4</td><td>14.8%</td><td>PASS</td><td>Low</td><td>Scope, priority rules, schedule, threshold, channel decision, and open questions remain available.</td></tr><tr><td>5</td><td>15.5%</td><td>CONDITIONAL</td><td>Medium</td><td>Core summary facts survive, but model/issue provenance and the Composite score label are corrupted.</td></tr></table></div>
+<h2 id="how-to-run-the-evaluation" class="section-heading">How to run the evaluation</h2>
+<p><strong>Step 1 — Generate:</strong> Run the same downstream model and settings twice for each prompt: once with the original prompt and once with the compressed prompt.</p>
+<p><strong>Step 2 — Probe:</strong> Score both responses against the five questions and required inclusions listed for that prompt. The questions are evaluation probes, not additions to the production prompt.</p>
+<p><strong>Step 3 — Score:</strong> For each probe use 2 = fully correct and attributable; 1 = partly correct, ambiguous, or missing a qualifier; 0 = incorrect, contradicted, or absent.</p>
+<p><strong>Step 4 — Compare:</strong> Record original and compressed scores separately. A compression-attributable loss is present when the compressed result scores lower and the missing element is available in the original prompt.</p>
+<p><strong>Recommended gate:</strong> Fail a prompt if any critical probe drops below 2, any numeric value is attached to the wrong label, an instruction/negation/override changes meaning, or the compressed total falls more than 10% below the original total.</p>
+<h3 id="loss-taxonomy">Loss taxonomy</h3>
+<p><strong>Instruction/decision scope:</strong> Changes what the model is asked to decide or how it must respond.</p>
+<p><strong>Label/relationship:</strong> Keeps a value but removes the name or relationship needed to interpret it.</p>
+<p><strong>Qualifier/evidence:</strong> Drops words such as primarily, very, few, only, before, or after that affect strength or meaning.</p>
+<p><strong>Numeric/temporal:</strong> Changes signs, thresholds, counts, dates, intervals, or units.</p>
+<p><strong>Availability/negation:</strong> Changes absent, unavailable, none, deferred, or do-not-use semantics.</p>
+<p><strong>Provenance/identifier:</strong> Corrupts paths, URLs, model names, issue IDs, authors, or repository names.</p>
+<p><strong>Output contract:</strong> Weakens JSON, schema, length, range, or formatting requirements.</p>
+<h2 id="prompt-1" class="prompt-heading">Prompt 1</h2>
+<p><strong>Task:</strong> Produce a schema-constrained lessons-learned summary for a merged pull request.</p>
+<p><strong>Compression:</strong> 486 → 384 (102 saved; 21.0%)</p>
+<div class="verdict fail"><span class="verdict-label">FAIL</span><span>High severity. Compression preserved most values but deleted several field names. For a structured JSON task, an unlabeled value is not equivalent to a labeled metric. A downstream model can no longer reliably distinguish verification friction, change sprawl, review contention, merge-friction risk, pending checks, or reruns.</span></div>
+<h3 id="observed-information-loss">Observed information loss</h3>
+<p><strong>Label/field loss:</strong> verificationFrictionScore, changeSprawlScore, reviewContentionScore, mergeFrictionRisk, pendingCount, and rerunCount labels are absent while their values remain.</p>
+<p><strong>Attribution ambiguity:</strong> The AI overallReasoning label and Linked issue Status label disappear, leaving content attached only to a colon.</p>
+<p><strong>Availability semantics:</strong> &#x27;No repository strategy context available&#x27; and &#x27;No repository memories available&#x27; become the broader and less precise &#x27;No repository available.&#x27;</p>
+<p><strong>Identifier distortion:</strong> website/index.html is split into &#x27;website / index. html&#x27;, which could affect exact path reporting.</p>
+<h3 id="five-evaluation-questions">Five evaluation questions</h3>
+<h4>Q1. What are all five friction scores, with the correct metric name paired to each value?</h4>
+<p><strong>Response must include:</strong> implementationFrictionScore=0; verificationFrictionScore=0; changeSprawlScore=0.10250000000000001; reviewContentionScore=0; operationalRiskScore=0.</p>
+<p><strong>Compression risk:</strong> Critical. The compressed prompt retains the numbers but loses three names, so correct mapping cannot be guaranteed.</p>
+<p><strong>Loss type:</strong> Label/relationship</p>
+<h4>Q2. Report the complete risk assessment, including every named probability, uncertainty, depth, and recommendation.</h4>
+<p><strong>Response must include:</strong> overallRisk=0.12; mergeFrictionRisk=0.02; changeFailureRisk=0.03; uncertainty=0.65; reviewDepth=light; mergeRecommendation=proceed; topDrivers=[]; mitigations=[].</p>
+<p><strong>Compression risk:</strong> Critical. mergeFrictionRisk is unlabeled after compression.</p>
+<p><strong>Loss type:</strong> Label/numeric attribution</p>
+<h4>Q3. What evidence supports the AI-authorship assessment, and what is the final likelihood?</h4>
+<p><strong>Response must include:</strong> Likelihood low; aiToolIndicator null; weak evidence beyond a fast merge and one commit; no branch, author, description, or code-pattern signals; signals=[].</p>
+<p><strong>Compression risk:</strong> Moderate. The reasoning text survives, but its field label is removed.</p>
+<p><strong>Loss type:</strong> Field attribution</p>
+<h4>Q4. Summarize CI and reviewer coverage using every supplied count and ratio.</h4>
+<p><strong>Response must include:</strong> CI: total=0, passed=0, failed=0, pending=0, duration=0 seconds, reruns=0. Reviewer coverage: requested=0, participating=0, coverageRatio=1.</p>
+<p><strong>Compression risk:</strong> Critical. pendingCount and rerunCount labels disappear.</p>
+<p><strong>Loss type:</strong> Label/relationship</p>
+<h4>Q5. Which contextual evidence sources were absent, and what was known about linked issues, similar PRs, and sensitive paths?</h4>
+<p><strong>Response must include:</strong> No linked issue; no similar prior work; no repository strategy context; no repository memories; no sensitive paths detected.</p>
+<p><strong>Compression risk:</strong> Moderate. Compressed wording conflates missing strategy/memory context with repository availability.</p>
+<p><strong>Loss type:</strong> Availability/negation</p>
+<h3 id="suggested-result-record">Suggested result record</h3>
+<p><strong>Record for each question:</strong> Original score (0-2) | Compressed score (0-2) | Delta | Missing/changed fact | Loss type | Reviewer note.</p>
+<h2 id="prompt-2" class="prompt-heading">Prompt 2</h2>
+<p><strong>Task:</strong> Score a pull request on seven dimensions using sparse PR metadata and explicitly missing context.</p>
+<p><strong>Compression:</strong> 230 → 196 (34 saved; 14.8%)</p>
+<div class="verdict pass"><span class="verdict-label">PASS</span><span>Low severity. The compressed prompt retains the task, the seven-dimension requirement, all substantive metadata, the diff size, and each statement of unavailable evidence. Spacing inserted inside identifiers and timestamps is undesirable but does not materially change the evaluation task in this sample.</span></div>
+<h3 id="observed-information-loss">Observed information loss</h3>
+<p><strong>Identifier formatting:</strong> Repository, branch, open-source title text, and timestamp are split with extra spaces around punctuation.</p>
+<p><strong>Instruction wording:</strong> &#x27;on its own merits&#x27; is shortened to &#x27;merits&#x27;; the evaluation intent remains clear.</p>
+<p><strong>Grammar:</strong> &#x27;if available/flagged&#x27; becomes parenthetical shorthand; no availability state is reversed.</p>
+<h3 id="five-evaluation-questions">Five evaluation questions</h3>
+<h4>Q1. What is the evaluation task and how many scoring dimensions are required?</h4>
+<p><strong>Response must include:</strong> Score this pull request on its own merits using seven dimensions.</p>
+<p><strong>Compression risk:</strong> Low risk. Both purpose and dimension count survive.</p>
+<p><strong>Loss type:</strong> Instruction</p>
+<h4>Q2. Identify the PR exactly: title, repository, branch transition, author, and creation time.</h4>
+<p><strong>Response must include:</strong> Title &#x27;Reposition homepage for open-source AI production assets&#x27;; repository PredictabilityAtScale/promptopskit; positioning-home-readme → main; author PredictabilityAtScale; 2026-06-22T17:43:33Z.</p>
+<p><strong>Compression risk:</strong> Low-to-moderate. Content survives, but punctuation splitting can damage exact-string extraction.</p>
+<p><strong>Loss type:</strong> Identifier formatting</p>
+<h4>Q3. What is the size and file count of the change?</h4>
+<p><strong>Response must include:</strong> +64 additions, -19 deletions, one file; the changeset profile repeats 64 additions and 19 deletions.</p>
+<p><strong>Compression risk:</strong> Low risk. Numeric facts remain labeled.</p>
+<p><strong>Loss type:</strong> Numeric</p>
+<h4>Q4. Which evidence categories are unavailable or absent?</h4>
+<p><strong>Response must include:</strong> No description; strategy context not provided; CI unavailable; no sensitive paths flagged; reviewer coverage not provided; no historical friction data; labels none.</p>
+<p><strong>Compression risk:</strong> Low risk. All absence statements remain explicit.</p>
+<p><strong>Loss type:</strong> Availability/negation</p>
+<h4>Q5. What output constraints must the response obey?</h4>
+<p><strong>Response must include:</strong> Return pure valid JSON matching the configured schema, without Markdown code fences.</p>
+<p><strong>Compression risk:</strong> Low risk. The compressed wording is grammatically degraded but preserves the JSON/schema/no-fence contract.</p>
+<p><strong>Loss type:</strong> Output contract</p>
+<h3 id="suggested-result-record">Suggested result record</h3>
+<p><strong>Record for each question:</strong> Original score (0-2) | Compressed score (0-2) | Delta | Missing/changed fact | Loss type | Reviewer note.</p>
+<h2 id="prompt-3" class="prompt-heading">Prompt 3</h2>
+<p><strong>Task:</strong> Assess whether a pull request was primarily generated by an AI coding agent.</p>
+<p><strong>Compression:</strong> 228 → 198 (30 saved; 13.2%)</p>
+<div class="verdict fail"><span class="verdict-label">FAIL</span><span>High severity. The compression removes &#x27;primarily&#x27; from the decision question and, more importantly, converts the central heuristic &#x27;opened and merged very quickly with few commits&#x27; into &#x27;opened merged with commits.&#x27; That loses both speed and scarcity, changing the evidentiary basis for AI-authorship assessment.</span></div>
+<h3 id="observed-information-loss">Observed information loss</h3>
+<p><strong>Decision-scope loss:</strong> &#x27;Primarily generated&#x27; becomes simply &#x27;generated,&#x27; which can change a mixed-authorship classification.</p>
+<p><strong>Evidence loss:</strong> &#x27;Very quickly&#x27; and &#x27;few commits&#x27; are removed from the heuristic signal.</p>
+<p><strong>Numeric sign loss:</strong> The leading plus sign is dropped from the summary &#x27;Size: +64 -19,&#x27; although it remains in the file-level line.</p>
+<p><strong>Label loss:</strong> The Title field name disappears, leaving the title after an unlabeled colon.</p>
+<h3 id="five-evaluation-questions">Five evaluation questions</h3>
+<h4>Q1. What exact classification is requested: any AI involvement, or primary AI generation?</h4>
+<p><strong>Response must include:</strong> Determine whether the PR was primarily generated by an AI coding agent.</p>
+<p><strong>Compression risk:</strong> Critical. &#x27;Primarily&#x27; is absent after compression.</p>
+<p><strong>Loss type:</strong> Instruction/decision scope</p>
+<h4>Q2. What timing evidence is available from the PR lifecycle?</h4>
+<p><strong>Response must include:</strong> Created 2026-06-22T17:43:33Z and closed 2026-06-22T17:43:44Z, an 11-second interval.</p>
+<p><strong>Compression risk:</strong> Low risk. Both timestamps remain, despite punctuation spacing.</p>
+<p><strong>Loss type:</strong> Temporal/numeric</p>
+<h4>Q3. State the supplied heuristic signal exactly enough to preserve its meaning.</h4>
+<p><strong>Response must include:</strong> The PR was opened and merged very quickly with few commits.</p>
+<p><strong>Compression risk:</strong> Critical. The compressed prompt loses both &#x27;very quickly&#x27; and &#x27;few.&#x27;</p>
+<p><strong>Loss type:</strong> Evidence/qualifier</p>
+<h4>Q4. Describe the diff, including additions, deletions, file count, and path.</h4>
+<p><strong>Response must include:</strong> +64/-19 across one file; website/index.html itself is +64/-19.</p>
+<p><strong>Compression risk:</strong> Moderate. The summary loses the plus sign, while the file line retains it with distorted path spacing.</p>
+<p><strong>Loss type:</strong> Numeric/identifier</p>
+<h4>Q5. What commit and description evidence is supplied, and what JSON constraint applies?</h4>
+<p><strong>Response must include:</strong> Commit ce82454 with the stated title, author @PredictabilityAtScale, timestamp 2026-06-22T17:32:20.000Z; no PR description; return schema-matching valid JSON without fences.</p>
+<p><strong>Compression risk:</strong> Low-to-moderate. Facts survive, but exact @ attribution and &#x27;pure&#x27; wording are weakened.</p>
+<p><strong>Loss type:</strong> Provenance/output contract</p>
+<h3 id="suggested-result-record">Suggested result record</h3>
+<p><strong>Record for each question:</strong> Original score (0-2) | Compressed score (0-2) | Delta | Missing/changed fact | Loss type | Reviewer note.</p>
+<h2 id="prompt-4" class="prompt-heading">Prompt 4</h2>
+<p><strong>Task:</strong> Assess a work item against strategy and prioritization context, then recommend an execution lane.</p>
+<p><strong>Compression:</strong> 1,638 → 1,396 (242 saved; 14.8%)</p>
+<div class="verdict pass"><span class="verdict-label">PASS</span><span>Low severity. Despite substantial surface rewriting, the compressed prompt preserves the business priorities, implementation scope, 75% threshold, 30-minute schedule, one-time alert semantics, SES decision, Slack deferral, data-source guidance, and unresolved persistence/recipient questions. These are the facts most likely to drive an execution-lane recommendation.</span></div>
+<h3 id="observed-information-loss">Observed information loss</h3>
+<p><strong>Minor qualifier loss:</strong> Some connective words and &#x27;at any time&#x27; are shortened, reducing polish but not changing the strategy.</p>
+<p><strong>Table formatting:</strong> The prior assessment table is malformed, though all five dimension names and values remain recoverable.</p>
+<p><strong>Identifier formatting:</strong> Product/domain names, repository path, issue number, function name, and URL are split by spaces.</p>
+<p><strong>Grammar/typos:</strong> Original typos remain and new grammatical roughness is introduced; core requirements remain interpretable.</p>
+<h3 id="five-evaluation-questions">Five evaluation questions</h3>
+<h4>Q1. Which organizational priorities should determine this work item&#x27;s execution lane?</h4>
+<p><strong>Response must include:</strong> Security/privacy first; then marketing and features that attract new customers; startup context favors acquisition. The products support vendors embedding AI capabilities.</p>
+<p><strong>Compression risk:</strong> Low risk. The priority ordering and strategy survive.</p>
+<p><strong>Loss type:</strong> Priority/relationship</p>
+<h4>Q2. What is the current v1 notification scope, and what is explicitly deferred?</h4>
+<p><strong>Response must include:</strong> Server-side email only via AWS SES; Slack is deferred/ignored for now, although future Slack configuration should include a channel.</p>
+<p><strong>Compression risk:</strong> Low risk. The later clarification overriding the initial email-and-Slack wording remains clear.</p>
+<p><strong>Loss type:</strong> Scope/override</p>
+<h4>Q3. What are the trigger, schedule, and repeat semantics?</h4>
+<p><strong>Response must include:</strong> Scheduled Lambda every 30 minutes by default; alert when usage reaches 75%; one-time alert per crossing/billing period; forecasting is future work.</p>
+<p><strong>Compression risk:</strong> Low risk. All decision-critical qualifiers survive.</p>
+<p><strong>Loss type:</strong> Temporal/threshold</p>
+<h4>Q4. What implementation questions remain unresolved before work begins?</h4>
+<p><strong>Response must include:</strong> Where to persist alert-sent state and reset it per billing period; which database fields contain notification recipient addresses; exact plan/data-model keys may require confirmation.</p>
+<p><strong>Compression risk:</strong> Low risk. Both pre-implementation questions remain available.</p>
+<p><strong>Loss type:</strong> Dependency/uncertainty</p>
+<h4>Q5. What customer data and display calculations are required?</h4>
+<p><strong>Response must include:</strong> Use customer subscription records; show all limited usage-plan fields, current-period usage and percent of allocation, and highlight fields over 75%.</p>
+<p><strong>Compression risk:</strong> Low risk. The three-part requirement is retained.</p>
+<p><strong>Loss type:</strong> Data requirement</p>
+<h3 id="suggested-result-record">Suggested result record</h3>
+<p><strong>Record for each question:</strong> Original score (0-2) | Compressed score (0-2) | Delta | Missing/changed fact | Loss type | Reviewer note.</p>
+<h2 id="prompt-5" class="prompt-heading">Prompt 5</h2>
+<p><strong>Task:</strong> Generate a 1-3 sentence work-item summary and 5-8 assessment keywords in schema-constrained JSON.</p>
+<p><strong>Compression:</strong> 1,139 → 963 (176 saved; 15.5%)</p>
+<div class="verdict conditional"><span class="verdict-label">CONDITIONAL</span><span>Medium severity. The compressed prompt preserves the task contract and nearly all facts needed for the requested short summary and keywords. However, it corrupts provenance fields and the assessment table: &#x27;openai/gpt-5-mini&#x27; becomes &#x27;/ - 5 -&#x27;, the Issue label and # marker disappear, and the Composite score loses its label. It is acceptable for a semantic summary but not for provenance- or score-sensitive output.</span></div>
+<h3 id="observed-information-loss">Observed information loss</h3>
+<p><strong>Provenance corruption:</strong> The model identifier openai/gpt-5-mini and labeled Issue reference PredictabilityAtScale/usagetap #73 are damaged.</p>
+<p><strong>Score-label loss:</strong> Composite=70.0 becomes an unlabeled 70.0; the remaining dimension labels survive.</p>
+<p><strong>Markup corruption:</strong> The issue URL runs into &#x27;Dimension|&#x27;, weakening URL extraction and table separation.</p>
+<p><strong>Minor scope wording:</strong> &#x27;Email and Slack notification&#x27; is compressed, but the later and controlling SES-only/Slack-deferred clarification survives.</p>
+<h3 id="five-evaluation-questions">Five evaluation questions</h3>
+<h4>Q1. What exact response shape and length does the task require?</h4>
+<p><strong>Response must include:</strong> A JSON object matching the configured schema, containing a concise 1-3 sentence summary and 5-8 assessment keywords.</p>
+<p><strong>Compression risk:</strong> Low risk. The response contract survives.</p>
+<p><strong>Loss type:</strong> Output contract</p>
+<h4>Q2. What is the core feature being requested?</h4>
+<p><strong>Response must include:</strong> Customer quota-threshold-crossed notification; configuration UI for recipient email addresses already exists.</p>
+<p><strong>Compression risk:</strong> Low risk. Core feature and UI state survive.</p>
+<p><strong>Loss type:</strong> Scope</p>
+<h4>Q3. What delivery mechanism is in scope now, and what happened to Slack?</h4>
+<p><strong>Response must include:</strong> Use a server-side Lambda and AWS SES for email; ignore/defer Slack for now; future Slack configuration would include a channel.</p>
+<p><strong>Compression risk:</strong> Low risk. The controlling clarification survives.</p>
+<p><strong>Loss type:</strong> Scope/override</p>
+<h4>Q4. What trigger behavior should the summary capture?</h4>
+<p><strong>Response must include:</strong> Check every 30 minutes; alert once when usage reaches 75%; avoid repeats in the billing period; forecasting before plan refresh is future work.</p>
+<p><strong>Compression risk:</strong> Low risk. Threshold, schedule, deduplication, and future boundary survive.</p>
+<p><strong>Loss type:</strong> Temporal/threshold</p>
+<h4>Q5. What provenance and assessment scores were supplied?</h4>
+<p><strong>Response must include:</strong> Model openai/gpt-5-mini; issue PredictabilityAtScale/usagetap #73; Composite 70.0, Requirements 90.0, Complexity 58.0, Security 75.0, Business Impact 80.0.</p>
+<p><strong>Compression risk:</strong> Critical for provenance use. The model identifier and Composite label are not recoverable reliably from the compressed text.</p>
+<p><strong>Loss type:</strong> Provenance/label</p>
+<h3 id="suggested-result-record">Suggested result record</h3>
+<p><strong>Record for each question:</strong> Original score (0-2) | Compressed score (0-2) | Delta | Missing/changed fact | Loss type | Reviewer note.</p>
+<h2 id="cross-prompt-conclusions" class="section-heading">Cross-prompt conclusions</h2>
+<p><strong>Most serious failure mode:</strong> Label deletion. Prompt 1 demonstrates that preserving a number without its field name can be worse than deleting the number because it invites confident misattribution.</p>
+<p><strong>Second serious failure mode:</strong> Qualifier deletion. Prompt 3 removes evidence-strength words central to the requested AI-authorship judgment.</p>
+<p><strong>Context matters:</strong> Prompt 5&#x27;s provenance damage is material for auditing but probably immaterial for a 1-3 sentence feature summary. Fidelity gates should therefore combine universal checks with task-specific probes.</p>
+<p><strong>What survived well:</strong> Thresholds, schedules, channel overrides, explicit absences, and major implementation requirements were generally preserved in Prompts 2, 4, and 5.</p>
+<p><strong>Recommended benchmark metric:</strong> Report critical-probe pass rate, total probe score retention, numeric-label accuracy, instruction/negation accuracy, and identifier exact-match rate alongside token savings.</p>
+<h3 id="recommended-acceptance-thresholds">Recommended acceptance thresholds</h3>
+<div class="table-wrap"><table><tr><th>Metric</th><th>Threshold</th><th>Reason</th></tr><tr><td>Critical probe accuracy</td><td>100%</td><td>A single lost critical instruction, label, or qualifier can change the task outcome.</td></tr><tr><td>Overall probe score retention</td><td>≥ 90%</td><td>Allows minor wording degradation while detecting broad semantic loss.</td></tr><tr><td>Numeric-label pairing</td><td>100%</td><td>Numbers must remain attached to the correct fields.</td></tr><tr><td>Negation/override accuracy</td><td>100%</td><td>Do not reverse &#x27;none,&#x27; &#x27;deferred,&#x27; &#x27;only,&#x27; or later controlling clarifications.</td></tr><tr><td>Exact identifiers</td><td>Task-dependent</td><td>Require 100% when paths, URLs, model names, issue IDs, or timestamps feed automation or audit trails.</td></tr></table></div>
+<h3 id="overall-verdict-for-this-sample">Overall verdict for this sample</h3>
+<div class="verdict fail"><span class="verdict-label">FAIL</span><span>High severity. At the pair level, 2 of 5 prompts contain losses capable of changing a downstream judgment or corrupting structured output. The observed 13-21% token savings should not be accepted without task-aware fidelity checks and stronger protection for field labels and decision qualifiers.</span></div>
+      <p class="source-note">Generated from the first five records in prompt-compression-savings-2026-07-12T03_21_22.817Z.csv.</p>
+    </main>
+  </div>
+</body>
+</html>

@@ -436,3 +436,34 @@ Please review after."""
     }
     assert "Line __CK_KEEP_0000__" in compressor.inputs[0]
     assert "Line __CK_KEEP_0001__" in compressor.inputs[0]
+
+
+def test_non_json_bracketed_output_format_is_not_dropped():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "Follow these response requirements:\n\n"
+        "[[rapItem: mission | \"The mission statement\"]]\n"
+        "[[rapItem: skill | \"Quickbooks\"]]"
+    )
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert "[[rapItem: mission" in result.compressed_text
+    assert "[[rapItem: skill" in result.compressed_text
+    assert compressor.inputs
+
+
+def test_citation_brackets_do_not_discard_preceding_prose():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "Work in Progress is work that has entered the system but is not "
+        "complete. [citation: Essential-Kanban.pdf, page: 25]"
+    )
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert "Work in Progress" in result.compressed_text
+    assert "[citation: Essential-Kanban.pdf, page: 25]" in result.compressed_text
+    assert compressor.inputs
