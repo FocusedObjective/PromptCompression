@@ -8,6 +8,7 @@ import re
 from threading import Lock
 from typing import Any
 
+from app.analytics import DetailedAnalytics, build_detailed_analytics
 from app.compression_pipeline import CompressionSegment, PromptPreprocessor
 from app.protected_spans import (
     ProtectedSpan,
@@ -336,6 +337,7 @@ class CompressionDiagnostics:
     protected_density: float = 0.0
     structured_density: float = 0.0
     identifier_density: float = 0.0
+    analytics: DetailedAnalytics | None = None
 
 
 @dataclass(frozen=True)
@@ -2132,6 +2134,7 @@ class PromptCompressionService:
         latency_budget_ms: float | None = None,
         allow_cpu_model_auto: bool | None = None,
         collect_diagnostics: bool = True,
+        apply_deterministic_transforms: bool = True,
     ) -> CompressionResult:
         start = time.perf_counter()
         timings = dict.fromkeys(TIMED_PHASES, 0.0)
@@ -2146,19 +2149,31 @@ class PromptCompressionService:
         timings["target_rate_ms"] = _elapsed_ms(phase_start)
 
         phase_start = time.perf_counter()
-        prepared_segments = self.preprocessor.prepare(text)
+        prepared_segments = (
+            self.preprocessor.prepare(text)
+            if apply_deterministic_transforms
+            else [CompressionSegment(text=text, compressible=True, kind="prose", source_text=text)]
+        )
         timings["preprocessing_ms"] = _elapsed_ms(phase_start)
         preprocessed_text = "".join(segment.text for segment in prepared_segments)
 
         phase_start = time.perf_counter()
-        segments = self._apply_force_drop_phrases(prepared_segments, profile)
+        segments = (
+            self._apply_force_drop_phrases(prepared_segments, profile)
+            if apply_deterministic_transforms
+            else prepared_segments
+        )
         timings["force_drop_ms"] = _elapsed_ms(phase_start)
         force_dropped_text = "".join(segment.text for segment in segments)
         exact_output_context = self._request_requires_exact_output(text)
-        literal_placeholdering = self._apply_repeated_literal_placeholdering(
-            segments,
-            profile,
-            exact_output_context=exact_output_context,
+        literal_placeholdering = (
+            self._apply_repeated_literal_placeholdering(
+                segments,
+                profile,
+                exact_output_context=exact_output_context,
+            )
+            if apply_deterministic_transforms
+            else _LiteralPlaceholderingResult(segments=segments)
         )
         segments = literal_placeholdering.segments
         deterministic_text = "".join(segment.text for segment in segments)
@@ -2366,6 +2381,54 @@ class PromptCompressionService:
                 compression_mode=compression_mode,
                 compression_path=compression_path,
                 model_gate=model_gate,
+                analytics=build_detailed_analytics(
+                    service=self,
+                    input_text=text,
+                    preprocessed_text=preprocessed_text,
+                    force_dropped_text=force_dropped_text,
+                    pipeline_text=deterministic_text,
+                    deterministic_text=(
+                        prepared.text
+                        if llmlingua_called and prepared is not None
+                        else compressed_text
+                    ),
+                    final_text=compressed_text,
+                    prepared_segments=prepared_segments,
+                    final_segments=segments,
+                    profile=profile,
+                    token_estimator=token_estimator,
+                    original_tokens=original_estimate.count,
+                    deterministic_tokens=(
+                        self.estimate_compression_tokens(prepared.text, profile).count
+                        if llmlingua_called and prepared is not None
+                        else compressed_estimate.count
+                    ),
+                    final_tokens=compressed_estimate.count,
+                    target_rate=target_rate,
+                    model_called=llmlingua_called,
+                    model_call_count=(
+                        0 if chunk_stats is None else chunk_stats.llmlingua_call_count
+                    ),
+                    model_chunk_count=(
+                        0 if chunk_stats is None else chunk_stats.chunk_count
+                    ),
+                    model_reason=fallback_reason or model_gate.reason,
+                    placeholder_tokens=(
+                        []
+                        if prepared is None
+                        else [item.token for item in prepared.placeholders]
+                    ),
+                    force_token_count=(
+                        len(force_tokens_for_text(prepared.text))
+                        if prepared is not None
+                        else len(force_tokens_for_text(deterministic_text))
+                    ) + len(profile.force_keep_tokens),
+                    duplicate_candidate_count=duplicate_blocks.candidate_count,
+                    duplicate_candidate_tokens=duplicate_blocks.candidate_tokens,
+                    attribution_residual_tokens=(
+                        token_savings.attribution_residual_tokens
+                    ),
+                ),
             )
             timings["diagnostics_ms"] += _elapsed_ms(phase_start)
         warnings = (
@@ -2434,6 +2497,7 @@ class PromptCompressionService:
         compression_mode: str,
         compression_path: str,
         model_gate: _ModelGateEvaluation,
+        analytics: DetailedAnalytics | None = None,
     ) -> CompressionDiagnostics:
         segment_kinds: dict[str, int] = {}
         for segment in segments:
@@ -2538,6 +2602,7 @@ class PromptCompressionService:
             protected_density=model_gate.protected_density,
             structured_density=model_gate.structured_density,
             identifier_density=model_gate.identifier_density,
+            analytics=analytics,
         )
 
 

@@ -2,6 +2,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.analytics import DetailedAnalytics
 from app.token_estimator import REGEX_TOKEN_ESTIMATOR
 
 DEFAULT_AGGRESSIVENESS = 0.15
@@ -89,6 +90,13 @@ class CompressRequest(BaseModel):
     include_diagnostics: bool = Field(
         default=False,
         description="Include phase-level timing and request-shape diagnostics.",
+    )
+    apply_deterministic_transforms: bool = Field(
+        default=True,
+        description=(
+            "Apply deterministic preprocessing before the model. Benchmark paired "
+            "conditions may disable it; production callers should normally leave it on."
+        ),
     )
 
 
@@ -180,6 +188,7 @@ class CompressionDiagnosticsResponse(BaseModel):
     protected_density: float = 0.0
     structured_density: float = 0.0
     identifier_density: float = 0.0
+    analytics: DetailedAnalytics | None = None
 
 
 class TokenSavingsResponse(BaseModel):

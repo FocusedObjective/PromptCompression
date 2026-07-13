@@ -45,6 +45,12 @@ DEFAULT_JSON_RATIOS = (0.0, 0.1, 0.25, 0.5, 0.75)
 DEFAULT_HTML_RATIOS = (0.0, 0.25)
 DEFAULT_AGGRESSIVENESS = 0.25
 DEFAULT_TIMEOUT_SECONDS = 900.0
+PAIRED_CONDITIONS = (
+    "unchanged",
+    "deterministic_only",
+    "model_force",
+    "deterministic_plus_model",
+)
 TIMING_FIELDS = (
     "total_ms",
     "target_rate_ms",
@@ -133,6 +139,14 @@ class BenchmarkCase:
     text: str
 
 
+@dataclass(frozen=True)
+class BenchmarkCondition:
+    condition_id: str
+    mode: str
+    apply_deterministic_transforms: bool
+    aggressiveness: float | None = None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run prompt-compression latency benchmarks against HTTP or in-process."
@@ -204,6 +218,14 @@ def parse_args() -> argparse.Namespace:
         help="Compression mode sent with each request.",
     )
     parser.add_argument(
+        "--conditions",
+        default=None,
+        help=(
+            "Comma-separated paired conditions over one frozen cohort: unchanged, "
+            "deterministic_only, model_force, deterministic_plus_model."
+        ),
+    )
+    parser.add_argument(
         "--latency-budget-ms",
         type=float,
         default=None,
@@ -255,6 +277,7 @@ def main() -> int:
     output_dir = resolve_output_dir(args.out_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     labels = parse_labels(args.label)
+    conditions = resolve_conditions(args)
     metadata = {
         "started_at": datetime.now(UTC).isoformat(),
         "mode": "in_process" if args.in_process else "http",
@@ -268,6 +291,7 @@ def main() -> int:
         "concurrency": args.concurrency,
         "aggressiveness": args.aggressiveness,
         "compression_mode": args.compression_mode,
+        "conditions": [condition.condition_id for condition in conditions],
         "latency_budget_ms": args.latency_budget_ms,
         "include_sections": args.include_sections,
         "seed": args.seed,
@@ -275,6 +299,9 @@ def main() -> int:
     }
 
     cases = build_cases(target_tokens, json_ratios, html_ratios)
+    cohort_id = cohort_id_for_cases(cases)
+    metadata["cohort_id"] = cohort_id
+    metadata["benchmark_schema_version"] = "benchmark.v2"
     print(f"Generating {len(cases)} prompt cases...")
     write_case_manifest(output_dir / "cases.json", cases, metadata)
     if args.save_prompts:
@@ -299,12 +326,15 @@ def main() -> int:
             headers=headers,
             service=service,
             measured=False,
+            condition=conditions[0],
+            cohort_id=cohort_id,
         )
 
     tasks = [
-        (case, repeat_index)
+        (case, repeat_index, condition)
         for case in cases
         for repeat_index in range(1, args.repeats + 1)
+        for condition in conditions
     ]
     if args.shuffle:
         random.Random(args.seed).shuffle(tasks)
@@ -316,7 +346,9 @@ def main() -> int:
         labels=labels,
         headers=headers,
         service=service,
+        cohort_id=cohort_id,
     )
+    verify_paired_cohort(rows, conditions)
     metadata["finished_at"] = datetime.now(UTC).isoformat()
     metadata["success_count"] = sum(1 for row in rows if row["status"] == "ok")
     metadata["error_count"] = len(rows) - metadata["success_count"]
@@ -372,6 +404,69 @@ def validate_args(
         for html_ratio in html_ratios
     ):
         raise SystemExit("At least one JSON + HTML ratio pair must be <= 1.0")
+
+
+def resolve_conditions(args: argparse.Namespace) -> list[BenchmarkCondition]:
+    if not args.conditions:
+        return [
+            BenchmarkCondition(
+                condition_id=args.compression_mode,
+                mode=args.compression_mode,
+                apply_deterministic_transforms=True,
+            )
+        ]
+
+    requested = [value.strip() for value in args.conditions.split(",") if value.strip()]
+    invalid = sorted(set(requested) - set(PAIRED_CONDITIONS))
+    if invalid:
+        raise SystemExit(
+            "Unknown --conditions value(s): " + ", ".join(invalid)
+        )
+    if not requested:
+        raise SystemExit("--conditions must include at least one condition")
+    mapping = {
+        "unchanged": BenchmarkCondition(
+            "unchanged", "deterministic", False, aggressiveness=0.0
+        ),
+        "deterministic_only": BenchmarkCondition(
+            "deterministic_only", "deterministic", True
+        ),
+        "model_force": BenchmarkCondition(
+            "model_force", "model_force", False
+        ),
+        "deterministic_plus_model": BenchmarkCondition(
+            "deterministic_plus_model", "model_force", True
+        ),
+    }
+    return [mapping[name] for name in requested]
+
+
+def cohort_id_for_cases(cases: list[BenchmarkCase]) -> str:
+    frozen = "\n".join(
+        f"{case.case_id}:{case.prompt_sha256}" for case in cases
+    )
+    return "cohort-" + hashlib.sha256(frozen.encode("utf-8")).hexdigest()[:16]
+
+
+def verify_paired_cohort(
+    rows: list[dict[str, Any]],
+    conditions: list[BenchmarkCondition],
+) -> None:
+    if len(conditions) <= 1:
+        return
+    expected_conditions = {condition.condition_id for condition in conditions}
+    by_prompt: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for row in rows:
+        by_prompt.setdefault((row["prompt_id"], row["repeat"]), []).append(row)
+    for key, prompt_rows in by_prompt.items():
+        actual_conditions = {row["condition_id"] for row in prompt_rows}
+        hashes = {row["original_sha256"] for row in prompt_rows}
+        if actual_conditions != expected_conditions or len(hashes) != 1:
+            raise RuntimeError(
+                "Paired cohort mismatch for "
+                f"prompt_id={key[0]} repeat={key[1]}: "
+                f"conditions={sorted(actual_conditions)} hashes={sorted(hashes)}"
+            )
 
 
 def build_cases(
@@ -539,17 +634,21 @@ def json_payload(record_count: int) -> str:
 
 
 def run_measured_tasks(
-    tasks: list[tuple[BenchmarkCase, int]],
+    tasks: list[tuple[BenchmarkCase, int, BenchmarkCondition]],
     *,
     args: argparse.Namespace,
     labels: dict[str, str],
     headers: dict[str, str],
     service: PromptCompressionService | None,
+    cohort_id: str,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if args.concurrency == 1:
-        for index, (case, repeat_index) in enumerate(tasks, start=1):
-            print(f"{index}/{len(tasks)} {case.case_id} repeat={repeat_index}")
+        for index, (case, repeat_index, condition) in enumerate(tasks, start=1):
+            print(
+                f"{index}/{len(tasks)} {case.case_id} repeat={repeat_index} "
+                f"condition={condition.condition_id}"
+            )
             rows.append(
                 run_one(
                     case,
@@ -559,6 +658,8 @@ def run_measured_tasks(
                     headers=headers,
                     service=service,
                     measured=True,
+                    condition=condition,
+                    cohort_id=cohort_id,
                 )
             )
         return rows
@@ -574,8 +675,10 @@ def run_measured_tasks(
                 headers,
                 None,
                 True,
+                condition,
+                cohort_id,
             )
-            for case, repeat_index in tasks
+            for case, repeat_index, condition in tasks
         ]
         for index, future in enumerate(as_completed(futures), start=1):
             row = future.result()
@@ -592,8 +695,12 @@ def run_one(
     headers: dict[str, str],
     service: PromptCompressionService | None,
     measured: bool,
+    condition: BenchmarkCondition,
+    cohort_id: str,
 ) -> dict[str, Any]:
-    base_row = base_result_row(case, repeat_index, labels, measured)
+    base_row = base_result_row(
+        case, repeat_index, labels, measured, condition, cohort_id
+    )
     if args.in_process:
         assert service is not None
         return run_one_in_process(case, base_row, args, service)
@@ -606,10 +713,18 @@ def run_one_http(
     args: argparse.Namespace,
     headers: dict[str, str],
 ) -> dict[str, Any]:
+    aggressiveness = (
+        args.aggressiveness
+        if base_row["condition_aggressiveness"] is None
+        else base_row["condition_aggressiveness"]
+    )
     payload = {
         "text": case.text,
-        "aggressiveness": args.aggressiveness,
-        "mode": args.compression_mode,
+        "aggressiveness": aggressiveness,
+        "mode": base_row["requested_compression_mode"],
+        "apply_deterministic_transforms": base_row[
+            "apply_deterministic_transforms"
+        ],
         "include_sections": args.include_sections,
         "include_diagnostics": True,
     }
@@ -661,10 +776,18 @@ def run_one_in_process(
     try:
         result = service.compress(
             case.text,
-            aggressiveness=args.aggressiveness,
+            aggressiveness=(
+                args.aggressiveness
+                if base_row["condition_aggressiveness"] is None
+                else base_row["condition_aggressiveness"]
+            ),
             include_sections=args.include_sections,
-            mode=args.compression_mode,
+            mode=base_row["requested_compression_mode"],
             latency_budget_ms=args.latency_budget_ms,
+            collect_diagnostics=True,
+            apply_deterministic_transforms=base_row[
+                "apply_deterministic_transforms"
+            ],
         )
         client_wall_ms = (time.perf_counter() - started) * 1000
         body = {
@@ -681,6 +804,11 @@ def run_one_in_process(
             "diagnostics": (
                 asdict(result.diagnostics)
                 if result.diagnostics is not None
+                else None
+            ),
+            "token_savings": (
+                asdict(result.token_savings)
+                if result.token_savings is not None
                 else None
             ),
         }
@@ -706,12 +834,21 @@ def base_result_row(
     repeat_index: int,
     labels: dict[str, str],
     measured: bool,
+    condition: BenchmarkCondition,
+    cohort_id: str,
 ) -> dict[str, Any]:
     row = {
+        "schema_version": "benchmark.v2",
         "status": "started",
         "error": "",
         "measured": measured,
         "case_id": case.case_id,
+        "prompt_id": case.case_id,
+        "cohort_id": cohort_id,
+        "condition_id": condition.condition_id,
+        "requested_compression_mode": condition.mode,
+        "apply_deterministic_transforms": condition.apply_deterministic_transforms,
+        "condition_aggressiveness": condition.aggressiveness,
         "repeat": repeat_index,
         "target_tokens": case.target_tokens,
         "json_ratio_target": case.json_ratio_target,
@@ -728,6 +865,8 @@ def base_result_row(
         "json_chars": case.json_chars,
         "html_chars": case.html_chars,
         "prompt_sha256": case.prompt_sha256,
+        "original_sha256": case.prompt_sha256,
+        "original_text": case.text,
     }
     for key, value in labels.items():
         row[f"label_{key}"] = value
@@ -737,6 +876,8 @@ def base_result_row(
 def add_response_fields(row: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
     diagnostics = body.get("diagnostics") or {}
     timings = diagnostics.get("timings") or {}
+    analytics = diagnostics.get("analytics") or {}
+    token_savings = body.get("token_savings") or {}
     response_original_tokens = body.get("original_tokens")
     response_compressed_tokens = body.get("compressed_tokens")
     deterministic_output_tokens = diagnostics.get("deterministic_output_tokens")
@@ -778,6 +919,38 @@ def add_response_fields(row: dict[str, Any], body: dict[str, Any]) -> dict[str, 
                 diagnostics.get("compression_path", ""),
             ),
             "output_chars": len(body.get("compressed_text", "")),
+            "final_text": body.get("compressed_text", ""),
+            "analytics": analytics,
+            "stages": {
+                "deterministicText": analytics.get("deterministic_text"),
+                "deterministicSha256": analytics.get("deterministic_sha256"),
+                "deterministicCharacters": analytics.get("deterministic_characters"),
+                "deterministicTokens": analytics.get("deterministic_tokens"),
+                "deterministicTokensSaved": analytics.get(
+                    "deterministic_tokens_saved"
+                ),
+                "deterministicTransforms": analytics.get(
+                    "deterministic_transforms", []
+                ),
+                "modelInputSha256": analytics.get("model_input_sha256"),
+                "finalSha256": analytics.get("final_sha256"),
+                "modelIncrementalTokensSaved": analytics.get(
+                    "model_incremental_tokens_saved"
+                ),
+                "modelCalled": analytics.get("model_called"),
+            },
+            "deterministicGateReasons": analytics.get(
+                "deterministic_gate_reasons", {}
+            ),
+            "candidateOpportunities": analytics.get(
+                "candidate_opportunities", {}
+            ),
+            "integrity": analytics.get("integrity", {}),
+            "provenance": analytics.get("provenance", {}),
+            "attribution_residual_tokens": token_savings.get(
+                "attribution_residual_tokens",
+                analytics.get("attribution_residual_tokens"),
+            ),
             "diagnostics_present": bool(diagnostics),
             "segment_count": diagnostics.get("segment_count"),
             "compressible_segment_count": diagnostics.get("compressible_segment_count"),

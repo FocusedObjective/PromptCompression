@@ -2,8 +2,11 @@ import statistics
 
 from scripts.benchmark_performance import (
     DEFAULT_TARGET_TOKENS,
+    BenchmarkCondition,
     build_case,
     build_summary_rows,
+    cohort_id_for_cases,
+    verify_paired_cohort,
 )
 
 
@@ -98,3 +101,27 @@ def test_summary_rows_group_latency_distributions():
     assert overall["success_count"] == 2
     assert overall["client_wall_ms_p50"] == 150.0
     assert overall["timing_llmlingua_ms_mean"] == 65.0
+
+
+def test_paired_conditions_verify_frozen_prompt_hashes():
+    case = build_case(256, 0.0)
+    cohort_id = cohort_id_for_cases([case])
+    conditions = [
+        BenchmarkCondition("unchanged", "deterministic", False, 0.0),
+        BenchmarkCondition("deterministic_only", "deterministic", True),
+    ]
+    rows = [
+        {
+            "prompt_id": case.case_id,
+            "repeat": 1,
+            "condition_id": condition.condition_id,
+            "original_sha256": case.prompt_sha256,
+            "cohort_id": cohort_id,
+        }
+        for condition in conditions
+    ]
+
+    verify_paired_cohort(rows, conditions)
+    assert len({row["prompt_id"] for row in rows}) == 1
+    assert len({row["original_sha256"] for row in rows}) == 1
+    assert len({row["cohort_id"] for row in rows}) == 1

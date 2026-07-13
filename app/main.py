@@ -1448,7 +1448,7 @@ def compress(
     aggressiveness = _resolve_compress_aggressiveness(request, tenant_profile)
     mode = _resolve_compress_mode(request)
     try:
-        result = compression_service.compress(
+        compression_kwargs = dict(
             text=request.text,
             aggressiveness=aggressiveness,
             include_sections=request.include_sections,
@@ -1458,6 +1458,9 @@ def compress(
             allow_cpu_model_auto=request.allow_cpu_model_auto,
             collect_diagnostics=request.include_diagnostics,
         )
+        if not request.apply_deterministic_transforms:
+            compression_kwargs["apply_deterministic_transforms"] = False
+        result = compression_service.compress(**compression_kwargs)
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

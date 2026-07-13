@@ -229,6 +229,86 @@ def test_collect_diagnostics_false_skips_component_diagnostics():
     assert compressor.inputs == []
 
 
+def test_detailed_analytics_tracks_exact_model_input_and_privacy():
+    compressor = ManglingProtectedTextCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    protected_value = "ORD-7781"
+    text = f"Review account {protected_value} at https://example.com/private now."
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    assert result.diagnostics is not None
+    analytics = result.diagnostics.analytics
+    assert analytics is not None
+    assert analytics.deterministic_text == compressor.inputs[0]
+    assert analytics.model_input_sha256 == analytics.deterministic_sha256
+    assert analytics.final_sha256
+    assert analytics.model_called is True
+    assert analytics.integrity.protected_span_validation_passed is True
+    assert analytics.integrity.placeholder_restoration_validation_passed is True
+    assert analytics.provenance.compressor_git_commit != ""
+    assert analytics.provenance.configuration_sha256
+    diagnostic_payload = repr(analytics)
+    assert protected_value not in diagnostic_payload
+    assert "https://example.com/private" not in diagnostic_payload
+    assert {item.transform for item in analytics.deterministic_transforms} == {
+        "whitespace_canonicalization",
+        "force_drop_preprocessing",
+        "json_minification",
+        "json_to_toon",
+        "html_to_markdown",
+        "nocompress_wrapper_handling",
+        "exact_duplicate_block_removal",
+        "protected_span_substitution",
+        "placeholder_restoration",
+    }
+    assert all(item.reason for item in analytics.deterministic_transforms)
+    assert (
+        analytics.deterministic_attribution_residual_tokens == 0
+        or analytics.deterministic_attribution_residual_reason is not None
+    )
+
+
+def test_detailed_analytics_deterministic_only_stage_equals_final():
+    service = PromptCompressionService()
+    text = "Alpha  beta.\n\n\nGamma."
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+
+    assert result.diagnostics is not None
+    analytics = result.diagnostics.analytics
+    assert analytics is not None
+    assert analytics.deterministic_text == result.compressed_text
+    assert analytics.deterministic_sha256 == analytics.final_sha256
+    assert analytics.model_incremental_tokens_saved == 0
+
+
+def test_detailed_analytics_unchanged_hashes_match():
+    service = PromptCompressionService()
+    text = "Already normalized."
+
+    result = service.compress(
+        text,
+        aggressiveness=0.0,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        apply_deterministic_transforms=False,
+    )
+
+    assert result.compressed_text == text
+    assert result.diagnostics is not None
+    analytics = result.diagnostics.analytics
+    assert analytics is not None
+    assert analytics.original_sha256 == analytics.deterministic_sha256
+    assert analytics.deterministic_sha256 == analytics.final_sha256
+
+
 def test_token_savings_arithmetic_for_all_normal_paths():
     cases = [
         (1000, 850, 600, True, 150, 250, 400, 0.15, 250 / 850, 0.4),

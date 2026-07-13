@@ -503,6 +503,7 @@ BENCHMARK_HTML = """
     let cancelled = false;
     let plannedRuns = 0;
     let completedRuns = 0;
+    let currentCohortId = "";
 
     const sizesInput = document.getElementById("sizesInput");
     const jsonRatiosInput = document.getElementById("jsonRatiosInput");
@@ -815,10 +816,14 @@ BENCHMARK_HTML = """
 
     function baseRow(testCase, repeat, measured) {
       return {
+        schema_version: "benchmark.v2",
         status: "started",
         error: "",
         measured,
         case_id: testCase.case_id,
+        prompt_id: testCase.case_id,
+        cohort_id: currentCohortId,
+        condition_id: compressionModeInput.value,
         repeat,
         target_tokens: testCase.target_tokens,
         json_ratio_target: testCase.json_ratio_target,
@@ -831,6 +836,7 @@ BENCHMARK_HTML = """
         input_chars: testCase.input_chars,
         json_chars: testCase.json_chars,
         html_chars: testCase.html_chars,
+        original_text: testCase.text,
       };
     }
 
@@ -891,6 +897,7 @@ BENCHMARK_HTML = """
 
     function addResponseFields(row, data) {
       const diagnostics = data.diagnostics || {};
+      const analytics = diagnostics.analytics || {};
       const timings = diagnostics.timings || {};
       row.status = "ok";
       row.error = "";
@@ -898,6 +905,25 @@ BENCHMARK_HTML = """
       row.response_original_tokens = data.original_tokens;
       row.response_compressed_tokens = data.compressed_tokens;
       row.response_tokens_saved = Math.max(0, Number(data.original_tokens || 0) - Number(data.compressed_tokens || 0));
+      row.original_sha256 = analytics.original_sha256 || "";
+      row.final_text = data.compressed_text || "";
+      row.analytics = analytics;
+      row.stages = {
+        deterministicText: analytics.deterministic_text,
+        deterministicSha256: analytics.deterministic_sha256,
+        deterministicCharacters: analytics.deterministic_characters,
+        deterministicTokens: analytics.deterministic_tokens,
+        deterministicTokensSaved: analytics.deterministic_tokens_saved,
+        deterministicTransforms: analytics.deterministic_transforms || [],
+        modelInputSha256: analytics.model_input_sha256,
+        finalSha256: analytics.final_sha256,
+        modelIncrementalTokensSaved: analytics.model_incremental_tokens_saved,
+        modelCalled: analytics.model_called,
+      };
+      row.deterministicGateReasons = analytics.deterministic_gate_reasons || {};
+      row.candidateOpportunities = analytics.candidate_opportunities || {};
+      row.integrity = analytics.integrity || {};
+      row.provenance = analytics.provenance || {};
       row.reduction = data.reduction;
       row.target_rate = data.target_rate;
       row.model = data.model || "";
@@ -1206,6 +1232,7 @@ BENCHMARK_HTML = """
     });
 
     runButton.addEventListener("click", async () => {
+      currentCohortId = `cohort-${Date.now().toString(36)}`;
       const sizes = parseNumberList(sizesInput.value, Number.parseInt);
       const jsonRatios = parseNumberList(jsonRatiosInput.value, Number.parseFloat);
       const htmlRatios = parseNumberList(htmlRatiosInput.value, Number.parseFloat);

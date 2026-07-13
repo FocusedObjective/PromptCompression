@@ -213,6 +213,73 @@ measurements adds work. Enable them explicitly in the request with:
 }
 ```
 
+Diagnostics schema `compression-diagnostics.v2` adds an `analytics` object.
+It is intentionally expensive and contains the exact deterministic/model-stage
+text, so only enable it for authorized benchmark inputs. The model-stage hash is
+always the deterministic hash. For deterministic-only runs, deterministic text
+is exactly the final text.
+
+Sanitized shape (hashes shortened here only for readability):
+
+```json
+{
+  "analytics": {
+    "diagnostics_schema_version": "compression-diagnostics.v2",
+    "original_sha256": "91b7...",
+    "deterministic_text": "Review __CK_KEEP_0000__ now.",
+    "deterministic_sha256": "22cc...",
+    "deterministic_characters": 30,
+    "deterministic_tokens": 8,
+    "deterministic_tokens_saved": 2,
+    "deterministic_transforms": [
+      {
+        "transform": "protected_span_substitution",
+        "candidate_count": 1,
+        "candidate_characters": 37,
+        "candidate_tokens": 10,
+        "applied_count": 1,
+        "input_characters": 37,
+        "output_characters": 30,
+        "input_tokens": 10,
+        "output_tokens": 8,
+        "tokens_saved": 2,
+        "status": "applied",
+        "reason": "applied",
+        "elapsed_ms": 0.08
+      }
+    ],
+    "deterministic_gate_reasons": {"no_candidate": 6},
+    "model_input_sha256": "22cc...",
+    "final_sha256": "7a5d...",
+    "integrity": {
+      "protected_span_validation_passed": true,
+      "placeholder_restoration_validation_passed": true,
+      "structural_validation_warnings": []
+    },
+    "provenance": {
+      "benchmark_schema_version": "benchmark.v2",
+      "diagnostics_schema_version": "compression-diagnostics.v2",
+      "compressor_git_commit": "0123456789abcdef",
+      "configuration_sha256": "73de..."
+    }
+  }
+}
+```
+
+Stable transform codes are `whitespace_canonicalization`,
+`force_drop_preprocessing`, `json_minification`, `json_to_toon`,
+`html_to_markdown`, `nocompress_wrapper_handling`,
+`exact_duplicate_block_removal`, `protected_span_substitution`, and
+`placeholder_restoration`.
+
+Stable deterministic gate reasons are `no_candidate`,
+`invalid_ambiguous_syntax`, `json_parse_failed`, `inside_protected_span`,
+`unsupported_structure`, `below_minimum_size`, `token_increase`,
+`no_token_savings`, `density_safety_gate`, `tenant_configuration_disabled`,
+`transform_failed`, and `duplicate_not_structurally_safe_to_remove`. An applied
+transform uses reason `applied`. Status values are `applied`, `no_candidate`,
+`skipped`, `failed`, and `no_savings`.
+
 ### `POST /tokens/estimate`
 
 Returns the backend token estimate used by the UI. Omit `model` to use the
@@ -608,6 +675,25 @@ The script writes `raw.jsonl`, `raw.csv`, `summary.csv`, `summary.json`,
 `summary.csv` for quick size-vs-latency comparisons, and `raw.jsonl` when you
 need to inspect whether time went to preprocessing, token gating, model load, or
 LLMLingua2 for an individual run.
+
+To run the four paired conditions over one frozen Kanban Zone cohort, use:
+
+```powershell
+$env:API_URL="$env:SERVICE_URL/compress"
+python scripts\benchmark_performance.py `
+  --url $env:API_URL `
+  --conditions unchanged,deterministic_only,model_force,deterministic_plus_model `
+  --sizes 3000,12000,24000 `
+  --repeats 3 `
+  --save-prompts `
+  --label "tenant=kanban-zone"
+```
+
+All conditions reuse the same in-memory cases. Each `benchmark.v2` JSONL record
+includes `cohort_id`, `condition_id`, `prompt_id`, `original_sha256`, the original
+and final text, nested `stages`, candidate opportunities, integrity results, and
+provenance. Export aborts if prompt IDs or original hashes diverge between paired
+conditions; it never refetches a cohort between conditions.
 
 ## Notes
 
