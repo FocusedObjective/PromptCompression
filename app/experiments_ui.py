@@ -419,7 +419,7 @@ EXPERIMENTS_HTML = """
 
     <section class="snapshot" aria-label="Program snapshot">
       <div class="metric"><strong>8</strong><span>implemented experiments and safety controls</span></div>
-      <div class="metric"><strong>2</strong><span>documented evidence cohorts</span></div>
+      <div class="metric"><strong>4</strong><span>documented evidence cohorts</span></div>
       <div class="metric"><strong>0</strong><span>savings transforms promoted to safe_stack_v1</span></div>
       <div class="metric"><strong>1</strong><span>accepted safety layer: shielding plus rollback</span></div>
     </section>
@@ -473,7 +473,42 @@ EXPERIMENTS_HTML = """
             <li>Constraint and required-term coverage were zero, so semantic acceptance remains open.</li>
           </ul>
         </article>
+
+        <article class="run-card">
+          <div class="run-head"><div><span class="run-kicker">Tenant 1</span><h3>Large structured-prompt slice</h3></div><span class="status revise">Positive TOON signal</span></div>
+          <p>Fifteen selected records, twelve unique baseline inputs, six profile-plus-model arms, and one repeat. Seven arm requests returned errors and are excluded from integrity rates.</p>
+          <div class="run-stats">
+            <div class="run-stat"><strong>39</strong><span>incremental deterministic tokens</span></div>
+            <div class="run-stat"><strong>1</strong><span>matched TOON application</span></div>
+            <div class="run-stat"><strong>0</strong><span>accepted hard failures</span></div>
+          </div>
+          <ul class="run-list">
+            <li>Expanded TOON changed one of fourteen completed matched records: a positive 0.01% signal, not promotion evidence.</li>
+            <li>The other five profiles produced zero incremental deterministic savings.</li>
+            <li>Twenty-nine unsafe inline-code model candidates were rejected; constraint and required-term coverage remained zero.</li>
+          </ul>
+        </article>
+
+        <article class="run-card">
+          <div class="run-head"><div><span class="run-kicker">Tenant 2</span><h3>Structured workflow slice</h3></div><span class="status revise">No incremental profile savings</span></div>
+          <p>Twenty-five selected records, twenty unique inputs, six profile-plus-model arms, and one repeat. All 175 configured arm records completed.</p>
+          <div class="run-stats">
+            <div class="run-stat"><strong>0</strong><span>incremental deterministic tokens</span></div>
+            <div class="run-stat"><strong>18</strong><span>unsafe model candidates rejected</span></div>
+            <div class="run-stat"><strong>100%</strong><span>accepted hard-integrity pass rate</span></div>
+          </div>
+          <ul class="run-list">
+            <li>Baseline TOON already saved 1,428 tokens on two records; every experiment profile matched that deterministic output exactly.</li>
+            <li>Each experiment-plus-model arm saved 40 model tokens, but there was no model-only arm for causal attribution.</li>
+            <li>The run used one repeat and crossed an application deployment boundary, so it cannot support promotion.</li>
+          </ul>
+        </article>
       </div>
+
+      <aside class="finding" aria-label="Additional cohort quality note">
+        <div class="finding-bar"></div>
+        <div class="finding-body"><h3>Run-quality note: errors are not integrity failures</h3><p>The two new exports configured 280 arm records and completed 273. Seven Tenant 1 rows contained no analytics or integrity result and are classified as harness/API errors, not failed compression outputs. Across completed records, the guardrail rejected 47 unsafe model candidates while accepted outputs recorded zero hard-integrity failures. Both runs still lack three repeats, the full four-arm matrix, and semantic constraint coverage.</p></div>
+      </aside>
     </section>
 
     <section class="section" id="experiments">
@@ -485,14 +520,14 @@ EXPERIMENTS_HTML = """
         <table>
           <thead><tr><th>Experiment</th><th>Status</th><th>What the evidence says</th><th>Next proof</th></tr></thead>
           <tbody>
-            <tr><td>Integrity rollback &amp; critical-clause shielding</td><td><span class="status accepted">Accepted safety</span></td><td>Rejected model output never counts as savings. Release and tenant cohorts recorded zero accepted hard-integrity failures; exact URLs, identifiers, code, numbers, links, constants, and shielded critical clauses were retained.</td><td>Keep unconditional. Expand semantic and entity-relationship evaluation coverage.</td></tr>
-            <tr><td>Strict prose whitespace</td><td><span class="status revise">Revise</span></td><td>No tokenizer-positive application in either cohort. The tenant slice contained 336 blank lines, but all candidates correctly failed the token-savings gate.</td><td>Test prose with actual tokenizer-costly spacing while retaining Markdown and aligned-text exclusions.</td></tr>
-            <tr><td>Safe JSON minification</td><td><span class="status revise">Revise</span></td><td>No minification applied. The tenant slice had 19 strict JSON arrays, all below threshold. A skipped candidate changed model placeholdering on 7 of 25 records, so its extra 33 saved tokens are not attributable to minification.</td><td>Make skipped candidates model-input neutral, then rerun the causal matrix.</td></tr>
-            <tr><td>Repeated literal aliases</td><td><span class="status revise">Revise</span></td><td>No eligible repeated long URL or identifier appeared in either held-out cohort.</td><td>Use held-out prompts with naturally repeated literals and verify exact expansion.</td></tr>
-            <tr><td>Expanded JSON-to-TOON</td><td><span class="status revise">Revise</span></td><td>All 36 threshold cells matched baseline on the fixed corpus. The tenant slice produced no additional eligible region.</td><td>Collect larger typed JSON records where the tokenizer gate can actually discriminate thresholds.</td></tr>
-            <tr><td>Expanded HTML-to-Markdown</td><td><span class="status revise">Revise</span></td><td>All 300/500/1000-character cells produced zero applications. The tenant slice contained no eligible HTML region.</td><td>Evaluate real article/main HTML with exact link and visible-text preservation.</td></tr>
-            <tr><td>Tenant-approved exact boilerplate</td><td><span class="status pending">Pending</span></td><td>Discovery remains diagnostics-only. The fixed benchmark had too few records for approval, and the tenant subset used the default profile without approved phrases.</td><td>Approve a versioned exact phrase set from at least 50 records, then evaluate held-out tenant data.</td></tr>
-            <tr><td>Classified duplicate-wrapper aliases</td><td><span class="status revise">Revise</span></td><td>No classified generated-support wrapper appeared. Generic duplicate removal stayed diagnostics-only as intended.</td><td>Build a held-out corpus of explicitly classified generated wrappers with exact expansion tests.</td></tr>
+            <tr><td>Integrity rollback &amp; critical-clause shielding</td><td><span class="status accepted">Accepted safety</span></td><td>Rejected model output never counts as savings. The two new cohorts rejected 47 unsafe candidates—35 inline-code and 12 identifier changes—while all 273 completed accepted outputs passed hard-integrity checks.</td><td>Keep unconditional. Expand semantic and entity-relationship evaluation coverage.</td></tr>
+            <tr><td>Strict prose whitespace</td><td><span class="status revise">Revise</span></td><td>The two new profile arms reported eight candidate rewrites, but they produced zero tokenizer savings and no incremental deterministic output change.</td><td>Test prose with actual tokenizer-costly spacing while retaining Markdown and aligned-text exclusions.</td></tr>
+            <tr><td>Safe JSON minification</td><td><span class="status revise">Revise</span></td><td>No minification applied in either new cohort despite detected structured-data candidates. The Delivery Tower skipped-candidate model-input interaction also remains open.</td><td>Make skipped candidates model-input neutral, then rerun the causal matrix.</td></tr>
+            <tr><td>Repeated literal aliases</td><td><span class="status revise">Revise</span></td><td>No eligible repeated long URL or identifier appeared in the fixed corpus or any of the three tenant slices.</td><td>Use held-out prompts with naturally repeated literals and verify exact expansion.</td></tr>
+            <tr><td>Expanded JSON-to-TOON</td><td><span class="status revise">Revise</span></td><td>Tenant 1 produced one incremental application and 39 deterministic tokens. Tenant 2 produced zero incremental tokens because baseline had already made the same two TOON conversions and saved 1,428 tokens.</td><td>Rerun the fixed four-arm matrix with three repeats and downstream constraints before considering promotion.</td></tr>
+            <tr><td>Expanded HTML-to-Markdown</td><td><span class="status revise">Revise</span></td><td>No new cohort applied the transform. Tenant 2 candidates remained below threshold; Tenant 1 had no eligible region.</td><td>Evaluate real article/main HTML with exact link and visible-text preservation.</td></tr>
+            <tr><td>Tenant-approved exact boilerplate</td><td><span class="status pending">Pending</span></td><td>Discovery remains diagnostics-only. All tenant experiment cohorts used the default profile without an approved, versioned phrase set.</td><td>Approve a versioned exact phrase set from at least 50 records, then evaluate held-out tenant data.</td></tr>
+            <tr><td>Classified duplicate-wrapper aliases</td><td><span class="status revise">Revise</span></td><td>No classified generated-support wrapper appeared in either new cohort. Generic duplicate removal stayed diagnostics-only as intended.</td><td>Build a held-out corpus of explicitly classified generated wrappers with exact expansion tests.</td></tr>
           </tbody>
         </table>
       </div>
@@ -536,6 +571,7 @@ EXPERIMENTS_HTML = """
             <li>Populate required terms and task-specific constraints.</li>
             <li>Add relationship, negation, permission, and required-format checks.</li>
             <li>Repair skipped-JSON model-input neutrality.</li>
+            <li>Record harness/API error reasons separately from integrity results.</li>
             <li>Include deliberately eligible records plus a held-out natural sample.</li>
           </ul>
         </div>
@@ -543,7 +579,7 @@ EXPERIMENTS_HTML = """
     </section>
 
     <footer>
-      <span>Current release evidence: deployment 2026.07.13.205912 · compressor commit 019e118 · LLMLingua-2 model revision 5f0c8279.</span>
+      <span>Evidence now spans four cohorts through July 14, 2026 · LLMLingua-2 model revision 5f0c8279.</span>
       <span>This page is cumulative. Revisions add cohorts; they do not overwrite prior decisions.</span>
     </footer>
   </main>

@@ -74,12 +74,20 @@ def nonempty_constraint_record(record: dict[str, Any]) -> bool:
 
 
 def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
-    original_tokens = sum(int(record.get("original_tokens") or 0) for record in records)
+    successful_records = [
+        record for record in records if str(record.get("status") or "").lower() != "error"
+    ]
+    error_records = [
+        record for record in records if str(record.get("status") or "").lower() == "error"
+    ]
+    original_tokens = sum(
+        int(record.get("original_tokens") or 0) for record in successful_records
+    )
     deterministic_tokens = sum(
         int((record.get("stages") or {}).get("deterministicTokens") or record.get("original_tokens") or 0)
-        for record in records
+        for record in successful_records
     )
-    final_tokens = sum(int(record.get("final_tokens") or 0) for record in records)
+    final_tokens = sum(int(record.get("final_tokens") or 0) for record in successful_records)
     deterministic_saved = original_tokens - deterministic_tokens
     model_saved = deterministic_tokens - final_tokens
     total_saved = original_tokens - final_tokens
@@ -117,6 +125,7 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     per_tenant: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
 
     integrity_failures = 0
+    integrity_evaluated = 0
     json_applicable = 0
     json_failures = 0
     protected_applicable = 0
@@ -137,7 +146,7 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     output_rollbacks = 0
     output_rollback_reasons: Counter[str] = Counter()
 
-    for record in records:
+    for record in successful_records:
         stages = record.get("stages") or {}
         original = record.get("original_text") or ""
         deterministic = stages.get("deterministicText")
@@ -208,8 +217,11 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
                 )
         integrity = record.get("integrity") or {}
         validation = record.get("validation") or {}
-        if not validation.get("integrityPassed", True):
-            integrity_failures += 1
+        integrity_result = validation.get("integrityPassed")
+        if integrity_result is not None:
+            integrity_evaluated += 1
+            if integrity_result is False:
+                integrity_failures += 1
         if integrity.get("json_round_trip_applicable"):
             json_applicable += 1
             if not integrity.get("json_round_trip_validation_passed", True):
@@ -256,10 +268,24 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         )
         tenant = per_tenant[tenant_key]
         tenant["records"] += 1
+        tenant["successful_records"] += 1
         tenant["original_tokens"] += original_count
         tenant["deterministic_tokens_saved"] += int(stages.get("deterministicTokensSaved") or 0)
         tenant["model_tokens_saved"] += int(stages.get("modelIncrementalTokensSaved") or 0)
-        tenant["integrity_failures"] += int(not validation.get("integrityPassed", True))
+        if integrity_result is not None:
+            tenant["integrity_evaluated_records"] += 1
+            tenant["integrity_failures"] += int(integrity_result is False)
+
+    for record in error_records:
+        provenance = record.get("provenance") or {}
+        settings = provenance.get("resolved_compression_settings") or {}
+        tenant_key = (
+            str(record.get("tenant_id") or "unknown"),
+            str(settings.get("tenant_profile_id") or "unknown"),
+        )
+        tenant = per_tenant[tenant_key]
+        tenant["records"] += 1
+        tenant["error_records"] += 1
 
     protected = {}
     for kind in sorted(protected_total):
@@ -309,12 +335,16 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "tenant_profile_id": profile_id,
                 **dict(values),
                 "total_reduction": ratio(total, original),
-                "integrity_failure_rate": ratio(values["integrity_failures"], values["records"]),
+                "integrity_failure_rate": ratio(
+                    values["integrity_failures"], values["integrity_evaluated_records"]
+                ),
             }
         )
 
     return {
         "records": len(records),
+        "successful_records": len(successful_records),
+        "error_records": len(error_records),
         "stage_savings": {
             "original_tokens": original_tokens,
             "deterministic_tokens": deterministic_tokens,
@@ -329,17 +359,18 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "pathways": {
             "model_called_records": model_called,
-            "model_call_rate": ratio(model_called, len(records)),
+            "model_call_rate": ratio(model_called, len(successful_records)),
             "deterministic_changed_records": deterministic_changed,
             "model_changed_records": final_changed_after_model,
             "unchanged_records": sum(
                 (record.get("original_text") or "") == (record.get("final_text") or "")
-                for record in records
+                for record in successful_records
             ),
         },
         "integrity": {
+            "integrity_evaluated_records": integrity_evaluated,
             "integrity_failures": integrity_failures,
-            "integrity_failure_rate": ratio(integrity_failures, len(records)),
+            "integrity_failure_rate": ratio(integrity_failures, integrity_evaluated),
             "json_applicable_records": json_applicable,
             "json_failures": json_failures,
             "json_failure_rate_when_applicable": ratio(json_failures, json_applicable),
@@ -353,10 +384,10 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
             "structural_warning_count": structural_warning_count,
             "structural_warning_types": dict(sorted(structural_warning_types.items())),
             "constraint_evaluated_records": constraint_evaluated,
-            "constraint_coverage": ratio(constraint_evaluated, len(records)),
+            "constraint_coverage": ratio(constraint_evaluated, len(successful_records)),
             "constraint_failures": constraint_failures,
             "required_term_evaluated_records": required_term_evaluated,
-            "required_term_coverage": ratio(required_term_evaluated, len(records)),
+            "required_term_coverage": ratio(required_term_evaluated, len(successful_records)),
             "required_term_failures": required_term_failures,
             "output_rollbacks": output_rollbacks,
             "output_rollback_reasons": dict(sorted(output_rollback_reasons.items())),

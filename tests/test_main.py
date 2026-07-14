@@ -320,6 +320,11 @@ def test_experiments_index_returns_evidence_ledger():
     assert "Current phases" in body
     assert "Fixed safety corpus" in body
     assert "Delivery Tower prompt slice" in body
+    assert "Tenant 1" in body
+    assert "Tenant 2" in body
+    assert "47 unsafe model candidates" in body
+    assert "39 deterministic tokens" in body
+    assert "documented evidence cohorts" in body
     assert "Integrity rollback &amp; critical-clause shielding" in body
     assert "json_minify_safe" in body
     assert "safe_stack_v1" in body
