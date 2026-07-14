@@ -2416,7 +2416,7 @@ class PromptCompressionService:
                     preprocessed_text=preprocessed_text,
                     force_dropped_text=force_dropped_text,
                     pipeline_text=deterministic_text,
-                    deterministic_text=(
+                    model_input_text=(
                         prepared.text
                         if llmlingua_called and prepared is not None
                         else deterministic_text
@@ -2432,7 +2432,7 @@ class PromptCompressionService:
                     profile=profile,
                     token_estimator=token_estimator,
                     original_tokens=original_estimate.count,
-                    deterministic_tokens=(
+                    model_input_tokens=(
                         self.estimate_compression_tokens(prepared.text, profile).count
                         if llmlingua_called and prepared is not None
                         else deterministic_estimate.count

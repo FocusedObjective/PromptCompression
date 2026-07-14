@@ -231,14 +231,14 @@ def build_detailed_analytics(
     preprocessed_text: str,
     force_dropped_text: str,
     pipeline_text: str,
-    deterministic_text: str,
+    model_input_text: str,
     final_text: str,
     prepared_segments: list[Any],
     final_segments: list[Any],
     profile: Any,
     token_estimator: str,
     original_tokens: int,
-    deterministic_tokens: int,
+    model_input_tokens: int,
     final_tokens: int,
     target_rate: float,
     model_called: bool,
@@ -266,7 +266,7 @@ def build_detailed_analytics(
         preprocessed_text=preprocessed_text,
         force_dropped_text=force_dropped_text,
         pipeline_text=pipeline_text,
-        deterministic_text=deterministic_text,
+        model_input_text=model_input_text,
         model_output_text=model_output_text,
         final_text=final_text,
         prepared_segments=prepared_segments,
@@ -311,8 +311,6 @@ def build_detailed_analytics(
     provenance = _provenance(service, profile, token_estimator)
     net_model_saved = max(0, post_deterministic_tokens - final_tokens)
     net_deterministic_saved = max(0, original_tokens - post_deterministic_tokens)
-    legacy_model_incremental_saved = max(0, deterministic_tokens - final_tokens)
-    legacy_deterministic_saved = max(0, original_tokens - deterministic_tokens)
     component_saved = sum(
         item.tokens_saved
         for item in transforms
@@ -328,8 +326,8 @@ def build_detailed_analytics(
         configuration_sha256=provenance.configuration_sha256,
         deterministic_sha256=sha256_text(pipeline_text),
     )
-    placeholder_delta = deterministic_tokens - post_deterministic_tokens
-    raw_model_saved = max(0, deterministic_tokens - model_output_tokens)
+    placeholder_delta = model_input_tokens - post_deterministic_tokens
+    raw_model_saved = max(0, model_input_tokens - model_output_tokens)
     total_saved = max(0, original_tokens - final_tokens)
     stages = CompressionStages(
         original=_stage(input_text, original_tokens),
@@ -338,7 +336,7 @@ def build_detailed_analytics(
             net_tokens_saved=net_deterministic_saved,
         ),
         model_input_with_placeholders=StageDiagnostic(
-            **_stage_values(deterministic_text, deterministic_tokens),
+            **_stage_values(model_input_text, model_input_tokens),
             placeholder_token_delta=placeholder_delta,
         ),
         model_output_before_restoration=StageDiagnostic(
@@ -356,11 +354,11 @@ def build_detailed_analytics(
         original_sha256=sha256_text(input_text),
         request_id=resolved_request_id,
         stages=stages,
-        deterministic_text=deterministic_text,
-        deterministic_sha256=sha256_text(deterministic_text),
-        deterministic_characters=len(deterministic_text),
-        deterministic_tokens=deterministic_tokens,
-        deterministic_tokens_saved=legacy_deterministic_saved,
+        deterministic_text=pipeline_text,
+        deterministic_sha256=sha256_text(pipeline_text),
+        deterministic_characters=len(pipeline_text),
+        deterministic_tokens=post_deterministic_tokens,
+        deterministic_tokens_saved=net_deterministic_saved,
         deterministic_transforms=transforms,
         deterministic_gate_reasons=dict(sorted(gate_reasons.items())),
         deterministic_gate_potential_tokens_saved=dict(
@@ -374,24 +372,26 @@ def build_detailed_analytics(
             else "token_estimator_non_additivity_or_overlapping_transforms"
         ),
         candidate_opportunities=opportunities,
-        model_input_sha256=sha256_text(deterministic_text),
-        model_input_characters=len(deterministic_text),
-        model_input_tokens=deterministic_tokens,
+        model_input_sha256=sha256_text(model_input_text),
+        model_input_characters=len(model_input_text),
+        model_input_tokens=model_input_tokens,
         final_sha256=sha256_text(final_text),
         final_characters=len(final_text),
         final_tokens=final_tokens,
-        model_incremental_tokens_saved=legacy_model_incremental_saved,
+        model_incremental_tokens_saved=net_model_saved,
         model_incremental_reduction=(
             0.0
-            if deterministic_tokens <= 0
-            else legacy_model_incremental_saved / deterministic_tokens
+            if post_deterministic_tokens <= 0
+            else net_model_saved / post_deterministic_tokens
         ),
         model_called=model_called,
         model_call_count=model_call_count,
         model_chunk_count=model_chunk_count,
         target_retention_rate=target_rate,
         effective_retention_rate=(
-            1.0 if deterministic_tokens <= 0 else final_tokens / deterministic_tokens
+            1.0
+            if post_deterministic_tokens <= 0
+            else final_tokens / post_deterministic_tokens
         ),
         force_token_count=force_token_count,
         protected_placeholder_count=len(placeholder_tokens),
@@ -422,7 +422,7 @@ def _transform_diagnostics(
     preprocessed_text: str,
     force_dropped_text: str,
     pipeline_text: str,
-    deterministic_text: str,
+    model_input_text: str,
     model_output_text: str,
     final_text: str,
     prepared_segments: list[Any],
@@ -614,9 +614,9 @@ def _transform_diagnostics(
     add(
         "protected_span_substitution",
         pipeline_text,
-        deterministic_text,
+        model_input_text,
         protected_count,
-        applied_count=int(bool(protected_count and pipeline_text != deterministic_text)),
+        applied_count=int(bool(protected_count and pipeline_text != model_input_text)),
         reason="inside_protected_span",
         started=started,
         tokens_saved_override=0,

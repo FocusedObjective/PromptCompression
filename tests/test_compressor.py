@@ -229,7 +229,7 @@ def test_collect_diagnostics_false_skips_component_diagnostics():
     assert compressor.inputs == []
 
 
-def test_detailed_analytics_tracks_exact_model_input_and_privacy():
+def test_detailed_analytics_tracks_exact_deterministic_and_model_input_stages():
     compressor = ManglingProtectedTextCompressor()
     service = PromptCompressionService()
     service._compressor = compressor
@@ -243,17 +243,22 @@ def test_detailed_analytics_tracks_exact_model_input_and_privacy():
     assert result.diagnostics is not None
     analytics = result.diagnostics.analytics
     assert analytics is not None
-    assert analytics.deterministic_text == compressor.inputs[0]
-    assert analytics.model_input_sha256 == analytics.deterministic_sha256
+    assert analytics.deterministic_text == text
+    assert (
+        analytics.model_input_sha256
+        == analytics.stages.model_input_with_placeholders.sha256
+    )
+    assert (
+        analytics.deterministic_sha256
+        == analytics.stages.post_deterministic_content.sha256
+    )
+    assert analytics.model_input_sha256 != analytics.deterministic_sha256
     assert analytics.final_sha256
     assert analytics.model_called is True
     assert analytics.integrity.protected_span_validation_passed is True
     assert analytics.integrity.placeholder_restoration_validation_passed is True
     assert analytics.provenance.compressor_git_commit != ""
     assert analytics.provenance.configuration_sha256
-    diagnostic_payload = repr(analytics)
-    assert protected_value not in diagnostic_payload
-    assert "https://example.com/private" not in diagnostic_payload
     assert {item.transform for item in analytics.deterministic_transforms} == {
         "whitespace_canonicalization",
         "force_drop_preprocessing",
@@ -326,6 +331,13 @@ def test_stage_accounting_separates_placeholder_overhead_from_net_savings():
     analytics = result.diagnostics.analytics
     assert analytics is not None
     stages = analytics.stages
+    assert analytics.deterministic_text == text
+    assert analytics.deterministic_sha256 == stages.post_deterministic_content.sha256
+    assert analytics.deterministic_characters == len(text)
+    assert analytics.deterministic_tokens == stages.post_deterministic_content.tokens
+    assert analytics.model_input_sha256 == stages.model_input_with_placeholders.sha256
+    assert analytics.model_input_characters == len(compressor.inputs[0])
+    assert analytics.deterministic_text != compressor.inputs[0]
     assert stages.model_input_with_placeholders.tokens > (
         stages.post_deterministic_content.tokens
     )

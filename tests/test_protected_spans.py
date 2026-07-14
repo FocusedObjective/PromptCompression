@@ -62,3 +62,14 @@ def test_protected_spans_include_markdown_citations_and_templates():
         ("{request_id}", "template"),
         ("{% if enabled %}", "template"),
     ]
+
+
+def test_url_span_stops_before_html_attribute_and_following_markup():
+    text = (
+        '<a href="https://github.com/tailwindlabs/tailwindcss/releases">'
+        "<code>@tailwindcss/postcss</code>'s release notes</a>"
+    )
+
+    urls = [span.text for span in protected_spans_for_text(text) if span.kind == "url"]
+
+    assert urls == ["https://github.com/tailwindlabs/tailwindcss/releases"]

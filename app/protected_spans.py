@@ -72,7 +72,10 @@ PROTECTED_PATTERN_SPECS = [
             r"|\{[A-Za-z_][A-Za-z0-9_.-]*\}"
         ),
     ),
-    ("url", re.compile(r"https?://\S+", re.IGNORECASE)),
+    # Stop before HTML/template delimiters. ``\S+`` greedily included markup
+    # following href values, producing false integrity failures when prose was
+    # compressed while the URL itself remained intact.
+    ("url", re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)),
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
     ("inline_code", re.compile(r"`[^`]+`")),
     ("money", re.compile(r"\$\s?\d+(?:[.,]\d+)*")),
