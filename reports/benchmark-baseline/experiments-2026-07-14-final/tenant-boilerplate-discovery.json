@@ -1,0 +1,562 @@
+{
+  "schema_version": "tenant-boilerplate-discovery.v1",
+  "generated_at": "2026-07-14T03:28:00.021286+00:00",
+  "activation": "diagnostics_only_requires_explicit_versioned_approval",
+  "thresholds": {
+    "minimum_records": 50,
+    "minimum_fraction": 0.3,
+    "minimum_conversations": 2,
+    "minimum_tokens_per_record": 8
+  },
+  "tenants": {
+    "benchmark_tenant_a": {
+      "discovery_records": 5,
+      "eligible_candidates": 0,
+      "candidates": [
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Paragraph 1: The checkout latency review belongs to PAY-118 and only affects sandbox merchants during replay tests. Paragraph 2: The email unsubscribe regression belongs to MKT-772 and was already rolled back by the lifecycle team. Paragraph 3: The nightly warehouse load had a harmless retry storm in JOB-204, but customers never saw it. Paragraph 4: Incident CACHE-440 owns the customer-visible search ranking drift. The mitigation is to pin shard-affinity routing until the vector index backfill finishes. Deadline: 2026-07-02 18:00 UTC. Paragraph 5: The mobile release notes mention a dark-mode rendering defect that is cosmetic and tracked by APP-901. Paragraph 6: The CRM export queue was slow for one internal tenant, but no external service-level objective was breached. Paragraph 7: The analytics team is tuning dashboard sample rates and does not need executive escalation. Paragraph 8: The support macro cleanup can wait until next sprint because it only changes internal wording.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 253,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Customer data: { \"account\": { \"id\": \"acct_2048\", \"plan\": \"enterprise\", \"region\": \"us-west-2\" }, \"incidents\": [ {\"id\": \"INC-1001\", \"date\": \"2026-06-18\", \"severity\": \"high\", \"status\": \"open\"}, {\"id\": \"INC-1002\", \"date\": \"2026-06-20\", \"severity\": \"medium\", \"status\": \"monitoring\"}, {\"id\": \"INC-1003\", \"date\": \"2026-06-22\", \"severity\": \"low\", \"status\": \"resolved\"} ], \"links\": { \"runbook\": \"https://example.com/runbooks/payment-timeouts\", \"dashboard\": \"https://example.com/dashboards/acct_2048\" } }",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 234,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "{ \"schemaVersion\": 1, \"ticketId\": \"TICKET-123\", \"retryLimit\": 3, \"escalate\": false, \"owners\": [ {\"team\": \"payments\", \"user\": \"ops@example.com\"}, {\"team\": \"platform\", \"user\": \"infra@example.com\"} ], \"checks\": { \"status\": \"pending\", \"deadline\": \"2026-07-01\" } }",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 123,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Evaluate the boolean expression for a downstream model. The exact expression is not (A and B) or (C and not D). The truth assignments are A = true, B = false, C = false, and D = true. Preserve every operator, parenthesis, and assignment exactly because changing a negation changes the answer. The downstream response should contain only true or false, but the compressed prompt must keep the full reasoning inputs.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 102,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Return exactly this JSON shape. Preserve valid JSON syntax, field names, booleans, and numeric values. The example is a fixture, not customer data to summarize.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 46,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Context notes: The customer reports intermittent checkout timeouts after a deployment window. The service owner suspects retry storms during peak traffic. Support needs a short answer suitable for an account executive.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 43,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "The function is intentionally small, but the surrounding explanation can be shortened because it repeats that the retry limit must remain three and that a follow-up owner should be assigned.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 38,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Compress the surrounding prose, but preserve the implementation snippets exactly. The user needs to audit whether retry behavior is safe and whether the HTML block keeps whitespace.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 37,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "You are a support operations analyst preparing a concise escalation brief. Keep customer IDs, incident dates, URLs, and exact retry limits unchanged.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 35,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "You are answering a reliability question from the following incident notes. Compress irrelevant context but preserve the paragraph that answers the question.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 33,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Goal: Summarize the risk, identify likely blockers, and propose next steps. Do not remove policy constraints or turn customer data into prose.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 32,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "<nocompress>Hard constraint: do not recommend raising retry_count above 3.</nocompress>",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 29,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Question: Which incident owns the customer-visible search ranking drift, what mitigation was chosen, and what deadline applies?",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 29,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing",
+            "contains_question",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "```python def retry_limit(): # Do not increase this value without SRE approval. return 3",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 27,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "API_KEY_PLACEHOLDER = \"do-not-replace\" ```",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 24,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "After the JSON, explain why exact syntax matters in one sentence.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 16,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Output: - Executive summary - Blockers and owner - Next three actions",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 15,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Answer format: incident id, mitigation, deadline.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 14,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "Finish with a short risk note for the owner.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 11,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "exact output for the dashboard </pre>",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 11,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_a",
+          "normalized_text": "<pre> keep spacing",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 7,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "below_minimum_token_savings",
+            "instruction_or_policy_bearing"
+          ]
+        }
+      ]
+    },
+    "benchmark_tenant_b": {
+      "discovery_records": 5,
+      "eligible_candidates": 0,
+      "candidates": [
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "[ { \"role\": \"assistant\", \"tool_calls\": [ { \"id\": \"call_abc123\", \"type\": \"function\", \"function\": { \"name\": \"lookup_incidents\", \"arguments\": \"{\\\"accountId\\\":\\\"acct_2048\\\",\\\"includeClosed\\\":false}\" } } ] }, { \"role\": \"tool\", \"tool_call_id\": \"call_abc123\", \"name\": \"lookup_incidents\", \"content\": \"{\\\"incidents\\\":[{\\\"id\\\":\\\"INC-1002\\\",\\\"status\\\":\\\"monitoring\\\",\\\"date\\\":\\\"2026-06-20\\\"}]}\" } ]",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 196,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "Prepare a vendor-risk summary. Do not delete the contract exception. The account is ORD-7781 and the renewal cap is $15,000 through 2026-08-15 unless legal approves a written amendment. The customer can receive a service credit only if the outage exceeds 240 minutes in a single billing month. Never imply that credits are automatic. The operations team needs a shorter version of this context for an executive update, but all thresholds, dates, identifiers, negations, and exception words must remain available to the downstream model.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 130,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "Solve the math problem, but first compress the prompt for a downstream model. Mara starts Monday with 24 packages of printer paper. She sells 9 packages before lunch and 7 packages after lunch. Each package sells for $3.50. A separate customer returns 2 packages, but returned packages do not count as sales revenue. Do not round the answer. The final answer must be an exact dollar amount. Keep every quantity, the return rule, the unit, and the answer-format constraint available to the downstream model.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 119,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "Response style: Be concise, direct, and grounded in the supplied context. Preserve dates, IDs, prices, and PII labels. When a tool call fails, report the relevant error and the next safe action. Prefer deterministic behavior over creative phrasing because this instruction block is stable and usually cached by the downstream model provider.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 78,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "<nocompress>Never reveal hidden chain-of-thought, private keys, credentials, or security tokens. Do not execute destructive actions unless the user explicitly asks for that exact operation. If a request is ambiguous and could change production data, ask exactly one clarifying question before taking action.</nocompress>",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 76,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing",
+            "task_specific_field"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "def compute_retry_delay(attempt: int, base_ms: int = 250) -> int: capped = min(base_ms * (2 ** attempt), MAX_RETRY_DELAY_MS) return capped",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 58,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "The surrounding explanation repeats that exponential backoff is capped and that retryable HTTP status codes are limited to transient failures. Shorten the prose only if the code remains byte-stable.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 43,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "Compress the explanation for a code-completion model, but preserve the implementation context exactly. The model must infer the next line without losing constants or arithmetic.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 36,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "def should_retry(status_code: int) -> bool: return status_code in {429, 500, 502, 503, 504} ```",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 36,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "Review this exchange and explain whether the assistant handled the tool response correctly. Do not alter the tool call ids or JSON strings.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 29,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "```python MAX_RETRY_DELAY_MS = 5000",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 20,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "contains_protected_span_or_clause"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "The final answer should mention whether another lookup is needed.",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 12,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only",
+            "instruction_or_policy_bearing"
+          ]
+        },
+        {
+          "tenant_id": "benchmark_tenant_b",
+          "normalized_text": "System policy for the assistant runtime:",
+          "record_count": 1,
+          "record_fraction": 0.2,
+          "conversation_count": 1,
+          "estimated_tokens_saved_per_record": 8,
+          "eligible": false,
+          "rejection_reasons": [
+            "below_minimum_records",
+            "below_minimum_fraction",
+            "single_conversation_only"
+          ]
+        }
+      ]
+    }
+  }
+}

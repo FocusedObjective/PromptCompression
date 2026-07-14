@@ -192,6 +192,15 @@ def test_index_returns_prompt_compression_ui():
     assert settings_index < tenant_index < docs_index
 
 
+def test_compress_request_rejects_unknown_experiment_profile():
+    response = TestClient(main.app).post(
+        "/compress",
+        json={"text": "hello", "experiment_profile": "not-allowlisted"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_index_http_allows_iframe_embedding():
     client = TestClient(main.app)
 

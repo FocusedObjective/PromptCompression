@@ -81,6 +81,46 @@ class ManglingProtectedTextCompressor(RecordingCompressor):
         }
 
 
+class InjectingUrlCompressor(RecordingCompressor):
+    def compress_prompt_llmlingua2(
+        self,
+        text: str,
+        rate: float,
+        force_tokens: list[str],
+        return_word_label: bool,
+    ) -> dict[str, str | int]:
+        self.inputs.append(text)
+        self.force_tokens_values.append(force_tokens)
+        self.return_word_label_values.append(return_word_label)
+        output = f"{text} https://unapproved.example/injected"
+        return {
+            "compressed_prompt": output,
+            "origin_tokens": len(text.split()),
+            "compressed_tokens": len(output.split()),
+            "fn_labeled_original_prompt": "",
+        }
+
+
+class AlteringCriticalClauseCompressor(RecordingCompressor):
+    def compress_prompt_llmlingua2(
+        self,
+        text: str,
+        rate: float,
+        force_tokens: list[str],
+        return_word_label: bool,
+    ) -> dict[str, str | int]:
+        self.inputs.append(text)
+        self.force_tokens_values.append(force_tokens)
+        self.return_word_label_values.append(return_word_label)
+        output = text.replace("may receive", "will receive")
+        return {
+            "compressed_prompt": output,
+            "origin_tokens": len(text.split()),
+            "compressed_tokens": len(output.split()),
+            "fn_labeled_original_prompt": "",
+        }
+
+
 class FakeTokenizer:
     name_or_path = "fake-tokenizer"
 
@@ -267,6 +307,8 @@ def test_detailed_analytics_tracks_exact_deterministic_and_model_input_stages():
         "html_to_markdown",
         "nocompress_wrapper_handling",
         "exact_duplicate_block_removal",
+        "repeated_literal_aliases",
+        "duplicate_wrapper_aliases",
         "protected_span_substitution",
         "placeholder_restoration",
     }
@@ -275,6 +317,70 @@ def test_detailed_analytics_tracks_exact_deterministic_and_model_input_stages():
         analytics.deterministic_attribution_residual_tokens == 0
         or analytics.deterministic_attribution_residual_reason is not None
     )
+
+
+def test_model_integrity_failure_rolls_back_before_token_accounting():
+    compressor = InjectingUrlCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    text = "Please review this prompt and keep its approved contents."
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    assert result.compressed_text == text
+    assert result.token_savings is not None
+    assert result.token_savings.model_incremental_tokens_saved == 0
+    assert result.token_savings.fallback_used is True
+    assert result.diagnostics is not None
+    assert result.diagnostics.output_rollback_count == 1
+    assert result.diagnostics.output_rollback_reason == "output_rejected_integrity_url"
+    assert result.diagnostics.rejected_output_sha256
+    assert result.diagnostics.analytics is not None
+    assert result.diagnostics.analytics.integrity.output_rollback_count == 1
+    assert result.diagnostics.analytics.provenance.experiment_profile == "baseline"
+
+
+def test_model_critical_clause_change_rolls_back_to_deterministic_output():
+    compressor = AlteringCriticalClauseCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    text = "The customer may receive a credit only if support approves the exception."
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    assert result.compressed_text == text
+    assert result.token_savings is not None
+    assert result.token_savings.model_incremental_tokens_saved == 0
+    assert result.diagnostics is not None
+    assert result.diagnostics.output_rollback_reason == (
+        "output_rejected_integrity_constraint"
+    )
+
+
+def test_experiment_profile_is_resolved_into_provenance_and_thresholds():
+    service = PromptCompressionService()
+    text = "Summary   has     copied spacing."
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        experiment_profile="strict_whitespace_token_positive",
+    )
+
+    assert result.experiment_profile == "strict_whitespace_token_positive"
+    assert result.diagnostics is not None
+    assert result.diagnostics.experiment_profile == result.experiment_profile
+    assert result.diagnostics.analytics is not None
+    provenance = result.diagnostics.analytics.provenance
+    assert provenance.experiment_profile == result.experiment_profile
+    assert provenance.resolved_experiment_profile["min_whitespace_savings_tokens"] == 2
+    assert provenance.configuration_sha256
+    assert provenance.tenant_profile_sha256
 
 
 def test_detailed_analytics_deterministic_only_stage_equals_final():
@@ -783,6 +889,64 @@ def test_duplicate_blocks_are_reported_without_rewriting_output():
     assert result.diagnostics.duplicate_block_candidate_tokens > 0
 
 
+def test_duplicate_wrapper_profile_aliases_only_approved_generated_wrappers():
+    service = PromptCompressionService()
+    service.min_duplicate_block_tokens = 32
+    service.estimate_compression_tokens = lambda value, _profile: TokenEstimate(
+        count=len(value),
+        estimator="test:characters",
+        tokenizer_backed=True,
+    )
+    wrapper = (
+        "Generated support export. Internal routing metadata follows. "
+        "This generated envelope contains stable routing labels for the support "
+        "analytics pipeline and repeats unchanged for every included ticket."
+    )
+    text = f"{wrapper}\n\nTicket A details.\n\n{wrapper}\n\nTicket B details."
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        experiment_profile="duplicate_wrapper_aliases",
+    )
+
+    legend, affected = result.compressed_text.split("\n", 1)
+    alias, canonical = legend.split("=", 1)
+    assert alias.startswith("[D")
+    assert canonical == wrapper
+    assert affected.replace(alias, canonical) == text
+    assert result.diagnostics is not None
+    assert result.diagnostics.duplicate_wrapper_alias_count == 1
+    assert result.diagnostics.duplicate_wrapper_alias_tokens_saved >= 32
+
+
+def test_duplicate_wrapper_profile_rejects_instruction_bearing_wrapper():
+    service = PromptCompressionService()
+    service.min_duplicate_block_tokens = 1
+    service.estimate_compression_tokens = lambda value, _profile: TokenEstimate(
+        count=len(value),
+        estimator="test:characters",
+        tokenizer_backed=True,
+    )
+    wrapper = (
+        "Generated support export. Internal routing metadata follows. "
+        "Do not delete the backup or change the required escalation owner."
+    )
+    text = f"{wrapper}\n\nUnique.\n\n{wrapper}"
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        experiment_profile="duplicate_wrapper_aliases",
+    )
+
+    assert result.compressed_text == text
+    assert result.diagnostics is not None
+    assert result.diagnostics.duplicate_wrapper_alias_count == 0
+
+
 def test_literal_placeholdering_replaces_repeated_long_urls_when_enabled():
     compressor = RecordingCompressor()
     service = build_service_with_pipeline(compressor)
@@ -856,6 +1020,40 @@ def test_literal_placeholdering_does_not_replace_json_values():
     assert result.compressed_text.count(url) == 2
     assert result.diagnostics is not None
     assert result.diagnostics.literal_placeholder_count == 0
+
+
+def test_literal_alias_profile_is_tokenizer_gated_and_round_trips_exactly():
+    service = PromptCompressionService()
+    service.estimate_compression_tokens = lambda value, _profile: TokenEstimate(
+        count=len(value),
+        estimator="test:characters",
+        tokenizer_backed=True,
+    )
+    url = "https://example.com/really/long/path/with/query?alpha=1&beta=2"
+    text = f"Fetch {url}.\nRetry {url} if needed."
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        experiment_profile="literal_aliases_safe",
+    )
+
+    legend, affected = result.compressed_text.split("\n", 1)
+    alias, literal = legend.split("=", 1)
+    assert literal == url
+    assert affected.replace(alias, literal) == text
+    assert result.diagnostics is not None
+    assert result.diagnostics.literal_placeholder_count == 1
+    analytics = result.diagnostics.analytics
+    assert analytics is not None
+    diagnostic = next(
+        item
+        for item in analytics.deterministic_transforms
+        if item.transform == "repeated_literal_aliases"
+    )
+    assert diagnostic.status == "applied"
+    assert diagnostic.tokens_saved >= 16
 
 
 def test_non_ui_compression_skips_word_labels_and_sections():
@@ -936,6 +1134,60 @@ def test_tenant_force_drop_phrases_apply_only_to_compressible_segments():
     assert result.compressed_text == (
         "Review before. Reusable preamble. Keep this exact. Review after."
     )
+
+
+def test_tenant_force_drop_rejects_instruction_bearing_phrase():
+    service = PromptCompressionService()
+    profile = build_tenant_profile(
+        tenant_id="tenant_123",
+        force_drop_phrases=["Do not delete ORD-7781."],
+    )
+    text = "Do not delete ORD-7781. Safe context follows."
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        tenant_profile=profile,
+    )
+
+    assert result.compressed_text == text
+
+
+def test_tenant_boilerplate_experiment_is_request_scoped_and_causal():
+    service = PromptCompressionService()
+    profile = build_tenant_profile(
+        tenant_id="tenant_123",
+        profile_id="tenant_123:approved-v1",
+        force_drop_phrases=["Reusable approved preamble. "],
+    )
+    text = "Reusable approved preamble. Safe context follows."
+
+    baseline = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        tenant_profile=profile,
+        experiment_profile="baseline",
+    )
+    experiment = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        tenant_profile=profile,
+        experiment_profile="tenant_boilerplate_exact",
+    )
+
+    assert baseline.compressed_text == text
+    assert experiment.compressed_text == "Safe context follows."
+    assert baseline.diagnostics is not None
+    baseline_transform = next(
+        transform
+        for transform in baseline.diagnostics.analytics.deterministic_transforms
+        if transform.transform == "force_drop_preprocessing"
+    )
+    assert baseline_transform.enabled is False
+    assert baseline_transform.reason == "tenant_configuration_disabled"
 
 
 def test_adapter_slot_config_parser_accepts_multiple_entries():

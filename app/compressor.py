@@ -10,8 +10,11 @@ from typing import Any
 
 from app.analytics import DetailedAnalytics, build_detailed_analytics
 from app.compression_pipeline import CompressionSegment, PromptPreprocessor
+from app.experiment_profiles import ExperimentProfile, resolve_experiment_profile
+from app.integrity_policy import evaluate_integrity, sha256_text
 from app.protected_spans import (
     ProtectedSpan,
+    critical_clause_spans,
     force_tokens_for_text,
     protected_spans_for_text,
 )
@@ -258,6 +261,7 @@ class CompressionResult:
     compression_path: str = COMPRESSION_PATH_UNCHANGED
     warnings: list[str] = field(default_factory=list)
     token_savings: TokenSavings | None = None
+    experiment_profile: str = "baseline"
 
 
 @dataclass(frozen=True)
@@ -324,6 +328,8 @@ class CompressionDiagnostics:
     json_minified_segment_count: int = 0
     duplicate_block_candidate_count: int = 0
     duplicate_block_candidate_tokens: int = 0
+    duplicate_wrapper_alias_count: int = 0
+    duplicate_wrapper_alias_tokens_saved: int = 0
     compression_mode: str = COMPRESSION_MODE_MODEL_FORCE
     compression_path: str = COMPRESSION_PATH_UNCHANGED
     model_gate_decision: str = "run"
@@ -338,6 +344,10 @@ class CompressionDiagnostics:
     structured_density: float = 0.0
     identifier_density: float = 0.0
     analytics: DetailedAnalytics | None = None
+    experiment_profile: str = "baseline"
+    output_rollback_count: int = 0
+    output_rollback_reason: str | None = None
+    rejected_output_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -433,6 +443,23 @@ class _LiteralPlaceholderingResult:
     segments: list[CompressionSegment]
     placeholder_count: int = 0
     tokens_saved: int = 0
+
+
+@dataclass(frozen=True)
+class _DuplicateWrapperAliasingResult:
+    segments: list[CompressionSegment]
+    alias_count: int = 0
+    tokens_saved: int = 0
+
+
+APPROVED_DUPLICATE_WRAPPER_PREFIXES = (
+    "Generated support export. Internal routing metadata follows.",
+)
+UNSAFE_DUPLICATE_WRAPPER_PATTERN = re.compile(
+    r"\b(?:do\s+not|don't|never|must|shall|should|may|cannot|can't|unless|"
+    r"except|only\s+if|required|delete|remove|change|keep|return|output)\b",
+    re.IGNORECASE,
+)
 
 
 def _elapsed_ms(start: float) -> float:
@@ -737,8 +764,23 @@ class PromptCompressionService:
             return max_force_tokens
         return min(max_force_tokens, self.placeholder_chunk_target)
 
-    def _protected_spans_for_model_input(self, text: str) -> list[ProtectedSpan]:
-        spans = protected_spans_for_text(text)
+    def _protected_spans_for_model_input(
+        self,
+        text: str,
+        *,
+        critical_clause_shielding: bool = False,
+    ) -> list[ProtectedSpan]:
+        candidates = [*protected_spans_for_text(text)]
+        if critical_clause_shielding:
+            candidates.extend(critical_clause_spans(text))
+        spans: list[ProtectedSpan] = []
+        for candidate in sorted(
+            candidates,
+            key=lambda span: (span.start, -(span.end - span.start), span.end),
+        ):
+            if spans and candidate.start < spans[-1].end:
+                continue
+            spans.append(candidate)
         if not spans:
             return spans
         return self._coalesce_protected_spans(text, spans)
@@ -784,6 +826,8 @@ class PromptCompressionService:
         self,
         segments: list[CompressionSegment],
         should_compress_segments: list[bool],
+        *,
+        critical_clause_shielding: bool = False,
     ) -> _PreparedModelInput:
         source_text = "".join(segment.text for segment in segments)
         parts: list[str] = []
@@ -811,7 +855,10 @@ class PromptCompressionService:
         ):
             if should_compress:
                 cursor = 0
-                for span in self._protected_spans_for_model_input(segment.text):
+                for span in self._protected_spans_for_model_input(
+                    segment.text,
+                    critical_clause_shielding=critical_clause_shielding,
+                ):
                     parts.append(segment.text[cursor:span.start])
                     append_placeholder(
                         CompressionSegment(
@@ -963,6 +1010,17 @@ class PromptCompressionService:
         if not tenant_profile.force_drop_phrases:
             return segments
 
+        safe_phrases = [
+            phrase
+            for phrase in tenant_profile.force_drop_phrases
+            if not protected_spans_for_text(phrase)
+            and not critical_clause_spans(phrase)
+            and not UNSAFE_DUPLICATE_WRAPPER_PATTERN.search(phrase)
+            and "?" not in phrase
+        ]
+        if not safe_phrases:
+            return segments
+
         updated_segments: list[CompressionSegment] = []
         for segment in segments:
             if not segment.compressible:
@@ -970,7 +1028,7 @@ class PromptCompressionService:
                 continue
 
             text = segment.text
-            for phrase in tenant_profile.force_drop_phrases:
+            for phrase in safe_phrases:
                 text = self._remove_force_drop_phrase(text, phrase)
             updated_segments.append(
                 CompressionSegment(
@@ -2027,8 +2085,13 @@ class PromptCompressionService:
         tenant_profile: TenantCompressionProfile,
         *,
         exact_output_context: bool,
+        enabled: bool | None = None,
+        minimum_savings_tokens: int | None = None,
+        minimum_reduction: float | None = None,
+        require_tokenizer_backed: bool = False,
     ) -> _LiteralPlaceholderingResult:
-        if not self.literal_placeholdering_enabled or exact_output_context:
+        active = self.literal_placeholdering_enabled if enabled is None else enabled
+        if not active or exact_output_context:
             return _LiteralPlaceholderingResult(segments=segments)
 
         source_text = "".join(segment.text for segment in segments)
@@ -2081,20 +2144,49 @@ class PromptCompressionService:
             )
 
         updated_text = "".join(segment.text for segment in updated_segments)
-        original_tokens = self.estimate_compression_tokens(
+        original_estimate = self.estimate_compression_tokens(
             source_text,
             tenant_profile,
-        ).count
-        updated_tokens = self.estimate_compression_tokens(
+        )
+        updated_estimate = self.estimate_compression_tokens(
             updated_text,
             tenant_profile,
-        ).count
+        )
+        if require_tokenizer_backed and not (
+            original_estimate.tokenizer_backed and updated_estimate.tokenizer_backed
+        ):
+            return _LiteralPlaceholderingResult(segments=segments)
+        original_tokens = original_estimate.count
+        updated_tokens = updated_estimate.count
         tokens_saved = max(0, original_tokens - updated_tokens)
         reduction = 0.0 if original_tokens <= 0 else tokens_saved / original_tokens
+        required_savings = (
+            self.min_literal_placeholder_savings_tokens
+            if minimum_savings_tokens is None
+            else minimum_savings_tokens
+        )
+        required_reduction = (
+            self.min_literal_placeholder_reduction
+            if minimum_reduction is None
+            else minimum_reduction
+        )
         if (
-            tokens_saved < self.min_literal_placeholder_savings_tokens
-            or reduction < self.min_literal_placeholder_reduction
+            tokens_saved < required_savings
+            or reduction < required_reduction
         ):
+            return _LiteralPlaceholderingResult(segments=segments)
+
+        expanded_without_legend = "".join(
+            segment.text
+            for segment in updated_segments
+            if segment.kind != "literal_map"
+        )
+        for literal, placeholder in placeholder_map.items():
+            expanded_without_legend = expanded_without_legend.replace(
+                placeholder,
+                literal,
+            )
+        if expanded_without_legend != source_text:
             return _LiteralPlaceholderingResult(segments=segments)
 
         return _LiteralPlaceholderingResult(
@@ -2128,8 +2220,10 @@ class PromptCompressionService:
     def _literal_candidates_for_text(self, text: str) -> list[str]:
         candidates: list[str] = []
         for span in protected_spans_for_text(text):
-            if span.kind == "url" and len(span.text) >= 32:
-                candidates.append(span.text)
+            if span.kind == "url":
+                literal = span.text.rstrip(".,;:!?)]}")
+                if len(literal) >= 32:
+                    candidates.append(literal)
             elif span.kind in {"constant", "identifier"} and len(span.text) >= 16:
                 candidates.append(span.text)
         return candidates
@@ -2149,6 +2243,121 @@ class PromptCompressionService:
                 break
         return f"[{label}]"
 
+    def _apply_duplicate_wrapper_aliases(
+        self,
+        segments: list[CompressionSegment],
+        tenant_profile: TenantCompressionProfile,
+        *,
+        enabled: bool,
+        require_tokenizer_backed: bool,
+    ) -> _DuplicateWrapperAliasingResult:
+        if not enabled:
+            return _DuplicateWrapperAliasingResult(segments=segments)
+        source_text = "".join(segment.text for segment in segments)
+        blocks: dict[str, list[tuple[int, int, str]]] = {}
+        for segment_index, segment in enumerate(segments):
+            if not segment.compressible:
+                continue
+            for match in re.finditer(r"(?ms)(?:^|(?<=\n\n))(?P<block>\S.*?)(?=\n\s*\n|\Z)", segment.text):
+                block = match.group("block")
+                normalized = self._normalize_duplicate_block(block)
+                if not self._approved_duplicate_wrapper(block, normalized):
+                    continue
+                token_count = self.estimate_compression_tokens(
+                    block,
+                    tenant_profile,
+                ).count
+                if token_count < self.min_duplicate_block_tokens:
+                    continue
+                blocks.setdefault(normalized, []).append(
+                    (segment_index, match.start("block"), block)
+                )
+        repeated = [
+            (normalized, occurrences)
+            for normalized, occurrences in blocks.items()
+            if len(occurrences) >= 2
+        ]
+        if not repeated:
+            return _DuplicateWrapperAliasingResult(segments=segments)
+
+        aliases: dict[str, str] = {}
+        canonical: dict[str, str] = {}
+        for index, (normalized, occurrences) in enumerate(repeated, start=1):
+            alias_index = index
+            alias = f"[D{alias_index}]"
+            while alias in source_text or alias in aliases.values():
+                alias_index += 1
+                alias = f"[D{alias_index}]"
+            aliases[normalized] = alias
+            canonical[normalized] = occurrences[0][2]
+
+        updated_segments: list[CompressionSegment] = []
+        for segment in segments:
+            if not segment.compressible:
+                updated_segments.append(segment)
+                continue
+            updated = segment.text
+            for normalized, alias in aliases.items():
+                updated = updated.replace(canonical[normalized], alias)
+            updated_segments.append(
+                segment
+                if updated == segment.text
+                else CompressionSegment(
+                    text=updated,
+                    compressible=False,
+                    kind="duplicate_wrapper_aliased",
+                    source_text=segment.text,
+                )
+            )
+        legend = "".join(
+            f"{aliases[normalized]}={canonical[normalized]}\n"
+            for normalized, _occurrences in repeated
+        )
+        candidate_segments = [
+            CompressionSegment(
+                text=legend,
+                compressible=False,
+                kind="duplicate_wrapper_map",
+                source_text="",
+            ),
+            *updated_segments,
+        ]
+        candidate_text = "".join(segment.text for segment in candidate_segments)
+        source_estimate = self.estimate_compression_tokens(source_text, tenant_profile)
+        output_estimate = self.estimate_compression_tokens(candidate_text, tenant_profile)
+        if require_tokenizer_backed and not (
+            source_estimate.tokenizer_backed and output_estimate.tokenizer_backed
+        ):
+            return _DuplicateWrapperAliasingResult(segments=segments)
+        saved = source_estimate.count - output_estimate.count
+        reduction = 0.0 if source_estimate.count <= 0 else saved / source_estimate.count
+        if saved < 32 or reduction < 0.10:
+            return _DuplicateWrapperAliasingResult(segments=segments)
+
+        expanded = "".join(
+            segment.text
+            for segment in candidate_segments
+            if segment.kind != "duplicate_wrapper_map"
+        )
+        for normalized, alias in aliases.items():
+            expanded = expanded.replace(alias, canonical[normalized])
+        if expanded != source_text:
+            return _DuplicateWrapperAliasingResult(segments=segments)
+        return _DuplicateWrapperAliasingResult(
+            segments=candidate_segments,
+            alias_count=len(aliases),
+            tokens_saved=saved,
+        )
+
+    def _approved_duplicate_wrapper(self, block: str, normalized: str) -> bool:
+        if not any(normalized.startswith(prefix) for prefix in APPROVED_DUPLICATE_WRAPPER_PREFIXES):
+            return False
+        if "?" in block or UNSAFE_DUPLICATE_WRAPPER_PATTERN.search(block):
+            return False
+        if protected_spans_for_text(block) or critical_clause_spans(block):
+            return False
+        return True
+
     def compress(
         self,
         text: str,
@@ -2163,12 +2372,22 @@ class PromptCompressionService:
         evaluate_disabled_transforms: bool = False,
         evaluation_constraints: dict[str, list[str]] | None = None,
         request_id: str | None = None,
+        experiment_profile: str | ExperimentProfile | None = None,
     ) -> CompressionResult:
         start = time.perf_counter()
         timings = dict.fromkeys(TIMED_PHASES, 0.0)
         profile = tenant_profile or TenantCompressionProfile()
         model_was_loaded = self.is_loaded
         compression_mode = self._normalize_compression_mode(mode)
+        resolved_experiment = resolve_experiment_profile(experiment_profile)
+        tenant_boilerplate_enabled = (
+            experiment_profile is None
+            or resolved_experiment.enable_tenant_boilerplate
+        )
+        active_preprocessor = self._preprocessor_for_experiment(
+            resolved_experiment,
+            profile,
+        )
 
         phase_start = time.perf_counter()
         target_rate = self.target_rate_for_aggressiveness(
@@ -2179,7 +2398,7 @@ class PromptCompressionService:
 
         phase_start = time.perf_counter()
         prepared_segments = (
-            self.preprocessor.prepare(text)
+            active_preprocessor.prepare(text)
             if apply_deterministic_transforms
             else [CompressionSegment(text=text, compressible=True, kind="prose", source_text=text)]
         )
@@ -2189,7 +2408,7 @@ class PromptCompressionService:
         phase_start = time.perf_counter()
         segments = (
             self._apply_force_drop_phrases(prepared_segments, profile)
-            if apply_deterministic_transforms
+            if apply_deterministic_transforms and tenant_boilerplate_enabled
             else prepared_segments
         )
         timings["force_drop_ms"] = _elapsed_ms(phase_start)
@@ -2200,11 +2419,28 @@ class PromptCompressionService:
                 segments,
                 profile,
                 exact_output_context=exact_output_context,
+                enabled=resolved_experiment.enable_literal_aliases,
+                minimum_savings_tokens=(
+                    resolved_experiment.min_literal_alias_savings_tokens
+                ),
+                minimum_reduction=resolved_experiment.min_literal_alias_reduction,
+                require_tokenizer_backed=(
+                    resolved_experiment.require_tokenizer_backed_gates
+                ),
             )
             if apply_deterministic_transforms
             else _LiteralPlaceholderingResult(segments=segments)
         )
         segments = literal_placeholdering.segments
+        duplicate_wrapper_aliasing = self._apply_duplicate_wrapper_aliases(
+            segments,
+            profile,
+            enabled=resolved_experiment.enable_duplicate_wrapper_aliases,
+            require_tokenizer_backed=(
+                resolved_experiment.require_tokenizer_backed_gates
+            ),
+        )
+        segments = duplicate_wrapper_aliasing.segments
         deterministic_text = "".join(segment.text for segment in segments)
 
         phase_start = time.perf_counter()
@@ -2269,7 +2505,13 @@ class PromptCompressionService:
         llmlingua_called = False
         if any(should_compress_segments):
             phase_start = time.perf_counter()
-            prepared = self._prepare_model_input(segments, should_compress_segments)
+            prepared = self._prepare_model_input(
+                segments,
+                should_compress_segments,
+                critical_clause_shielding=(
+                    resolved_experiment.enable_critical_clause_shielding
+                ),
+            )
             timings["model_input_ms"] = _elapsed_ms(phase_start)
 
         phase_start = time.perf_counter()
@@ -2297,6 +2539,9 @@ class PromptCompressionService:
                 prepared = self._prepare_model_input(
                     segments,
                     should_compress_segments,
+                    critical_clause_shielding=(
+                        resolved_experiment.enable_critical_clause_shielding
+                    ),
                 )
                 timings["model_input_ms"] += _elapsed_ms(phase_start)
 
@@ -2323,6 +2568,37 @@ class PromptCompressionService:
             timings["uncompressed_expand_ms"] = _elapsed_ms(phase_start)
 
         compressed_text = expanded.text
+        output_rollback_reason = None
+        rejected_output_sha256 = None
+        if llmlingua_called:
+            required_terms = []
+            if evaluation_constraints:
+                required_terms = [
+                    *evaluation_constraints.get("required_substrings", []),
+                    *evaluation_constraints.get(
+                        "required_whitespace_insensitive_substrings",
+                        [],
+                    ),
+                ]
+            integrity = evaluate_integrity(
+                deterministic_text,
+                compressed_text,
+                placeholder_tokens=(
+                    [] if prepared is None else [item.token for item in prepared.placeholders]
+                ),
+                required_terms=required_terms,
+            )
+            if not integrity.passed:
+                rejected_output_sha256 = sha256_text(compressed_text)
+                failure = integrity.primary_failure or "unknown"
+                output_rollback_reason = f"output_rejected_integrity_{failure}"
+                expanded = self._uncompressed_result_parts(
+                    segments,
+                    include_sections=include_sections,
+                )
+                compressed_text = expanded.text
+                fallback_used = True
+                fallback_reason = output_rollback_reason
         phase_start = time.perf_counter()
         compressed_estimate = (
             deterministic_estimate
@@ -2407,6 +2683,8 @@ class PromptCompressionService:
                 ),
                 duplicate_block_candidate_count=duplicate_blocks.candidate_count,
                 duplicate_block_candidate_tokens=duplicate_blocks.candidate_tokens,
+                duplicate_wrapper_alias_count=duplicate_wrapper_aliasing.alias_count,
+                duplicate_wrapper_alias_tokens_saved=duplicate_wrapper_aliasing.tokens_saved,
                 compression_mode=compression_mode,
                 compression_path=compression_path,
                 model_gate=model_gate,
@@ -2479,14 +2757,36 @@ class PromptCompressionService:
                     evaluation_constraints=evaluation_constraints,
                     request_id=request_id,
                     cold_model_load=llmlingua_called and not model_was_loaded,
+                    preprocessor=active_preprocessor,
+                    experiment_profile=resolved_experiment,
+                    integrity_reference_text=deterministic_text,
+                    output_rollback_reason=output_rollback_reason,
+                    rejected_output_sha256=rejected_output_sha256,
+                    literal_placeholder_count=literal_placeholdering.placeholder_count,
+                    literal_placeholder_tokens_saved=literal_placeholdering.tokens_saved,
+                    literal_aliases_enabled=(
+                        self.literal_placeholdering_enabled
+                        if resolved_experiment.enable_literal_aliases is None
+                        else resolved_experiment.enable_literal_aliases
+                    ),
+                    duplicate_wrapper_alias_count=duplicate_wrapper_aliasing.alias_count,
+                    duplicate_wrapper_alias_tokens_saved=duplicate_wrapper_aliasing.tokens_saved,
+                    duplicate_wrapper_aliases_enabled=(
+                        resolved_experiment.enable_duplicate_wrapper_aliases
+                    ),
+                    tenant_boilerplate_enabled=tenant_boilerplate_enabled,
                 ),
+                experiment_profile=resolved_experiment.profile_id,
+                output_rollback_count=int(output_rollback_reason is not None),
+                output_rollback_reason=output_rollback_reason,
+                rejected_output_sha256=rejected_output_sha256,
             )
             timings["diagnostics_ms"] += _elapsed_ms(phase_start)
-        warnings = (
-            [model_gate.reason]
-            if model_gate.decision == "skip" and model_gate.reason is not None
-            else []
-        )
+        warnings = []
+        if model_gate.decision == "skip" and model_gate.reason is not None:
+            warnings.append(model_gate.reason)
+        if output_rollback_reason is not None:
+            warnings.append(output_rollback_reason)
 
         return CompressionResult(
             compressed_text=compressed_text,
@@ -2509,6 +2809,68 @@ class PromptCompressionService:
             compression_path=compression_path,
             warnings=warnings,
             token_savings=token_savings,
+            experiment_profile=resolved_experiment.profile_id,
+        )
+
+    def _preprocessor_for_experiment(
+        self,
+        experiment: ExperimentProfile,
+        tenant_profile: TenantCompressionProfile,
+    ) -> PromptPreprocessor:
+        base = self.preprocessor
+        return base.clone(
+            strict_prose_whitespace=(
+                base.strict_prose_whitespace
+                if experiment.strict_prose_whitespace is None
+                else experiment.strict_prose_whitespace
+            ),
+            enable_json_minify=(
+                base.enable_json_minify
+                if experiment.enable_json_minify is None
+                else experiment.enable_json_minify
+            ),
+            min_json_chars=(
+                base.min_json_chars
+                if experiment.min_toon_characters is None
+                else experiment.min_toon_characters
+            ),
+            min_json_lines=(
+                base.min_json_lines
+                if experiment.min_toon_lines is None
+                else experiment.min_toon_lines
+            ),
+            min_toon_savings=(
+                base.min_toon_savings
+                if experiment.min_toon_reduction is None
+                else experiment.min_toon_reduction
+            ),
+            min_html_chars=(
+                base.min_html_chars
+                if experiment.min_html_characters is None
+                else experiment.min_html_characters
+            ),
+            min_html_markdown_savings=(
+                base.min_html_markdown_savings
+                if experiment.min_html_reduction is None
+                else experiment.min_html_reduction
+            ),
+            min_json_minify_savings=(
+                base.min_json_minify_savings
+                if experiment.min_json_minify_reduction is None
+                else experiment.min_json_minify_reduction
+            ),
+            token_estimator=lambda value: self.estimate_compression_tokens(
+                value,
+                tenant_profile,
+            ),
+            require_tokenizer_backed_gates=experiment.require_tokenizer_backed_gates,
+            min_whitespace_savings_tokens=experiment.min_whitespace_savings_tokens,
+            min_whitespace_reduction=experiment.min_whitespace_reduction,
+            min_toon_savings_tokens=experiment.min_toon_savings_tokens,
+            min_html_markdown_savings_tokens=experiment.min_html_savings_tokens,
+            min_json_minify_savings_tokens=(
+                experiment.min_json_minify_savings_tokens
+            ),
         )
 
     def _build_diagnostics(
@@ -2545,10 +2907,16 @@ class PromptCompressionService:
         model_incremental_reduction: float,
         duplicate_block_candidate_count: int,
         duplicate_block_candidate_tokens: int,
+        duplicate_wrapper_alias_count: int,
+        duplicate_wrapper_alias_tokens_saved: int,
         compression_mode: str,
         compression_path: str,
         model_gate: _ModelGateEvaluation,
         analytics: DetailedAnalytics | None = None,
+        experiment_profile: str = "baseline",
+        output_rollback_count: int = 0,
+        output_rollback_reason: str | None = None,
+        rejected_output_sha256: str | None = None,
     ) -> CompressionDiagnostics:
         segment_kinds: dict[str, int] = {}
         for segment in segments:
@@ -2636,6 +3004,8 @@ class PromptCompressionService:
             json_minified_segment_count=segment_kinds.get("json_minified", 0),
             duplicate_block_candidate_count=duplicate_block_candidate_count,
             duplicate_block_candidate_tokens=duplicate_block_candidate_tokens,
+            duplicate_wrapper_alias_count=duplicate_wrapper_alias_count,
+            duplicate_wrapper_alias_tokens_saved=duplicate_wrapper_alias_tokens_saved,
             compression_mode=compression_mode,
             compression_path=compression_path,
             model_gate_decision=model_gate.decision,
@@ -2654,6 +3024,10 @@ class PromptCompressionService:
             structured_density=model_gate.structured_density,
             identifier_density=model_gate.identifier_density,
             analytics=analytics,
+            experiment_profile=experiment_profile,
+            output_rollback_count=output_rollback_count,
+            output_rollback_reason=output_rollback_reason,
+            rejected_output_sha256=rejected_output_sha256,
         )
 
 

@@ -1,0 +1,192 @@
+<div id="compression-baseline-0714">
+  <style>
+    #compression-baseline-0714 {
+      color: var(--foreground);
+      display: grid;
+      gap: 24px;
+      width: 100%;
+    }
+    #compression-baseline-0714 .summary {
+      margin-bottom: 2px;
+    }
+    #compression-baseline-0714 figure {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+    }
+    #compression-baseline-0714 figcaption {
+      font-weight: 500;
+    }
+    #compression-baseline-0714 .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      color: var(--muted-foreground);
+    }
+    #compression-baseline-0714 .legend span {
+      align-items: center;
+      display: inline-flex;
+      gap: 6px;
+    }
+    #compression-baseline-0714 .swatch {
+      display: inline-block;
+      height: 10px;
+      width: 10px;
+    }
+    #compression-baseline-0714 .det { background: var(--viz-series-1); }
+    #compression-baseline-0714 .model { background: var(--viz-series-2); }
+    #compression-baseline-0714 .loss { background: var(--viz-series-3); }
+    #compression-baseline-0714 .retained { background: var(--viz-series-1); }
+    #compression-baseline-0714 .bar-list {
+      display: grid;
+      gap: 10px;
+    }
+    #compression-baseline-0714 .bar-row {
+      align-items: center;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 128px minmax(120px, 1fr) 64px;
+    }
+    #compression-baseline-0714 .bar-track {
+      background: var(--muted);
+      display: flex;
+      height: 18px;
+      min-width: 0;
+      overflow: hidden;
+    }
+    #compression-baseline-0714 .bar-segment {
+      display: block;
+      height: 100%;
+      min-width: 0;
+    }
+    #compression-baseline-0714 .axis {
+      color: var(--muted-foreground);
+      display: grid;
+      grid-template-columns: 128px minmax(120px, 1fr) 64px;
+      gap: 10px;
+    }
+    #compression-baseline-0714 .axis-scale {
+      display: flex;
+      justify-content: space-between;
+    }
+    #compression-baseline-0714 .opportunity-list {
+      display: grid;
+      gap: 0;
+    }
+    #compression-baseline-0714 .opportunity-row {
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(130px, 1.2fr) minmax(130px, 2fr) 92px;
+      padding: 9px 0;
+    }
+    #compression-baseline-0714 .opportunity-row:last-child {
+      border-bottom: 0;
+    }
+    #compression-baseline-0714 .opportunity-head {
+      color: var(--muted-foreground);
+    }
+    #compression-baseline-0714 .value {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    #compression-baseline-0714 .note {
+      color: var(--muted-foreground);
+    }
+    @media (max-width: 520px) {
+      #compression-baseline-0714 .bar-row,
+      #compression-baseline-0714 .axis {
+        grid-template-columns: 92px minmax(90px, 1fr) 54px;
+        gap: 7px;
+      }
+      #compression-baseline-0714 .opportunity-row {
+        grid-template-columns: 1fr auto;
+      }
+      #compression-baseline-0714 .opportunity-row > :nth-child(2) {
+        grid-column: 1 / -1;
+        grid-row: 2;
+      }
+      #compression-baseline-0714 .opportunity-head {
+        display: none;
+      }
+    }
+  </style>
+
+  <div class="viz-grid summary" aria-label="Combined baseline summary">
+    <div class="card viz-stat">
+      <div class="text-muted">Total reduction</div>
+      <div class="viz-stat-value">11.54%</div>
+      <div class="text-small">65,430 of 567,133 tokens</div>
+    </div>
+    <div class="card viz-stat">
+      <div class="text-muted">Deterministic share</div>
+      <div class="viz-stat-value">10.0%</div>
+      <div class="text-small">6,533 of 65,430 saved</div>
+    </div>
+    <div class="card viz-stat">
+      <div class="text-muted">Integrity failures</div>
+      <div class="viz-stat-value">3 / 334</div>
+      <div class="text-small">16 protected spans changed</div>
+    </div>
+  </div>
+
+  <figure aria-labelledby="stage-caption">
+    <figcaption id="stage-caption">Token reduction by pipeline stage</figcaption>
+    <div class="legend text-small">
+      <span><i class="swatch det" aria-hidden="true"></i>Deterministic</span>
+      <span><i class="swatch model" aria-hidden="true"></i>LLMLingua-2</span>
+    </div>
+    <div class="bar-list" role="img" aria-label="Cohort one reduced 9.65 percent, cohort two 15.01 percent, cohort three 14.90 percent, and the descriptive combined cohort 11.54 percent. Only cohort one had deterministic token savings.">
+      <div class="axis text-small"><span></span><span class="axis-scale"><span>0%</span><span>8%</span><span>16%</span></span><span></span></div>
+      <div class="bar-row">
+        <span>Cohort 1 · 72</span>
+        <span class="bar-track"><i class="bar-segment det" style="width:11.16%"></i><i class="bar-segment model" style="width:49.18%"></i></span>
+        <span class="value">9.65%</span>
+      </div>
+      <div class="bar-row">
+        <span>Cohort 2 · 162</span>
+        <span class="bar-track"><i class="bar-segment det" style="width:0%"></i><i class="bar-segment model" style="width:93.81%"></i></span>
+        <span class="value">15.01%</span>
+      </div>
+      <div class="bar-row">
+        <span>Cohort 3 · 100</span>
+        <span class="bar-track"><i class="bar-segment det" style="width:0%"></i><i class="bar-segment model" style="width:93.09%"></i></span>
+        <span class="value">14.90%</span>
+      </div>
+      <div class="bar-row">
+        <span>Combined · 334</span>
+        <span class="bar-track"><i class="bar-segment det" style="width:7.20%"></i><i class="bar-segment model" style="width:64.91%"></i></span>
+        <span class="value">11.54%</span>
+      </div>
+    </div>
+  </figure>
+
+  <figure aria-labelledby="retention-caption">
+    <figcaption id="retention-caption">Exact safety-lexeme occurrence retention after LLMLingua-2</figcaption>
+    <div class="legend text-small">
+      <span><i class="swatch retained" aria-hidden="true"></i>Retained</span>
+      <span><i class="swatch loss" aria-hidden="true"></i>Removed or reformatted</span>
+    </div>
+    <div class="bar-list" role="img" aria-label="Combined exact occurrence retention was 91.3 percent for negation, 81.4 percent for obligation, 79.3 percent for scope, 66.7 percent for permission, and 97.8 percent for destructive-action terms.">
+      <div class="bar-row"><span>Negation</span><span class="bar-track"><i class="bar-segment retained" style="width:91.33%"></i><i class="bar-segment loss" style="width:8.67%"></i></span><span class="value">91.3%</span></div>
+      <div class="bar-row"><span>Obligation</span><span class="bar-track"><i class="bar-segment retained" style="width:81.39%"></i><i class="bar-segment loss" style="width:18.61%"></i></span><span class="value">81.4%</span></div>
+      <div class="bar-row"><span>Scope</span><span class="bar-track"><i class="bar-segment retained" style="width:79.33%"></i><i class="bar-segment loss" style="width:20.67%"></i></span><span class="value">79.3%</span></div>
+      <div class="bar-row"><span>Permission</span><span class="bar-track"><i class="bar-segment retained" style="width:66.67%"></i><i class="bar-segment loss" style="width:33.33%"></i></span><span class="value">66.7%</span></div>
+      <div class="bar-row"><span>Destructive</span><span class="bar-track"><i class="bar-segment retained" style="width:97.79%"></i><i class="bar-segment loss" style="width:2.21%"></i></span><span class="value">97.8%</span></div>
+    </div>
+    <div class="note text-small">Diagnostic only: exact deletion can remove redundancy without changing meaning. Constraint and required-term evaluation coverage were both 0%.</div>
+  </figure>
+
+  <figure aria-labelledby="opportunity-caption">
+    <figcaption id="opportunity-caption">Deterministic opportunity inventory</figcaption>
+    <div class="opportunity-list" role="table" aria-label="Deterministic transform candidates, disposition, and realized token savings">
+      <div class="opportunity-row opportunity-head text-small" role="row"><span role="columnheader">Pattern</span><span role="columnheader">Observed disposition</span><span class="value" role="columnheader">Saved</span></div>
+      <div class="opportunity-row" role="row"><span role="cell">JSON → TOON</span><span class="text-small" role="cell">12 applications; 1,614 region candidates</span><span class="value" role="cell">6,533</span></div>
+      <div class="opportunity-row" role="row"><span role="cell">Exact duplicates</span><span class="text-small" role="cell">120 candidates / 7,171 tokens; safety-blocked</span><span class="value" role="cell">0</span></div>
+      <div class="opportunity-row" role="row"><span role="cell">Blank lines</span><span class="text-small" role="cell">12,062 estimated tokens; tokenizer found no savings</span><span class="value" role="cell">0</span></div>
+      <div class="opportunity-row" role="row"><span role="cell">JSON minify</span><span class="text-small" role="cell">1,614 candidates; tenant-disabled; counterfactual unknown</span><span class="value" role="cell">0</span></div>
+      <div class="opportunity-row" role="row"><span role="cell">HTML → Markdown</span><span class="text-small" role="cell">40 candidates; all below minimum size</span><span class="value" role="cell">0</span></div>
+    </div>
+  </figure>
+</div>

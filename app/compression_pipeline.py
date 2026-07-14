@@ -5,11 +5,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from app.token_estimator import TokenEstimate
+
 from app.html_compactor import (
     compact_html_to_markdown,
+    html_to_markdown_is_equivalent,
     should_preserve_html_verbatim,
 )
-from app.toon_adapter import ToonEncodingError, encode_toon
+from app.json_regions import JsonRegionDetector, STRICT_CLASSES
+from app.protected_spans import critical_clause_spans
+from app.toon_adapter import ToonEncodingError, encode_toon, toon_round_trip_matches
 from app.whitespace_normalizer import (
     ENABLE_STRICT_PROSE_WHITESPACE,
     normalize_whitespace,
@@ -118,6 +123,14 @@ class PromptPreprocessor:
         enable_json_minify: bool = ENABLE_JSON_MINIFY,
         min_json_minify_savings: float = MIN_JSON_MINIFY_SAVINGS,
         strict_prose_whitespace: bool = ENABLE_STRICT_PROSE_WHITESPACE,
+        token_estimator: Callable[[str], TokenEstimate] | None = None,
+        require_tokenizer_backed_gates: bool = False,
+        min_whitespace_savings_tokens: int = 0,
+        min_whitespace_reduction: float = 0.0,
+        min_toon_savings_tokens: int = 0,
+        min_html_markdown_savings_tokens: int = 0,
+        min_json_minify_savings_tokens: int = 0,
+        json_region_detector: JsonRegionDetector | None = None,
     ) -> None:
         self.toon_encoder = toon_encoder
         self.min_json_chars = min_json_chars
@@ -130,6 +143,59 @@ class PromptPreprocessor:
         self.enable_json_minify = enable_json_minify
         self.min_json_minify_savings = min_json_minify_savings
         self.strict_prose_whitespace = strict_prose_whitespace
+        self.token_estimator = token_estimator
+        self.require_tokenizer_backed_gates = require_tokenizer_backed_gates
+        self.min_whitespace_savings_tokens = min_whitespace_savings_tokens
+        self.min_whitespace_reduction = min_whitespace_reduction
+        self.min_toon_savings_tokens = min_toon_savings_tokens
+        self.min_html_markdown_savings_tokens = min_html_markdown_savings_tokens
+        self.min_json_minify_savings_tokens = min_json_minify_savings_tokens
+        self.json_region_detector = json_region_detector or JsonRegionDetector()
+
+    def clone(self, **overrides: Any) -> "PromptPreprocessor":
+        values = {
+            "toon_encoder": self.toon_encoder,
+            "min_json_chars": self.min_json_chars,
+            "min_json_lines": self.min_json_lines,
+            "min_toon_savings": self.min_toon_savings,
+            "html_markdown_converter": self.html_markdown_converter,
+            "enable_html_markdown": self.enable_html_markdown,
+            "min_html_chars": self.min_html_chars,
+            "min_html_markdown_savings": self.min_html_markdown_savings,
+            "enable_json_minify": self.enable_json_minify,
+            "min_json_minify_savings": self.min_json_minify_savings,
+            "strict_prose_whitespace": self.strict_prose_whitespace,
+            "token_estimator": self.token_estimator,
+            "require_tokenizer_backed_gates": self.require_tokenizer_backed_gates,
+            "min_whitespace_savings_tokens": self.min_whitespace_savings_tokens,
+            "min_whitespace_reduction": self.min_whitespace_reduction,
+            "min_toon_savings_tokens": self.min_toon_savings_tokens,
+            "min_html_markdown_savings_tokens": self.min_html_markdown_savings_tokens,
+            "min_json_minify_savings_tokens": self.min_json_minify_savings_tokens,
+            "json_region_detector": self.json_region_detector,
+        }
+        values.update(overrides)
+        return PromptPreprocessor(**values)
+
+    def _passes_token_gate(
+        self,
+        source: str,
+        output: str,
+        *,
+        minimum_tokens: int,
+        minimum_reduction: float,
+    ) -> bool:
+        if self.token_estimator is None:
+            return not self.require_tokenizer_backed_gates and minimum_tokens <= 0
+        source_estimate = self.token_estimator(source)
+        output_estimate = self.token_estimator(output)
+        if self.require_tokenizer_backed_gates and not (
+            source_estimate.tokenizer_backed and output_estimate.tokenizer_backed
+        ):
+            return False
+        saved = source_estimate.count - output_estimate.count
+        reduction = 0.0 if source_estimate.count <= 0 else saved / source_estimate.count
+        return saved >= minimum_tokens and saved > 0 and reduction >= minimum_reduction
 
     def prepare(self, text: str) -> list[CompressionSegment]:
         html_markdown_segment = self._html_markdown_segment_for_candidate(text)
@@ -279,33 +345,32 @@ class PromptPreprocessor:
     def _prepare_raw_json_text(self, text: str) -> list[CompressionSegment]:
         segments: list[CompressionSegment] = []
         cursor = 0
-        search_cursor = 0
 
-        while search_cursor < len(text):
-            start = self._find_json_start(text, search_cursor)
-            if start is None:
-                break
-
-            end = self._find_balanced_json_end(text, start)
-            if end is None:
-                break
-
-            candidate = text[start:end]
-            leading_context = text[max(0, cursor) : start]
+        for region in self.json_region_detector.detect(text):
+            if region.start < cursor:
+                continue
+            if region.syntax_class not in STRICT_CLASSES and region.syntax_class not in {
+                "ndjson",
+                "concatenated_json",
+            }:
+                continue
+            if "ambiguous_parent" in region.context_flags:
+                continue
+            candidate = text[region.start:region.end]
+            leading_context = text[:region.start]
             json_segment = self._json_segment_for_candidate(
                 candidate,
                 leading_context=leading_context,
+                allow_rewrite=region.rewrite_eligible,
             )
             if json_segment is None:
-                search_cursor = end
                 continue
 
-            if start > cursor:
-                segments.extend(self._prose_segments(text[cursor:start]))
+            if region.start > cursor:
+                segments.extend(self._prose_segments(text[cursor:region.start]))
 
             segments.append(json_segment)
-            cursor = end
-            search_cursor = end
+            cursor = region.end
 
         # JSON-looking bracketed syntax such as ``[[rapItem: ...]]`` is not
         # necessarily JSON.  Keep every byte that was not emitted as a JSON
@@ -364,9 +429,21 @@ class PromptPreprocessor:
         markdown = self.html_markdown_converter(candidate)
         if markdown is None or not markdown.strip():
             return None
+        if self.require_tokenizer_backed_gates and not html_to_markdown_is_equivalent(
+            candidate,
+            markdown,
+        ):
+            return None
 
         savings = 1.0 - (len(markdown) / len(candidate))
         if savings < self.min_html_markdown_savings:
+            return None
+        if (self.min_html_markdown_savings_tokens or self.require_tokenizer_backed_gates) and not self._passes_token_gate(
+            candidate,
+            markdown,
+            minimum_tokens=self.min_html_markdown_savings_tokens,
+            minimum_reduction=self.min_html_markdown_savings,
+        ):
             return None
 
         return CompressionSegment(
@@ -414,15 +491,42 @@ class PromptPreprocessor:
         if not text:
             return None
 
+        normalization_input = text
+        clause_placeholders: dict[str, str] = {}
+        if self.strict_prose_whitespace:
+            for index, span in reversed(list(enumerate(critical_clause_spans(text)))):
+                placeholder = f"\ue000CKCLAUSE{index}\ue001"
+                clause_placeholders[placeholder] = span.text
+                normalization_input = (
+                    normalization_input[:span.start]
+                    + placeholder
+                    + normalization_input[span.end:]
+                )
         normalized = normalize_whitespace(
-            text,
+            normalization_input,
             strict_prose=self.strict_prose_whitespace,
         )
-        if not normalized.text:
+        normalized_text = normalized.text
+        for placeholder, clause in clause_placeholders.items():
+            normalized_text = normalized_text.replace(placeholder, clause)
+        if not normalized_text:
             return None
+        if (
+            self.strict_prose_whitespace
+            and normalized_text != text
+            and (self.min_whitespace_savings_tokens or self.require_tokenizer_backed_gates)
+            and not self._passes_token_gate(
+                text,
+                normalized_text,
+                minimum_tokens=self.min_whitespace_savings_tokens,
+                minimum_reduction=self.min_whitespace_reduction,
+            )
+        ):
+            normalized = normalize_whitespace(text, strict_prose=False)
+            normalized_text = normalized.text
 
         return CompressionSegment(
-            text=normalized.text,
+            text=normalized_text,
             compressible=normalized.compressible,
             kind=normalized.kind,
             source_text=text,
@@ -434,16 +538,15 @@ class PromptPreprocessor:
         *,
         allow_toon: bool = True,
         leading_context: str = "",
+        allow_rewrite: bool = True,
     ) -> CompressionSegment | None:
-        if not self._is_medium_large_json(candidate):
-            return None
-
         parsed = self._parse_json(candidate)
         if parsed is None:
             return None
 
         if (
             not allow_toon
+            or not allow_rewrite
             or self._context_requires_verbatim_json(leading_context)
             or self._contains_llm_tool_exchange(parsed)
             or self._contains_duplicate_json_keys(candidate)
@@ -455,6 +558,11 @@ class PromptPreprocessor:
                 source_text=candidate,
             )
 
+        if not self._is_medium_large_json(candidate) and not self.enable_json_minify:
+            return None
+        if not self._is_medium_large_json(candidate):
+            return self._json_fallback_segment(candidate, parsed)
+
         try:
             toon = self.toon_encoder(parsed)
         except ToonEncodingError:
@@ -462,9 +570,18 @@ class PromptPreprocessor:
 
         if not toon.strip():
             return self._json_fallback_segment(candidate, parsed)
+        if self.require_tokenizer_backed_gates and not toon_round_trip_matches(parsed, toon):
+            return self._json_fallback_segment(candidate, parsed)
 
         savings = 1.0 - (len(toon) / len(candidate))
         if savings < self.min_toon_savings:
+            return self._json_fallback_segment(candidate, parsed)
+        if (self.min_toon_savings_tokens or self.require_tokenizer_backed_gates) and not self._passes_token_gate(
+            candidate,
+            toon,
+            minimum_tokens=self.min_toon_savings_tokens,
+            minimum_reduction=self.min_toon_savings,
+        ):
             return self._json_fallback_segment(candidate, parsed)
 
         return CompressionSegment(
@@ -498,6 +615,19 @@ class PromptPreprocessor:
 
         savings = 1.0 - (len(minified) / len(candidate))
         if savings < self.min_json_minify_savings:
+            return CompressionSegment(
+                text=candidate,
+                compressible=False,
+                kind="json",
+                source_text=candidate,
+            )
+
+        if (self.min_json_minify_savings_tokens or self.require_tokenizer_backed_gates) and not self._passes_token_gate(
+            candidate,
+            minified,
+            minimum_tokens=self.min_json_minify_savings_tokens,
+            minimum_reduction=self.min_json_minify_savings,
+        ):
             return CompressionSegment(
                 text=candidate,
                 compressible=False,
@@ -570,7 +700,9 @@ class PromptPreprocessor:
         return duplicate_found
 
     def _context_requires_verbatim_json(self, leading_context: str) -> bool:
-        context = leading_context[-300:].lower()
+        heading_matches = list(re.finditer(r"(?m)^#{1,6}\s+.*$", leading_context))
+        section_start = heading_matches[-1].start() if heading_matches else 0
+        context = leading_context[section_start:].lower()
         if not context:
             return False
 

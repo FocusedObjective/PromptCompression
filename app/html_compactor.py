@@ -31,6 +31,33 @@ def compact_html_to_markdown(html: str) -> str | None:
     return normalized or None
 
 
+def html_to_markdown_is_equivalent(html: str, markdown: str) -> bool:
+    """Conservative preservation proof for expanded HTML experiments."""
+
+    parser = _HtmlPreservationParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return False
+    if not parser.has_content_region or parser.rejected:
+        return False
+    cursor = 0
+    normalized_markdown = re.sub(r"\s+", " ", markdown).strip()
+    for value in parser.ordered_text:
+        normalized = re.sub(r"\s+", " ", value).strip()
+        if not normalized:
+            continue
+        index = normalized_markdown.find(normalized, cursor)
+        if index < 0:
+            return False
+        cursor = index + len(normalized)
+    for label, destination in parser.links:
+        if f"[{label}]({destination})" not in markdown:
+            return False
+    return True
+
+
 def should_preserve_html_verbatim(
     html: str,
     *,
@@ -151,6 +178,56 @@ class _FallbackMarkdownParser(HTMLParser):
 
     def markdown(self) -> str:
         return "".join(self.parts)
+
+
+class _HtmlPreservationParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.content_depth = 0
+        self.has_content_region = False
+        self.rejected = False
+        self.ordered_text: list[str] = []
+        self.links: list[tuple[str, str]] = []
+        self._active_link: tuple[str, list[str]] | None = None
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        tag = tag.lower()
+        if tag in {"form", "input", "button", "select", "textarea", "script", "template", "svg", "pre", "code"} or "-" in tag:
+            self.rejected = True
+        if tag in {"main", "article"}:
+            self.content_depth += 1
+            self.has_content_region = True
+        if self.content_depth and tag == "a":
+            destination = dict(attrs).get("href")
+            if destination is None:
+                self.rejected = True
+            else:
+                self._active_link = (destination, [])
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag == "a" and self._active_link is not None:
+            destination, parts = self._active_link
+            label = re.sub(r"\s+", " ", "".join(parts)).strip()
+            if label:
+                self.links.append((label, destination))
+            self._active_link = None
+        if tag in {"main", "article"} and self.content_depth:
+            self.content_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self.content_depth:
+            return
+        value = re.sub(r"\s+", " ", unescape(data)).strip()
+        if not value:
+            return
+        self.ordered_text.append(value)
+        if self._active_link is not None:
+            self._active_link[1].append(value)
 
 
 def fallback_html_to_markdown(html: str) -> str:

@@ -19,7 +19,8 @@ ARG COMPRESSOR_GIT_COMMIT=unknown
 ARG COMPRESSOR_SOURCE_SHA256=unknown
 ENV COMPRESSOR_MODEL=${COMPRESSOR_MODEL} \
     COMPRESSOR_GIT_COMMIT=${COMPRESSOR_GIT_COMMIT} \
-    COMPRESSOR_SOURCE_SHA256=${COMPRESSOR_SOURCE_SHA256}
+    COMPRESSOR_SOURCE_SHA256=${COMPRESSOR_SOURCE_SHA256} \
+    HF_HUB_DISABLE_XET=1
 RUN mkdir -p /cache/huggingface/hub \
     && python -c "from pathlib import Path; from huggingface_hub import snapshot_download; path = snapshot_download('${COMPRESSOR_MODEL}', revision='${COMPRESSOR_MODEL_REVISION}', cache_dir='/cache/huggingface/hub'); Path('/app/model_revision.txt').write_text(Path(path).name, encoding='utf-8')"
 ENV HF_HUB_OFFLINE=1 \

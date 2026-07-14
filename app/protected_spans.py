@@ -55,6 +55,13 @@ CRITICAL_WORDS = [
 ]
 
 PROTECTED_PATTERN_SPECS = [
+    (
+        "code_fence",
+        re.compile(
+            r"(?P<fence>`{3,}|~{3,})[^\n]*\n.*?(?:\n(?P=fence)[ \t]*(?:\n|$)|$)",
+            re.DOTALL,
+        ),
+    ),
     # Markdown and templating syntax are executable/structural data, not prose
     # for a language model to rewrite. Tenant-specific output formats should
     # use <nocompress> rather than expanding this global list.
@@ -102,6 +109,29 @@ PROTECTED_PATTERN_SPECS = [
 ]
 PROTECTED_PATTERNS = [pattern for _, pattern in PROTECTED_PATTERN_SPECS]
 
+CLAUSE_PATTERN = re.compile(r"(?m)(?:^|(?<=[.!?]))[^\n.!?]*[^\s\n.!?][.!?]?")
+CLAUSE_ACTION_PATTERN = re.compile(
+    r"\b(?:add|alter|approve|change|create|delete|deliver|emit|exceed|include|"
+    r"increase|keep|modify|output|preserve|provide|raise|receive|remove|respond|"
+    r"return|send|set|use|write)(?:s|d|ing)?\b",
+    re.IGNORECASE,
+)
+CLAUSE_POLICY_PATTERN = re.compile(
+    r"\b(?:do\s+not|don't|never|without|must(?:\s+not)?|shall(?:\s+not)?|"
+    r"should(?:\s+not)?|may(?:\s+not)?|can(?:not|'t)?|required|permitted|"
+    r"only\s+if|unless|except|scope|within)\b",
+    re.IGNORECASE,
+)
+CLAUSE_FORMAT_PATTERN = re.compile(
+    r"\b(?:required|exact|specified)\s+(?:output\s+)?(?:format|ordering|order|schema)\b",
+    re.IGNORECASE,
+)
+CLAUSE_GOVERNING_VALUE_PATTERN = re.compile(
+    r"\b(?:at|above|below|under|over|equals?|exceeds?|within|before|after)\b.*"
+    r"(?:\d|https?://|\b[A-Z][A-Z0-9_]*(?:[-_][A-Z0-9]+)+\b)",
+    re.IGNORECASE,
+)
+
 
 def protected_spans_for_text(text: str) -> list[ProtectedSpan]:
     candidates: list[ProtectedSpan] = []
@@ -129,6 +159,36 @@ def protected_spans_for_text(text: str) -> list[ProtectedSpan]:
         if spans and candidate.start < spans[-1].end:
             continue
         spans.append(candidate)
+    return spans
+
+
+def critical_clause_spans(text: str) -> list[ProtectedSpan]:
+    """Return complete safety-sensitive clauses for model-stage shielding."""
+
+    spans: list[ProtectedSpan] = []
+    for match in CLAUSE_PATTERN.finditer(text):
+        raw = match.group(0)
+        leading = len(raw) - len(raw.lstrip())
+        clause = raw.strip()
+        if not clause:
+            continue
+        start = match.start() + leading
+        end = start + len(clause)
+        has_action = CLAUSE_ACTION_PATTERN.search(clause) is not None
+        sensitive = (
+            (has_action and CLAUSE_POLICY_PATTERN.search(clause) is not None)
+            or CLAUSE_FORMAT_PATTERN.search(clause) is not None
+            or (has_action and CLAUSE_GOVERNING_VALUE_PATTERN.search(clause) is not None)
+        )
+        if sensitive:
+            spans.append(
+                ProtectedSpan(
+                    start=start,
+                    end=end,
+                    text=clause,
+                    kind="critical_clause",
+                )
+            )
     return spans
 
 

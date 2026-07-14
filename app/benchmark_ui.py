@@ -368,7 +368,7 @@ BENCHMARK_HTML = """
       </label>
       <label class="field">
         Repeats
-        <input id="repeatsInput" type="number" min="1" max="20" step="1" value="1">
+        <input id="repeatsInput" type="number" min="1" max="20" step="1" value="3">
       </label>
       <label class="field">
         Warmup
@@ -385,6 +385,24 @@ BENCHMARK_HTML = """
           <option value="model_auto" selected>Model auto</option>
           <option value="deterministic">Deterministic</option>
         </select>
+      </label>
+      <label class="field">
+        Experiment profile
+        <select id="experimentProfileInput">
+          <option value="baseline" selected>baseline</option>
+          <option value="strict_whitespace_token_positive">strict_whitespace_token_positive</option>
+          <option value="json_minify_safe">json_minify_safe</option>
+          <option value="literal_aliases_safe">literal_aliases_safe</option>
+          <option value="toon_expanded_safe">toon_expanded_safe</option>
+          <option value="html_markdown_expanded_safe">html_markdown_expanded_safe</option>
+          <option value="tenant_boilerplate_exact">tenant_boilerplate_exact</option>
+          <option value="duplicate_wrapper_aliases">duplicate_wrapper_aliases</option>
+          <option value="safe_stack_v1">safe_stack_v1</option>
+        </select>
+      </label>
+      <label class="inline">
+        <input id="applyDeterministicInput" type="checkbox" checked>
+        Apply deterministic transforms
       </label>
       <label class="field">
         Latency budget ms
@@ -512,6 +530,8 @@ BENCHMARK_HTML = """
     const warmupInput = document.getElementById("warmupInput");
     const concurrencyInput = document.getElementById("concurrencyInput");
     const compressionModeInput = document.getElementById("compressionModeInput");
+    const experimentProfileInput = document.getElementById("experimentProfileInput");
+    const applyDeterministicInput = document.getElementById("applyDeterministicInput");
     const latencyBudgetInput = document.getElementById("latencyBudgetInput");
     const allowCpuModelAutoInput = document.getElementById("allowCpuModelAutoInput");
     const aggressivenessInput = document.getElementById("aggressivenessInput");
@@ -823,7 +843,7 @@ BENCHMARK_HTML = """
         case_id: testCase.case_id,
         prompt_id: testCase.case_id,
         cohort_id: currentCohortId,
-        condition_id: compressionModeInput.value,
+        condition_id: `${experimentProfileInput.value}__${compressionModeInput.value}__${applyDeterministicInput.checked ? "det_on" : "det_off"}`,
         repeat,
         target_tokens: testCase.target_tokens,
         json_ratio_target: testCase.json_ratio_target,
@@ -844,6 +864,8 @@ BENCHMARK_HTML = """
       const testCase = buildCase(task.targetTokens, task.jsonRatio, task.htmlRatio);
       const row = baseRow(testCase, task.repeat, task.measured);
       row.requested_compression_mode = compressionModeInput.value;
+      row.requested_experiment_profile = experimentProfileInput.value;
+      row.apply_deterministic_transforms = applyDeterministicInput.checked;
       row.allow_cpu_model_auto_override = allowCpuModelAutoInput.checked;
       row.latency_budget_ms = latencyBudgetInput.value.trim() || "";
       const controller = new AbortController();
@@ -854,6 +876,8 @@ BENCHMARK_HTML = """
           text: testCase.text,
           aggressiveness: Number(aggressivenessInput.value),
           mode: compressionModeInput.value,
+          experiment_profile: experimentProfileInput.value,
+          apply_deterministic_transforms: applyDeterministicInput.checked,
           include_sections: includeSectionsInput.checked,
           include_diagnostics: true,
           evaluate_disabled_transforms: true,
@@ -950,6 +974,7 @@ BENCHMARK_HTML = """
       row.fallback_used = diagnostics.fallback_used;
       row.fallback_reason = diagnostics.fallback_reason || "";
       row.compression_mode = diagnostics.compression_mode || data.compression_mode || "";
+      row.experiment_profile = diagnostics.experiment_profile || data.experiment_profile || "baseline";
       row.compression_path = diagnostics.compression_path || data.compression_path || "";
       row.deterministic_tokens_saved = diagnostics.deterministic_tokens_saved;
       row.deterministic_reduction = diagnostics.deterministic_reduction;
@@ -1207,6 +1232,8 @@ BENCHMARK_HTML = """
       warmupInput.disabled = running;
       concurrencyInput.disabled = running;
       compressionModeInput.disabled = running;
+      experimentProfileInput.disabled = running;
+      applyDeterministicInput.disabled = running;
       latencyBudgetInput.disabled = running;
       allowCpuModelAutoInput.disabled = running;
       includeSectionsInput.disabled = running;

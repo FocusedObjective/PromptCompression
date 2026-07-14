@@ -1,8 +1,10 @@
+import json
 from typing import Any
 
 from app.compression_pipeline import PromptPreprocessor
 from app.compressor import PromptCompressionService
 from app.toon_adapter import ToonEncodingError
+from app.token_estimator import TokenEstimate
 from tests.pipeline_helpers import (
     RecordingCompressor,
     build_service_with_pipeline,
@@ -262,6 +264,53 @@ def test_json_minify_fallback_never_minifies_duplicate_key_json():
     assert not any(
         section.kind == "json_minified" for section in result.output_sections
     )
+
+
+def test_json_minify_safe_profile_uses_absolute_and_relative_token_gates():
+    def reject_toon(_value: object) -> str:
+        raise ToonEncodingError("not suitable for TOON")
+
+    service = PromptCompressionService()
+    service.preprocessor = PromptPreprocessor(toon_encoder=reject_toon)
+    service.estimate_compression_tokens = lambda value, _profile: TokenEstimate(
+        count=len(value),
+        estimator="test:characters",
+        tokenizer_backed=True,
+    )
+    text = '{\n  "ticket": "UT-1042",\n  "status": "open",\n  "retry_limit": 3\n}'
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode="deterministic",
+        experiment_profile="json_minify_safe",
+    )
+
+    assert json.loads(result.compressed_text) == json.loads(text)
+    assert result.compressed_text == '{"ticket":"UT-1042","status":"open","retry_limit":3}'
+    assert result.diagnostics is not None
+    assert result.diagnostics.json_minify_tokens_saved >= 8
+
+
+def test_json_minify_safe_profile_reverts_when_tokenizer_reports_no_savings():
+    service = PromptCompressionService()
+    service.estimate_compression_tokens = lambda _value, _profile: TokenEstimate(
+        count=20,
+        estimator="test:stub",
+        tokenizer_backed=True,
+    )
+    text = '{\n  "ticket": "UT-1042",\n  "status": "open"\n}'
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode="deterministic",
+        experiment_profile="json_minify_safe",
+    )
+
+    assert result.compressed_text == text
+    assert result.diagnostics is not None
+    assert result.diagnostics.json_minify_tokens_saved == 0
 
 
 def test_small_json_does_not_trigger_structured_pipeline():

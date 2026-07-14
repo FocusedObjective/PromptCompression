@@ -1467,6 +1467,8 @@ def compress(
             compression_kwargs["evaluation_constraints"] = (
                 request.evaluation_constraints.model_dump()
             )
+        if request.experiment_profile is not None:
+            compression_kwargs["experiment_profile"] = request.experiment_profile
         if x_request_id:
             compression_kwargs["request_id"] = x_request_id
         result = compression_service.compress(**compression_kwargs)
@@ -1507,6 +1509,7 @@ def compress(
             if request.include_diagnostics and result.diagnostics is not None
             else None
         ),
+        experiment_profile=result.experiment_profile,
     )
 
 

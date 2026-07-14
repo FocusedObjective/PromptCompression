@@ -15,7 +15,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
 
-from app.protected_spans import protected_spans_for_text
+from app.experiment_profiles import ExperimentProfile
+from app.integrity_policy import evaluate_integrity
 from app.version import DEPLOYMENT_VERSION
 
 
@@ -33,6 +34,8 @@ TRANSFORM_CODES = (
     "html_to_markdown",
     "nocompress_wrapper_handling",
     "exact_duplicate_block_removal",
+    "repeated_literal_aliases",
+    "duplicate_wrapper_aliases",
     "protected_span_substitution",
     "placeholder_restoration",
 )
@@ -142,6 +145,7 @@ class CandidateOpportunities:
     duplicate_candidate_tokens: int = 0
     markdown_heading_count: int = 0
     markdown_list_count: int = 0
+    json_syntax_class_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -155,11 +159,19 @@ class IntegrityValidation:
     original_canonical_json_sha256: str | None
     output_canonical_json_sha256: str | None
     placeholder_restoration_validation_passed: bool
+    protected_spans_added_by_type: dict[str, int] = field(default_factory=dict)
+    required_terms_validation_passed: bool = True
+    failure_classes: list[str] = field(default_factory=list)
+    output_rollback_count: int = 0
+    output_rollback_reason: str | None = None
+    rejected_output_sha256: str | None = None
     structural_validation_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class CompressionProvenance:
+    experiment_profile: str
+    resolved_experiment_profile: dict[str, Any]
     compressor_git_commit: str
     compressor_source_sha256: str
     deployment_version: str
@@ -257,7 +269,20 @@ def build_detailed_analytics(
     evaluation_constraints: dict[str, list[str]] | None = None,
     request_id: str | None = None,
     cold_model_load: bool = False,
+    preprocessor: Any | None = None,
+    experiment_profile: ExperimentProfile | None = None,
+    integrity_reference_text: str | None = None,
+    output_rollback_reason: str | None = None,
+    rejected_output_sha256: str | None = None,
+    literal_placeholder_count: int = 0,
+    literal_placeholder_tokens_saved: int = 0,
+    literal_aliases_enabled: bool = False,
+    duplicate_wrapper_alias_count: int = 0,
+    duplicate_wrapper_alias_tokens_saved: int = 0,
+    duplicate_wrapper_aliases_enabled: bool = False,
+    tenant_boilerplate_enabled: bool = True,
 ) -> DetailedAnalytics:
+    active_preprocessor = preprocessor or service.preprocessor
     def estimate(value: str) -> int:
         return service.estimate_compression_tokens(value, profile).count
     transforms = _transform_diagnostics(
@@ -277,9 +302,18 @@ def build_detailed_analytics(
         duplicate_candidate_count=duplicate_candidate_count,
         duplicate_candidate_tokens=duplicate_candidate_tokens,
         evaluate_disabled_transforms=evaluate_disabled_transforms,
+        preprocessor=active_preprocessor,
+        literal_placeholder_count=literal_placeholder_count,
+        literal_placeholder_tokens_saved=literal_placeholder_tokens_saved,
+        literal_aliases_enabled=literal_aliases_enabled,
+        duplicate_wrapper_alias_count=duplicate_wrapper_alias_count,
+        duplicate_wrapper_alias_tokens_saved=duplicate_wrapper_alias_tokens_saved,
+        duplicate_wrapper_aliases_enabled=duplicate_wrapper_aliases_enabled,
+        tenant_boilerplate_enabled=tenant_boilerplate_enabled,
     )
     opportunities = _candidate_opportunities(
         service,
+        active_preprocessor,
         input_text,
         final_segments,
         duplicate_candidate_count,
@@ -304,11 +338,20 @@ def build_detailed_analytics(
             opportunities.json_like_invalid_region_count
         )
     integrity = _integrity_validation(
-        input_text,
+        integrity_reference_text or input_text,
         final_text,
         placeholder_tokens,
+        evaluation_constraints=evaluation_constraints,
+        output_rollback_reason=output_rollback_reason,
+        rejected_output_sha256=rejected_output_sha256,
     )
-    provenance = _provenance(service, profile, token_estimator)
+    provenance = _provenance(
+        service,
+        profile,
+        token_estimator,
+        preprocessor=active_preprocessor,
+        experiment_profile=experiment_profile,
+    )
     net_model_saved = max(0, post_deterministic_tokens - final_tokens)
     net_deterministic_saved = max(0, original_tokens - post_deterministic_tokens)
     component_saved = sum(
@@ -433,6 +476,14 @@ def _transform_diagnostics(
     duplicate_candidate_count: int,
     duplicate_candidate_tokens: int,
     evaluate_disabled_transforms: bool,
+    preprocessor: Any,
+    literal_placeholder_count: int,
+    literal_placeholder_tokens_saved: int,
+    literal_aliases_enabled: bool,
+    duplicate_wrapper_alias_count: int,
+    duplicate_wrapper_alias_tokens_saved: int,
+    duplicate_wrapper_aliases_enabled: bool,
+    tenant_boilerplate_enabled: bool,
 ) -> list[TransformDiagnostic]:
     diagnostics: list[TransformDiagnostic] = []
 
@@ -520,7 +571,7 @@ def _transform_diagnostics(
         "html_to_markdown": "html_markdown",
         "nocompress_wrapper_handling": "nocompress",
     }
-    valid_json_count, invalid_json_count = _json_region_counts(service, input_text)
+    valid_json_count, invalid_json_count = _json_region_counts(preprocessor, input_text)
     whitespace_candidate_count = (
         len(re.findall(r"(?m)^[ \t]*$", input_text))
         + len(re.findall(r"(?m)[ \t]+$", input_text))
@@ -558,12 +609,12 @@ def _transform_diagnostics(
             candidate_count = nocompress_candidate_count
         counterfactual = None
         enabled = True
-        if code == "json_minification" and not service.preprocessor.enable_json_minify:
+        if code == "json_minification" and not preprocessor.enable_json_minify:
             reason = "tenant_configuration_disabled"
             enabled = False
             if evaluate_disabled_transforms:
                 counterfactual = _json_minification_counterfactual(
-                    service, input_text, profile
+                    service, preprocessor, input_text, profile
                 )
         elif candidates and source == output:
             reason = "no_token_savings"
@@ -591,10 +642,11 @@ def _transform_diagnostics(
         force_candidates,
         reason=(
             "tenant_configuration_disabled"
-            if not profile.force_drop_phrases
+            if not profile.force_drop_phrases or not tenant_boilerplate_enabled
             else "no_token_savings"
         ),
         started=started,
+        enabled=tenant_boilerplate_enabled,
     )
     started = time.perf_counter()
     duplicate_chars = _duplicate_candidate_characters(service, final_segments)
@@ -608,6 +660,55 @@ def _transform_diagnostics(
         candidate_characters=duplicate_chars,
         candidate_tokens=duplicate_candidate_tokens,
         started=started,
+    )
+    started = time.perf_counter()
+    literal_segments = [
+        segment for segment in final_segments if segment.kind == "literal_placeholdered"
+    ]
+    literal_legend = "".join(
+        segment.text for segment in final_segments if segment.kind == "literal_map"
+    )
+    literal_source = "".join(
+        segment.source_text or "" for segment in literal_segments
+    )
+    literal_output = literal_legend + "".join(
+        segment.text for segment in literal_segments
+    )
+    add(
+        "repeated_literal_aliases",
+        literal_source,
+        literal_output,
+        literal_placeholder_count,
+        applied_count=int(literal_placeholder_count > 0),
+        reason=(
+            "tenant_configuration_disabled"
+            if not literal_placeholder_count
+            and not literal_aliases_enabled
+            else "no_token_savings"
+        ),
+        started=started,
+        tokens_saved_override=literal_placeholder_tokens_saved,
+    )
+    started = time.perf_counter()
+    wrapper_segments = [
+        segment for segment in final_segments if segment.kind == "duplicate_wrapper_aliased"
+    ]
+    wrapper_legend = "".join(
+        segment.text for segment in final_segments if segment.kind == "duplicate_wrapper_map"
+    )
+    add(
+        "duplicate_wrapper_aliases",
+        "".join(segment.source_text or "" for segment in wrapper_segments),
+        wrapper_legend + "".join(segment.text for segment in wrapper_segments),
+        duplicate_wrapper_alias_count,
+        applied_count=int(duplicate_wrapper_alias_count > 0),
+        reason=(
+            "tenant_configuration_disabled"
+            if not duplicate_wrapper_aliases_enabled
+            else "duplicate_not_structurally_safe_to_remove"
+        ),
+        started=started,
+        tokens_saved_override=duplicate_wrapper_alias_tokens_saved,
     )
     started = time.perf_counter()
     protected_count = len(placeholder_tokens)
@@ -639,12 +740,14 @@ def _transform_diagnostics(
 
 def _candidate_opportunities(
     service: Any,
+    preprocessor: Any,
     text: str,
     segments: list[Any],
     duplicate_count: int,
     duplicate_tokens: int,
 ) -> CandidateOpportunities:
-    valid_json, invalid_json = _json_region_counts(service, text)
+    detected_regions = preprocessor.json_region_detector.detect(text)
+    valid_json, invalid_json = _json_region_counts(preprocessor, text)
     duplicate_chars = _duplicate_candidate_characters(service, segments)
     blank_lines = len(re.findall(r"(?m)^[ \t]*$", text))
     return CandidateOpportunities(
@@ -662,28 +765,27 @@ def _candidate_opportunities(
         duplicate_candidate_tokens=duplicate_tokens,
         markdown_heading_count=len(re.findall(r"(?m)^#{1,6}\s+", text)),
         markdown_list_count=len(re.findall(r"(?m)^\s*(?:[-+*]|\d+[.)])\s+", text)),
+        json_syntax_class_counts=dict(
+            sorted(Counter(region.syntax_class for region in detected_regions).items())
+        ),
     )
 
 
-def _json_region_counts(service: Any, text: str) -> tuple[int, int]:
-    valid = invalid = 0
-    cursor = 0
-    while cursor < len(text):
-        start = service.preprocessor._find_json_start(text, cursor)
-        if start is None:
-            break
-        end = service.preprocessor._find_balanced_json_end(text, start)
-        if end is None:
-            invalid += 1
-            cursor = start + 1
-            continue
-        candidate = text[start:end]
-        try:
-            json.loads(candidate)
-            valid += 1
-        except json.JSONDecodeError:
-            invalid += 1
-        cursor = end
+def _json_region_counts(preprocessor: Any, text: str) -> tuple[int, int]:
+    regions = preprocessor.json_region_detector.detect(text)
+    valid = sum(
+        region.syntax_class in {"strict_json_object", "strict_json_array"}
+        for region in regions
+    )
+    invalid = sum(
+        region.syntax_class in {
+            "invalid_balanced",
+            "invalid_unbalanced",
+            "jsonc_like",
+            "javascript_object_like",
+        }
+        for region in regions
+    )
     return valid, invalid
 
 
@@ -706,36 +808,57 @@ def _integrity_validation(
     original: str,
     output: str,
     placeholder_tokens: list[str],
+    *,
+    evaluation_constraints: dict[str, list[str]] | None = None,
+    output_rollback_reason: str | None = None,
+    rejected_output_sha256: str | None = None,
 ) -> IntegrityValidation:
-    spans = protected_spans_for_text(original)
-    counts = Counter(span.kind for span in spans)
-    protected_values = Counter((span.kind, span.text) for span in spans)
-    missing: Counter[str] = Counter()
-    for (kind, value), expected_count in protected_values.items():
-        missing[kind] += max(0, expected_count - output.count(value))
-    missing = Counter({kind: count for kind, count in missing.items() if count})
-    warnings: list[str] = []
-    if missing:
-        warnings.append("protected_span_missing_or_changed")
-    placeholder_ok = all(token not in output for token in placeholder_tokens)
-    if not placeholder_ok:
-        warnings.append("placeholder_not_restored")
-    original_json = _canonical_json_hash(original)
-    output_json = _canonical_json_hash(output)
-    json_applicable = original_json is not None
-    json_passed = not json_applicable or original_json == output_json
-    if json_applicable and not json_passed:
-        warnings.append("json_round_trip_changed")
+    constraints = evaluation_constraints or {}
+    required_terms = [
+        *constraints.get("required_substrings", []),
+        *constraints.get("required_whitespace_insensitive_substrings", []),
+    ]
+    result = evaluate_integrity(
+        original,
+        output,
+        placeholder_tokens=placeholder_tokens,
+        required_terms=required_terms,
+    )
+    warnings = [f"integrity_{failure}" for failure in result.failure_classes]
+    if output_rollback_reason:
+        warnings.append(output_rollback_reason)
     return IntegrityValidation(
-        protected_span_validation_passed=not missing,
-        protected_span_count_by_type=dict(sorted(counts.items())),
-        protected_spans_missing_by_type=dict(sorted(missing.items())),
-        protected_spans_changed_by_type=dict(sorted(missing.items())),
-        json_round_trip_applicable=json_applicable,
-        json_round_trip_validation_passed=json_passed,
-        original_canonical_json_sha256=original_json,
-        output_canonical_json_sha256=output_json if json_applicable else None,
-        placeholder_restoration_validation_passed=placeholder_ok,
+        protected_span_validation_passed=(
+            not result.protected_spans_missing_by_type
+            and not result.protected_spans_added_by_type
+        ),
+        protected_span_count_by_type=result.protected_span_count_by_type,
+        protected_spans_missing_by_type=result.protected_spans_missing_by_type,
+        protected_spans_changed_by_type={
+            key: (
+                result.protected_spans_missing_by_type.get(key, 0)
+                + result.protected_spans_added_by_type.get(key, 0)
+            )
+            for key in sorted(
+                set(result.protected_spans_missing_by_type)
+                | set(result.protected_spans_added_by_type)
+            )
+        },
+        json_round_trip_applicable=result.json_round_trip_applicable,
+        json_round_trip_validation_passed=(
+            result.json_round_trip_validation_passed
+        ),
+        original_canonical_json_sha256=result.original_canonical_json_sha256,
+        output_canonical_json_sha256=result.output_canonical_json_sha256,
+        placeholder_restoration_validation_passed=(
+            result.placeholder_restoration_validation_passed
+        ),
+        protected_spans_added_by_type=result.protected_spans_added_by_type,
+        required_terms_validation_passed=result.required_terms_validation_passed,
+        failure_classes=list(result.failure_classes),
+        output_rollback_count=int(output_rollback_reason is not None),
+        output_rollback_reason=output_rollback_reason,
+        rejected_output_sha256=rejected_output_sha256,
         structural_validation_warnings=warnings,
     )
 
@@ -763,31 +886,21 @@ def _stage_values(text: str, tokens: int) -> dict[str, str | int]:
 
 def _json_minification_counterfactual(
     service: Any,
+    preprocessor: Any,
     text: str,
     profile: Any,
 ) -> CounterfactualDiagnostic:
-    cursor = 0
     original_parts: list[str] = []
     minified_parts: list[str] = []
-    while cursor < len(text):
-        start = service.preprocessor._find_json_start(text, cursor)
-        if start is None:
-            break
-        end = service.preprocessor._find_balanced_json_end(text, start)
-        if end is None:
-            cursor = start + 1
+    for region in preprocessor.json_region_detector.detect(text):
+        if not region.rewrite_eligible:
             continue
-        candidate = text[start:end]
-        try:
-            value = json.loads(candidate)
-        except json.JSONDecodeError:
-            cursor = end
-            continue
+        candidate = text[region.start:region.end]
+        value = region.parsed_value
         original_parts.append(candidate)
         minified_parts.append(
             json.dumps(value, ensure_ascii=False, separators=(",", ":"))
         )
-        cursor = end
     original = "".join(original_parts)
     minified = "".join(minified_parts)
     original_tokens = (
@@ -889,16 +1002,28 @@ def _repeatability_metadata(
     )
 
 
-def _provenance(service: Any, profile: Any, token_estimator: str) -> CompressionProvenance:
+def _provenance(
+    service: Any,
+    profile: Any,
+    token_estimator: str,
+    *,
+    preprocessor: Any,
+    experiment_profile: ExperimentProfile | None,
+) -> CompressionProvenance:
+    resolved_experiment = experiment_profile or ExperimentProfile("baseline")
     settings = {
         "device": service.device,
         "min_rate": service.min_rate,
         "min_segment_characters": service.min_segment_chars,
         "min_segment_tokens": service.min_segment_tokens,
-        "literal_placeholdering_enabled": service.literal_placeholdering_enabled,
-        "json_minification_enabled": service.preprocessor.enable_json_minify,
-        "html_markdown_enabled": service.preprocessor.enable_html_markdown,
-        "strict_prose_whitespace": service.preprocessor.strict_prose_whitespace,
+        "literal_placeholdering_enabled": (
+            service.literal_placeholdering_enabled
+            if resolved_experiment.enable_literal_aliases is None
+            else resolved_experiment.enable_literal_aliases
+        ),
+        "json_minification_enabled": preprocessor.enable_json_minify,
+        "html_markdown_enabled": preprocessor.enable_html_markdown,
+        "strict_prose_whitespace": preprocessor.strict_prose_whitespace,
         "tenant_id": profile.tenant_id,
         "tenant_profile_id": profile.profile_id,
         "tenant_profile_source": profile.source,
@@ -907,16 +1032,25 @@ def _provenance(service: Any, profile: Any, token_estimator: str) -> Compression
         "tenant_min_rate": profile.min_rate,
     }
     thresholds = {
-        "minimum_json_characters": service.preprocessor.min_json_chars,
-        "minimum_json_lines": service.preprocessor.min_json_lines,
-        "minimum_toon_savings": service.preprocessor.min_toon_savings,
-        "minimum_html_characters": service.preprocessor.min_html_chars,
-        "minimum_html_markdown_savings": service.preprocessor.min_html_markdown_savings,
-        "minimum_json_minify_savings": service.preprocessor.min_json_minify_savings,
+        "minimum_json_characters": preprocessor.min_json_chars,
+        "minimum_json_lines": preprocessor.min_json_lines,
+        "minimum_toon_savings": preprocessor.min_toon_savings,
+        "minimum_toon_savings_tokens": preprocessor.min_toon_savings_tokens,
+        "minimum_html_characters": preprocessor.min_html_chars,
+        "minimum_html_markdown_savings": preprocessor.min_html_markdown_savings,
+        "minimum_html_markdown_savings_tokens": preprocessor.min_html_markdown_savings_tokens,
+        "minimum_json_minify_savings": preprocessor.min_json_minify_savings,
+        "minimum_json_minify_savings_tokens": preprocessor.min_json_minify_savings_tokens,
+        "minimum_whitespace_savings_tokens": preprocessor.min_whitespace_savings_tokens,
+        "minimum_whitespace_reduction": preprocessor.min_whitespace_reduction,
         "minimum_duplicate_block_tokens": service.min_duplicate_block_tokens,
     }
     config_json = json.dumps(
-        {"settings": settings, "thresholds": thresholds},
+        {
+            "experiment_profile": resolved_experiment.export(),
+            "settings": settings,
+            "thresholds": thresholds,
+        },
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -926,12 +1060,14 @@ def _provenance(service: Any, profile: Any, token_estimator: str) -> Compression
             "profile_id": profile.profile_id,
             "source": profile.source,
             "min_rate": profile.min_rate,
-            "force_keep_token_count": len(profile.force_keep_tokens),
-            "force_drop_phrase_count": len(profile.force_drop_phrases),
+            "force_keep_tokens": list(profile.force_keep_tokens),
+            "force_drop_phrases": list(profile.force_drop_phrases),
         },
         sort_keys=True,
     )
     return CompressionProvenance(
+        experiment_profile=resolved_experiment.profile_id,
+        resolved_experiment_profile=resolved_experiment.export(),
         compressor_git_commit=_git_commit(),
         compressor_source_sha256=_source_sha256(),
         deployment_version=DEPLOYMENT_VERSION,
@@ -944,9 +1080,9 @@ def _provenance(service: Any, profile: Any, token_estimator: str) -> Compression
         enabled_deterministic_transforms=[
             "whitespace_canonicalization",
             "force_drop_preprocessing",
-            *( ["json_minification"] if service.preprocessor.enable_json_minify else [] ),
+            *( ["json_minification"] if preprocessor.enable_json_minify else [] ),
             "json_to_toon",
-            *( ["html_to_markdown"] if service.preprocessor.enable_html_markdown else [] ),
+            *( ["html_to_markdown"] if preprocessor.enable_html_markdown else [] ),
             "nocompress_wrapper_handling",
             "protected_span_substitution",
             "placeholder_restoration",

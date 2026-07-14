@@ -1,0 +1,2624 @@
+{
+  "schema_version": "compression-baseline.v1",
+  "privacy": "Aggregate metrics only; prompt text is excluded.",
+  "cohorts": [
+    {
+      "source_file": "cohort-2026-07-14T01-49-00-410Z-8793f196-a164-4ef2-bea3-66850b1aa10c.benchmark-export.v2.json",
+      "cohort_id": "cohort-2026-07-14T01-49-00-410Z-8793f196-a164-4ef2-bea3-66850b1aa10c",
+      "exported_at": "2026-07-14T01:58:40.873Z",
+      "configuration": {
+        "endpoint": "https://compress.usagetap.com/compress",
+        "aggressiveness": 0.25,
+        "concurrency": 2,
+        "imported_prompt_count": 72,
+        "subset_start_record": 1,
+        "subset_max_records": null,
+        "mode": "model_force",
+        "include_sections": false,
+        "include_diagnostics": true,
+        "apply_deterministic_transforms": true,
+        "evaluate_disabled_transforms": true
+      },
+      "provenance": {
+        "compressor_git_commit": [
+          "6cfa689fc738352e44b1fa913a2d2897f83b559f"
+        ],
+        "deployment_version": [
+          "2026.07.13.122324"
+        ],
+        "model_checkpoint": [
+          "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+        ],
+        "model_revision": [
+          "5f0c82792b7ea14c6484e015b6a072009496b7f2"
+        ],
+        "configuration_sha256": [
+          "3a1891efd996c9674d01ff29f9a5dbcc5a9d9d4646b2fe32c52e7210f85d29c7"
+        ]
+      },
+      "metrics": {
+        "records": 72,
+        "stage_savings": {
+          "original_tokens": 365963,
+          "deterministic_tokens": 359430,
+          "final_tokens": 330638,
+          "deterministic_tokens_saved": 6533,
+          "model_tokens_saved": 28792,
+          "total_tokens_saved": 35325,
+          "deterministic_reduction": 0.017851531438970607,
+          "model_incremental_reduction": 0.08010461007706647,
+          "total_reduction": 0.09652615155083984,
+          "deterministic_share_of_savings": 0.18493984430290164
+        },
+        "pathways": {
+          "model_called_records": 21,
+          "model_call_rate": 0.2916666666666667,
+          "deterministic_changed_records": 15,
+          "model_changed_records": 21,
+          "unchanged_records": 51
+        },
+        "integrity": {
+          "integrity_failures": 1,
+          "integrity_failure_rate": 0.013888888888888888,
+          "json_applicable_records": 0,
+          "json_failures": 0,
+          "json_failure_rate_when_applicable": null,
+          "protected_span_applicable_records": 35,
+          "protected_span_failures": 1,
+          "protected_span_failure_rate_when_applicable": 0.02857142857142857,
+          "protected_spans_missing_by_type": {
+            "inline_code": 14
+          },
+          "protected_spans_changed_by_type": {
+            "inline_code": 14
+          },
+          "placeholder_failures": 0,
+          "structural_warning_records": 1,
+          "structural_warning_count": 1,
+          "structural_warning_types": {
+            "protected_span_missing_or_changed": 1
+          },
+          "constraint_evaluated_records": 0,
+          "constraint_coverage": 0.0,
+          "constraint_failures": 0,
+          "required_term_evaluated_records": 0,
+          "required_term_coverage": 0.0,
+          "required_term_failures": 0
+        },
+        "protected_span_retention": {
+          "constant": {
+            "original_occurrences": 5211,
+            "retained_after_deterministic": 5211,
+            "retained_after_final": 5209,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.9996161965073882,
+            "model_input_occurrences": 5211,
+            "retained_across_model": 5209,
+            "model_stage_retention": 0.9996161965073882
+          },
+          "constraint": {
+            "original_occurrences": 74,
+            "retained_after_deterministic": 74,
+            "retained_after_final": 74,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 74,
+            "retained_across_model": 74,
+            "model_stage_retention": 1.0
+          },
+          "identifier": {
+            "original_occurrences": 226,
+            "retained_after_deterministic": 226,
+            "retained_after_final": 226,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 226,
+            "retained_across_model": 226,
+            "model_stage_retention": 1.0
+          },
+          "inline_code": {
+            "original_occurrences": 4535,
+            "retained_after_deterministic": 4535,
+            "retained_after_final": 4521,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.9969128996692392,
+            "model_input_occurrences": 4535,
+            "retained_across_model": 4521,
+            "model_stage_retention": 0.9969128996692392
+          },
+          "number": {
+            "original_occurrences": 1950,
+            "retained_after_deterministic": 1950,
+            "retained_after_final": 1949,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.9994871794871795,
+            "model_input_occurrences": 2022,
+            "retained_across_model": 2021,
+            "model_stage_retention": 0.9995054401582592
+          },
+          "template": {
+            "original_occurrences": 24,
+            "retained_after_deterministic": 24,
+            "retained_after_final": 24,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 25,
+            "retained_across_model": 25,
+            "model_stage_retention": 1.0
+          },
+          "url": {
+            "original_occurrences": 18,
+            "retained_after_deterministic": 18,
+            "retained_after_final": 18,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 18,
+            "retained_across_model": 18,
+            "model_stage_retention": 1.0
+          }
+        },
+        "safety_lexeme_retention": {
+          "negation": {
+            "original_occurrences": 5169,
+            "retained_after_deterministic": 5169,
+            "retained_after_final": 4602,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.8903076030179918,
+            "model_input_occurrences": 5169,
+            "retained_across_model": 4602,
+            "model_stage_retention": 0.8903076030179918
+          },
+          "obligation": {
+            "original_occurrences": 1685,
+            "retained_after_deterministic": 1685,
+            "retained_after_final": 1306,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.7750741839762612,
+            "model_input_occurrences": 1685,
+            "retained_across_model": 1306,
+            "model_stage_retention": 0.7750741839762612
+          },
+          "scope": {
+            "original_occurrences": 2928,
+            "retained_after_deterministic": 2928,
+            "retained_after_final": 2337,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.798155737704918,
+            "model_input_occurrences": 2928,
+            "retained_across_model": 2337,
+            "model_stage_retention": 0.798155737704918
+          },
+          "permission": {
+            "original_occurrences": 912,
+            "retained_after_deterministic": 912,
+            "retained_after_final": 719,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.7883771929824561,
+            "model_input_occurrences": 912,
+            "retained_across_model": 719,
+            "model_stage_retention": 0.7883771929824561
+          },
+          "destructive_action": {
+            "original_occurrences": 213,
+            "retained_after_deterministic": 213,
+            "retained_after_final": 204,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.9577464788732394,
+            "model_input_occurrences": 213,
+            "retained_across_model": 204,
+            "model_stage_retention": 0.9577464788732394
+          }
+        },
+        "deterministic_transforms": {
+          "exact_duplicate_block_removal": {
+            "candidate_count": 114,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 73.38,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 57,
+              "skipped": 15
+            },
+            "gate_reasons": {
+              "no_candidate": 57,
+              "duplicate_not_structurally_safe_to_remove": 114
+            },
+            "gated_estimated_tokens": {}
+          },
+          "force_drop_preprocessing": {
+            "candidate_count": 0,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 13062.564,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 72
+            },
+            "gate_reasons": {
+              "no_candidate": 72
+            },
+            "gated_estimated_tokens": {}
+          },
+          "html_to_markdown": {
+            "candidate_count": 40,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 0.442,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 64,
+              "skipped": 8
+            },
+            "gate_reasons": {
+              "no_candidate": 64,
+              "below_minimum_size": 40
+            },
+            "gated_estimated_tokens": {}
+          },
+          "json_minification": {
+            "candidate_count": 989,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 2215.175,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 57,
+              "skipped": 15
+            },
+            "gate_reasons": {
+              "no_candidate": 57,
+              "tenant_configuration_disabled": 989
+            },
+            "gated_estimated_tokens": {
+              "no_candidate": 0,
+              "tenant_configuration_disabled": 0
+            }
+          },
+          "json_to_toon": {
+            "candidate_count": 989,
+            "applied_count": 12,
+            "tokens_saved": 6533,
+            "elapsed_ms": 1594.21,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 57,
+              "skipped": 3,
+              "applied": 12
+            },
+            "gate_reasons": {
+              "no_candidate": 57,
+              "below_minimum_size": 201
+            },
+            "gated_estimated_tokens": {}
+          },
+          "nocompress_wrapper_handling": {
+            "candidate_count": 0,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 0.309,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 72
+            },
+            "gate_reasons": {
+              "no_candidate": 72
+            },
+            "gated_estimated_tokens": {}
+          },
+          "placeholder_restoration": {
+            "candidate_count": 3831,
+            "applied_count": 3831,
+            "tokens_saved": 0,
+            "elapsed_ms": 12299.688,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 51,
+              "applied": 21
+            },
+            "gate_reasons": {
+              "no_candidate": 51
+            },
+            "gated_estimated_tokens": {}
+          },
+          "protected_span_substitution": {
+            "candidate_count": 3831,
+            "applied_count": 21,
+            "tokens_saved": 0,
+            "elapsed_ms": 12414.58,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 51,
+              "applied": 21
+            },
+            "gate_reasons": {
+              "no_candidate": 51
+            },
+            "gated_estimated_tokens": {}
+          },
+          "whitespace_canonicalization": {
+            "candidate_count": 14434,
+            "applied_count": 15,
+            "tokens_saved": 0,
+            "elapsed_ms": 12484.389,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "skipped": 20,
+              "no_candidate": 37,
+              "no_savings": 15
+            },
+            "gate_reasons": {
+              "no_token_savings": 14419,
+              "no_candidate": 37
+            },
+            "gated_estimated_tokens": {}
+          }
+        },
+        "candidate_opportunities": {
+          "blank_line_count": 9001,
+          "duplicate_candidate_characters": 67290,
+          "duplicate_candidate_tokens": 6459,
+          "estimated_blank_line_removable_tokens": 9001,
+          "exact_duplicate_block_candidate_count": 114,
+          "html_comment_count": 16,
+          "html_region_count": 40,
+          "json_like_invalid_region_count": 782,
+          "markdown_heading_count": 2113,
+          "markdown_list_count": 9690,
+          "multiple_space_run_count": 4366,
+          "toon_eligible_region_count": 16,
+          "trailing_whitespace_line_count": 1067,
+          "valid_json_region_count": 207
+        },
+        "distributions": {
+          "record_reduction_p50": 0.0,
+          "record_reduction_p95": 0.1476510067114094,
+          "latency_ms_p50": 1105.1000000005588,
+          "latency_ms_p95": 70354.975,
+          "model_called_latency_ms_p50": 58674.40000000037,
+          "model_called_latency_ms_p95": 84439.79999999888,
+          "latency_ms_per_1k_tokens_saved": 31340.02264685069,
+          "model_latency_ms_per_1k_model_tokens_saved": 35109.155320922306
+        },
+        "model_deleted_words_top": [
+          {
+            "token": "the",
+            "occurrences_removed": 4619,
+            "affected_records": 21
+          },
+          {
+            "token": "a",
+            "occurrences_removed": 1956,
+            "affected_records": 21
+          },
+          {
+            "token": "is",
+            "occurrences_removed": 1612,
+            "affected_records": 15
+          },
+          {
+            "token": "and",
+            "occurrences_removed": 1337,
+            "affected_records": 18
+          },
+          {
+            "token": "do",
+            "occurrences_removed": 636,
+            "affected_records": 15
+          },
+          {
+            "token": "or",
+            "occurrences_removed": 630,
+            "affected_records": 15
+          },
+          {
+            "token": "that",
+            "occurrences_removed": 604,
+            "affected_records": 15
+          },
+          {
+            "token": "it",
+            "occurrences_removed": 559,
+            "affected_records": 15
+          },
+          {
+            "token": "this",
+            "occurrences_removed": 492,
+            "affected_records": 15
+          },
+          {
+            "token": "when",
+            "occurrences_removed": 470,
+            "affected_records": 15
+          },
+          {
+            "token": "yes",
+            "occurrences_removed": 436,
+            "affected_records": 15
+          },
+          {
+            "token": "to",
+            "occurrences_removed": 430,
+            "affected_records": 18
+          },
+          {
+            "token": "are",
+            "occurrences_removed": 403,
+            "affected_records": 15
+          },
+          {
+            "token": "not",
+            "occurrences_removed": 385,
+            "affected_records": 15
+          },
+          {
+            "token": "you",
+            "occurrences_removed": 323,
+            "affected_records": 15
+          },
+          {
+            "token": "must",
+            "occurrences_removed": 302,
+            "affected_records": 15
+          },
+          {
+            "token": "what",
+            "occurrences_removed": 278,
+            "affected_records": 15
+          },
+          {
+            "token": "in",
+            "occurrences_removed": 261,
+            "affected_records": 15
+          },
+          {
+            "token": "as",
+            "occurrences_removed": 230,
+            "affected_records": 15
+          },
+          {
+            "token": "an",
+            "occurrences_removed": 206,
+            "affected_records": 15
+          },
+          {
+            "token": "be",
+            "occurrences_removed": 193,
+            "affected_records": 15
+          },
+          {
+            "token": "of",
+            "occurrences_removed": 189,
+            "affected_records": 18
+          },
+          {
+            "token": "if",
+            "occurrences_removed": 178,
+            "affected_records": 15
+          },
+          {
+            "token": "its",
+            "occurrences_removed": 165,
+            "affected_records": 15
+          },
+          {
+            "token": "them",
+            "occurrences_removed": 156,
+            "affected_records": 15
+          },
+          {
+            "token": "they",
+            "occurrences_removed": 147,
+            "affected_records": 18
+          },
+          {
+            "token": "these",
+            "occurrences_removed": 141,
+            "affected_records": 15
+          },
+          {
+            "token": "but",
+            "occurrences_removed": 137,
+            "affected_records": 15
+          },
+          {
+            "token": "only",
+            "occurrences_removed": 135,
+            "affected_records": 15
+          },
+          {
+            "token": "any",
+            "occurrences_removed": 133,
+            "affected_records": 15
+          },
+          {
+            "token": "all",
+            "occurrences_removed": 130,
+            "affected_records": 15
+          },
+          {
+            "token": "can",
+            "occurrences_removed": 125,
+            "affected_records": 15
+          },
+          {
+            "token": "applies",
+            "occurrences_removed": 123,
+            "affected_records": 15
+          },
+          {
+            "token": "exactly",
+            "occurrences_removed": 113,
+            "affected_records": 15
+          },
+          {
+            "token": "has",
+            "occurrences_removed": 108,
+            "affected_records": 15
+          },
+          {
+            "token": "i",
+            "occurrences_removed": 108,
+            "affected_records": 15
+          },
+          {
+            "token": "your",
+            "occurrences_removed": 106,
+            "affected_records": 15
+          },
+          {
+            "token": "always",
+            "occurrences_removed": 106,
+            "affected_records": 15
+          },
+          {
+            "token": "no",
+            "occurrences_removed": 103,
+            "affected_records": 13
+          },
+          {
+            "token": "does",
+            "occurrences_removed": 101,
+            "affected_records": 15
+          },
+          {
+            "token": "where",
+            "occurrences_removed": 97,
+            "affected_records": 15
+          },
+          {
+            "token": "on",
+            "occurrences_removed": 95,
+            "affected_records": 13
+          },
+          {
+            "token": "more",
+            "occurrences_removed": 93,
+            "affected_records": 15
+          },
+          {
+            "token": "at",
+            "occurrences_removed": 88,
+            "affected_records": 15
+          },
+          {
+            "token": "would",
+            "occurrences_removed": 80,
+            "affected_records": 15
+          },
+          {
+            "token": "escalation",
+            "occurrences_removed": 70,
+            "affected_records": 15
+          },
+          {
+            "token": "their",
+            "occurrences_removed": 68,
+            "affected_records": 15
+          },
+          {
+            "token": "for",
+            "occurrences_removed": 59,
+            "affected_records": 15
+          },
+          {
+            "token": "already",
+            "occurrences_removed": 59,
+            "affected_records": 15
+          },
+          {
+            "token": "there",
+            "occurrences_removed": 58,
+            "affected_records": 15
+          }
+        ],
+        "tenants": [
+          {
+            "tenant_id": "43e74de1-2c6d-4826-9d9e-6a0187a937af",
+            "tenant_profile_id": "default:base",
+            "records": 72,
+            "original_tokens": 365963,
+            "deterministic_tokens_saved": 6533,
+            "model_tokens_saved": 28792,
+            "integrity_failures": 1,
+            "total_reduction": 0.09652615155083984,
+            "integrity_failure_rate": 0.013888888888888888
+          }
+        ]
+      }
+    },
+    {
+      "source_file": "cohort-2026-07-14T01-25-33-103Z-9d25189a-9a65-459d-8124-f17d3108061f.benchmark-export.v2.json",
+      "cohort_id": "cohort-2026-07-14T01-25-33-103Z-9d25189a-9a65-459d-8124-f17d3108061f",
+      "exported_at": "2026-07-14T01:48:39.960Z",
+      "configuration": {
+        "endpoint": "https://compress.usagetap.com/compress",
+        "aggressiveness": 0.25,
+        "concurrency": 2,
+        "imported_prompt_count": 162,
+        "subset_start_record": 1,
+        "subset_max_records": null,
+        "mode": "model_force",
+        "include_sections": false,
+        "include_diagnostics": true,
+        "apply_deterministic_transforms": true,
+        "evaluate_disabled_transforms": true
+      },
+      "provenance": {
+        "compressor_git_commit": [
+          "6cfa689fc738352e44b1fa913a2d2897f83b559f"
+        ],
+        "deployment_version": [
+          "2026.07.13.122324"
+        ],
+        "model_checkpoint": [
+          "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+        ],
+        "model_revision": [
+          "5f0c82792b7ea14c6484e015b6a072009496b7f2"
+        ],
+        "configuration_sha256": [
+          "3a1891efd996c9674d01ff29f9a5dbcc5a9d9d4646b2fe32c52e7210f85d29c7"
+        ]
+      },
+      "metrics": {
+        "records": 162,
+        "stage_savings": {
+          "original_tokens": 123714,
+          "deterministic_tokens": 123714,
+          "final_tokens": 105146,
+          "deterministic_tokens_saved": 0,
+          "model_tokens_saved": 18568,
+          "total_tokens_saved": 18568,
+          "deterministic_reduction": 0.0,
+          "model_incremental_reduction": 0.15008810643904488,
+          "total_reduction": 0.15008810643904488,
+          "deterministic_share_of_savings": 0.0
+        },
+        "pathways": {
+          "model_called_records": 162,
+          "model_call_rate": 1.0,
+          "deterministic_changed_records": 13,
+          "model_changed_records": 162,
+          "unchanged_records": 0
+        },
+        "integrity": {
+          "integrity_failures": 0,
+          "integrity_failure_rate": 0.0,
+          "json_applicable_records": 0,
+          "json_failures": 0,
+          "json_failure_rate_when_applicable": null,
+          "protected_span_applicable_records": 162,
+          "protected_span_failures": 0,
+          "protected_span_failure_rate_when_applicable": 0.0,
+          "protected_spans_missing_by_type": {},
+          "protected_spans_changed_by_type": {},
+          "placeholder_failures": 0,
+          "structural_warning_records": 0,
+          "structural_warning_count": 0,
+          "structural_warning_types": {},
+          "constraint_evaluated_records": 0,
+          "constraint_coverage": 0.0,
+          "constraint_failures": 0,
+          "required_term_evaluated_records": 0,
+          "required_term_coverage": 0.0,
+          "required_term_failures": 0
+        },
+        "protected_span_retention": {
+          "constant": {
+            "original_occurrences": 464,
+            "retained_after_deterministic": 464,
+            "retained_after_final": 464,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 464,
+            "retained_across_model": 464,
+            "model_stage_retention": 1.0
+          },
+          "email": {
+            "original_occurrences": 1,
+            "retained_after_deterministic": 1,
+            "retained_after_final": 1,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 1,
+            "retained_across_model": 1,
+            "model_stage_retention": 1.0
+          },
+          "identifier": {
+            "original_occurrences": 3,
+            "retained_after_deterministic": 3,
+            "retained_after_final": 3,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 3,
+            "retained_across_model": 3,
+            "model_stage_retention": 1.0
+          },
+          "inline_code": {
+            "original_occurrences": 356,
+            "retained_after_deterministic": 356,
+            "retained_after_final": 356,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 356,
+            "retained_across_model": 356,
+            "model_stage_retention": 1.0
+          },
+          "markdown_link": {
+            "original_occurrences": 61,
+            "retained_after_deterministic": 61,
+            "retained_after_final": 61,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 61,
+            "retained_across_model": 61,
+            "model_stage_retention": 1.0
+          },
+          "number": {
+            "original_occurrences": 3119,
+            "retained_after_deterministic": 3119,
+            "retained_after_final": 3119,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 3119,
+            "retained_across_model": 3119,
+            "model_stage_retention": 1.0
+          },
+          "template": {
+            "original_occurrences": 70,
+            "retained_after_deterministic": 70,
+            "retained_after_final": 70,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 70,
+            "retained_across_model": 70,
+            "model_stage_retention": 1.0
+          },
+          "url": {
+            "original_occurrences": 42,
+            "retained_after_deterministic": 42,
+            "retained_after_final": 42,
+            "deterministic_retention": 1.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 42,
+            "retained_across_model": 42,
+            "model_stage_retention": 1.0
+          }
+        },
+        "safety_lexeme_retention": {
+          "negation": {
+            "original_occurrences": 1104,
+            "retained_after_deterministic": 1104,
+            "retained_after_final": 1087,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.9846014492753623,
+            "model_input_occurrences": 1104,
+            "retained_across_model": 1087,
+            "model_stage_retention": 0.9846014492753623
+          },
+          "obligation": {
+            "original_occurrences": 268,
+            "retained_after_deterministic": 268,
+            "retained_after_final": 261,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.9738805970149254,
+            "model_input_occurrences": 268,
+            "retained_across_model": 261,
+            "model_stage_retention": 0.9738805970149254
+          },
+          "scope": {
+            "original_occurrences": 529,
+            "retained_after_deterministic": 529,
+            "retained_after_final": 407,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.7693761814744802,
+            "model_input_occurrences": 529,
+            "retained_across_model": 407,
+            "model_stage_retention": 0.7693761814744802
+          },
+          "permission": {
+            "original_occurrences": 261,
+            "retained_after_deterministic": 261,
+            "retained_after_final": 107,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.4099616858237548,
+            "model_input_occurrences": 261,
+            "retained_across_model": 107,
+            "model_stage_retention": 0.4099616858237548
+          },
+          "destructive_action": {
+            "original_occurrences": 317,
+            "retained_after_deterministic": 317,
+            "retained_after_final": 312,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.9842271293375394,
+            "model_input_occurrences": 317,
+            "retained_across_model": 312,
+            "model_stage_retention": 0.9842271293375394
+          }
+        },
+        "deterministic_transforms": {
+          "exact_duplicate_block_removal": {
+            "candidate_count": 6,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 47.598,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 160,
+              "skipped": 2
+            },
+            "gate_reasons": {
+              "no_candidate": 160,
+              "duplicate_not_structurally_safe_to_remove": 6
+            },
+            "gated_estimated_tokens": {}
+          },
+          "force_drop_preprocessing": {
+            "candidate_count": 0,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 22167.536,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 162
+            },
+            "gate_reasons": {
+              "no_candidate": 162
+            },
+            "gated_estimated_tokens": {}
+          },
+          "html_to_markdown": {
+            "candidate_count": 0,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 0.742,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 162
+            },
+            "gate_reasons": {
+              "no_candidate": 162
+            },
+            "gated_estimated_tokens": {}
+          },
+          "json_minification": {
+            "candidate_count": 383,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 4298.375,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "skipped": 86,
+              "no_candidate": 76
+            },
+            "gate_reasons": {
+              "tenant_configuration_disabled": 383,
+              "no_candidate": 76
+            },
+            "gated_estimated_tokens": {
+              "tenant_configuration_disabled": 0,
+              "no_candidate": 0
+            }
+          },
+          "json_to_toon": {
+            "candidate_count": 383,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 1.381,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "skipped": 86,
+              "no_candidate": 76
+            },
+            "gate_reasons": {
+              "json_parse_failed": 283,
+              "below_minimum_size": 100,
+              "no_candidate": 76
+            },
+            "gated_estimated_tokens": {}
+          },
+          "nocompress_wrapper_handling": {
+            "candidate_count": 0,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 0.628,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 162
+            },
+            "gate_reasons": {
+              "no_candidate": 162
+            },
+            "gated_estimated_tokens": {}
+          },
+          "placeholder_restoration": {
+            "candidate_count": 3094,
+            "applied_count": 3094,
+            "tokens_saved": 0,
+            "elapsed_ms": 22409.37,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "applied": 162
+            },
+            "gate_reasons": {},
+            "gated_estimated_tokens": {}
+          },
+          "protected_span_substitution": {
+            "candidate_count": 3094,
+            "applied_count": 162,
+            "tokens_saved": 0,
+            "elapsed_ms": 22297.523,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "applied": 162
+            },
+            "gate_reasons": {},
+            "gated_estimated_tokens": {}
+          },
+          "whitespace_canonicalization": {
+            "candidate_count": 1994,
+            "applied_count": 13,
+            "tokens_saved": 0,
+            "elapsed_ms": 22103.068,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "skipped": 149,
+              "no_savings": 13
+            },
+            "gate_reasons": {
+              "no_token_savings": 1981
+            },
+            "gated_estimated_tokens": {}
+          }
+        },
+        "candidate_opportunities": {
+          "blank_line_count": 1904,
+          "duplicate_candidate_characters": 3086,
+          "duplicate_candidate_tokens": 712,
+          "estimated_blank_line_removable_tokens": 1904,
+          "exact_duplicate_block_candidate_count": 6,
+          "html_comment_count": 22,
+          "html_region_count": 0,
+          "json_like_invalid_region_count": 318,
+          "markdown_heading_count": 170,
+          "markdown_list_count": 1926,
+          "multiple_space_run_count": 63,
+          "toon_eligible_region_count": 0,
+          "trailing_whitespace_line_count": 27,
+          "valid_json_region_count": 65
+        },
+        "distributions": {
+          "record_reduction_p50": 0.15361037673496364,
+          "record_reduction_p95": 0.19184432989690703,
+          "latency_ms_p50": 5437.700000000186,
+          "latency_ms_p95": 11324.909999999309,
+          "model_called_latency_ms_p50": 5437.700000000186,
+          "model_called_latency_ms_p95": 11324.909999999309,
+          "latency_ms_per_1k_tokens_saved": 52991.51227919052,
+          "model_latency_ms_per_1k_model_tokens_saved": 52991.51227919052
+        },
+        "model_deleted_words_top": [
+          {
+            "token": "the",
+            "occurrences_removed": 1595,
+            "affected_records": 158
+          },
+          {
+            "token": "and",
+            "occurrences_removed": 1436,
+            "affected_records": 153
+          },
+          {
+            "token": "a",
+            "occurrences_removed": 1080,
+            "affected_records": 143
+          },
+          {
+            "token": "is",
+            "occurrences_removed": 635,
+            "affected_records": 116
+          },
+          {
+            "token": "this",
+            "occurrences_removed": 426,
+            "affected_records": 147
+          },
+          {
+            "token": "if",
+            "occurrences_removed": 337,
+            "affected_records": 78
+          },
+          {
+            "token": "are",
+            "occurrences_removed": 290,
+            "affected_records": 113
+          },
+          {
+            "token": "or",
+            "occurrences_removed": 286,
+            "affected_records": 89
+          },
+          {
+            "token": "that",
+            "occurrences_removed": 276,
+            "affected_records": 98
+          },
+          {
+            "token": "it",
+            "occurrences_removed": 275,
+            "affected_records": 90
+          },
+          {
+            "token": "an",
+            "occurrences_removed": 252,
+            "affected_records": 122
+          },
+          {
+            "token": "do",
+            "occurrences_removed": 244,
+            "affected_records": 128
+          },
+          {
+            "token": "means",
+            "occurrences_removed": 234,
+            "affected_records": 18
+          },
+          {
+            "token": "you",
+            "occurrences_removed": 232,
+            "affected_records": 89
+          },
+          {
+            "token": "to",
+            "occurrences_removed": 138,
+            "affected_records": 82
+          },
+          {
+            "token": "how",
+            "occurrences_removed": 138,
+            "affected_records": 74
+          },
+          {
+            "token": "for",
+            "occurrences_removed": 133,
+            "affected_records": 72
+          },
+          {
+            "token": "whether",
+            "occurrences_removed": 130,
+            "affected_records": 60
+          },
+          {
+            "token": "in",
+            "occurrences_removed": 120,
+            "affected_records": 67
+          },
+          {
+            "token": "was",
+            "occurrences_removed": 117,
+            "affected_records": 64
+          },
+          {
+            "token": "will",
+            "occurrences_removed": 116,
+            "affected_records": 84
+          },
+          {
+            "token": "with",
+            "occurrences_removed": 116,
+            "affected_records": 50
+          },
+          {
+            "token": "be",
+            "occurrences_removed": 108,
+            "affected_records": 68
+          },
+          {
+            "token": "when",
+            "occurrences_removed": 100,
+            "affected_records": 51
+          },
+          {
+            "token": "but",
+            "occurrences_removed": 97,
+            "affected_records": 50
+          },
+          {
+            "token": "of",
+            "occurrences_removed": 95,
+            "affected_records": 69
+          },
+          {
+            "token": "change-surface",
+            "occurrences_removed": 93,
+            "affected_records": 21
+          },
+          {
+            "token": "could",
+            "occurrences_removed": 90,
+            "affected_records": 38
+          },
+          {
+            "token": "does",
+            "occurrences_removed": 90,
+            "affected_records": 47
+          },
+          {
+            "token": "these",
+            "occurrences_removed": 83,
+            "affected_records": 38
+          },
+          {
+            "token": "have",
+            "occurrences_removed": 81,
+            "affected_records": 62
+          },
+          {
+            "token": "enough",
+            "occurrences_removed": 78,
+            "affected_records": 60
+          },
+          {
+            "token": "its",
+            "occurrences_removed": 70,
+            "affected_records": 52
+          },
+          {
+            "token": "available",
+            "occurrences_removed": 69,
+            "affected_records": 21
+          },
+          {
+            "token": "your",
+            "occurrences_removed": 68,
+            "affected_records": 46
+          },
+          {
+            "token": "would",
+            "occurrences_removed": 62,
+            "affected_records": 44
+          },
+          {
+            "token": "can",
+            "occurrences_removed": 62,
+            "affected_records": 55
+          },
+          {
+            "token": "them",
+            "occurrences_removed": 62,
+            "affected_records": 40
+          },
+          {
+            "token": "any",
+            "occurrences_removed": 57,
+            "affected_records": 47
+          },
+          {
+            "token": "their",
+            "occurrences_removed": 56,
+            "affected_records": 22
+          },
+          {
+            "token": "what",
+            "occurrences_removed": 54,
+            "affected_records": 39
+          },
+          {
+            "token": "e.g",
+            "occurrences_removed": 54,
+            "affected_records": 21
+          },
+          {
+            "token": "been",
+            "occurrences_removed": 51,
+            "affected_records": 37
+          },
+          {
+            "token": "has",
+            "occurrences_removed": 51,
+            "affected_records": 50
+          },
+          {
+            "token": "were",
+            "occurrences_removed": 50,
+            "affected_records": 40
+          },
+          {
+            "token": "ai-first",
+            "occurrences_removed": 49,
+            "affected_records": 34
+          },
+          {
+            "token": "we",
+            "occurrences_removed": 46,
+            "affected_records": 17
+          },
+          {
+            "token": "lessons",
+            "occurrences_removed": 42,
+            "affected_records": 10
+          },
+          {
+            "token": "one",
+            "occurrences_removed": 41,
+            "affected_records": 35
+          },
+          {
+            "token": "as",
+            "occurrences_removed": 41,
+            "affected_records": 36
+          }
+        ],
+        "tenants": [
+          {
+            "tenant_id": "39a5e4a0-681c-463d-ae7b-bca25d4487ae",
+            "tenant_profile_id": "default:base",
+            "records": 162,
+            "original_tokens": 123714,
+            "deterministic_tokens_saved": 0,
+            "model_tokens_saved": 18568,
+            "integrity_failures": 0,
+            "total_reduction": 0.15008810643904488,
+            "integrity_failure_rate": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "source_file": "cohort-2026-07-13T20-41-11-316Z-063937e6-3e04-47dd-a4d9-3fd9ef238990.benchmark-export.v2.json",
+      "cohort_id": "cohort-2026-07-13T20-41-11-316Z-063937e6-3e04-47dd-a4d9-3fd9ef238990",
+      "exported_at": "2026-07-13T20:50:30.770Z",
+      "configuration": {
+        "endpoint": "https://compress.usagetap.com/compress",
+        "aggressiveness": 0.25,
+        "concurrency": 2,
+        "imported_prompt_count": 162,
+        "subset_start_record": 1,
+        "subset_max_records": 100,
+        "mode": "model_force",
+        "include_sections": false,
+        "include_diagnostics": true,
+        "apply_deterministic_transforms": true,
+        "evaluate_disabled_transforms": true
+      },
+      "provenance": {
+        "compressor_git_commit": [
+          "9d09aa042c9c85dd8b861bf77c426c8bb3bde67c-dirty"
+        ],
+        "deployment_version": [
+          "2026.07.13.122324"
+        ],
+        "model_checkpoint": [
+          "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+        ],
+        "model_revision": [
+          "5f0c82792b7ea14c6484e015b6a072009496b7f2"
+        ],
+        "configuration_sha256": [
+          "3a1891efd996c9674d01ff29f9a5dbcc5a9d9d4646b2fe32c52e7210f85d29c7"
+        ]
+      },
+      "metrics": {
+        "records": 100,
+        "stage_savings": {
+          "original_tokens": 77456,
+          "deterministic_tokens": 77456,
+          "final_tokens": 65919,
+          "deterministic_tokens_saved": 0,
+          "model_tokens_saved": 11537,
+          "total_tokens_saved": 11537,
+          "deterministic_reduction": 0.0,
+          "model_incremental_reduction": 0.14894908076843627,
+          "total_reduction": 0.14894908076843627,
+          "deterministic_share_of_savings": 0.0
+        },
+        "pathways": {
+          "model_called_records": 100,
+          "model_call_rate": 1.0,
+          "deterministic_changed_records": 100,
+          "model_changed_records": 100,
+          "unchanged_records": 0
+        },
+        "integrity": {
+          "integrity_failures": 2,
+          "integrity_failure_rate": 0.02,
+          "json_applicable_records": 0,
+          "json_failures": 0,
+          "json_failure_rate_when_applicable": null,
+          "protected_span_applicable_records": 100,
+          "protected_span_failures": 2,
+          "protected_span_failure_rate_when_applicable": 0.02,
+          "protected_spans_missing_by_type": {
+            "url": 2
+          },
+          "protected_spans_changed_by_type": {
+            "url": 2
+          },
+          "placeholder_failures": 0,
+          "structural_warning_records": 2,
+          "structural_warning_count": 2,
+          "structural_warning_types": {
+            "protected_span_missing_or_changed": 2
+          },
+          "constraint_evaluated_records": 0,
+          "constraint_coverage": 0.0,
+          "constraint_failures": 0,
+          "required_term_evaluated_records": 0,
+          "required_term_coverage": 0.0,
+          "required_term_failures": 0
+        },
+        "protected_span_retention": {
+          "constant": {
+            "original_occurrences": 292,
+            "retained_after_deterministic": 0,
+            "retained_after_final": 292,
+            "deterministic_retention": 0.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 0,
+            "retained_across_model": 0,
+            "model_stage_retention": null
+          },
+          "email": {
+            "original_occurrences": 1,
+            "retained_after_deterministic": 0,
+            "retained_after_final": 1,
+            "deterministic_retention": 0.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 0,
+            "retained_across_model": 0,
+            "model_stage_retention": null
+          },
+          "inline_code": {
+            "original_occurrences": 230,
+            "retained_after_deterministic": 0,
+            "retained_after_final": 230,
+            "deterministic_retention": 0.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 0,
+            "retained_across_model": 0,
+            "model_stage_retention": null
+          },
+          "markdown_link": {
+            "original_occurrences": 46,
+            "retained_after_deterministic": 0,
+            "retained_after_final": 46,
+            "deterministic_retention": 0.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 0,
+            "retained_across_model": 0,
+            "model_stage_retention": null
+          },
+          "number": {
+            "original_occurrences": 1923,
+            "retained_after_deterministic": 0,
+            "retained_after_final": 1923,
+            "deterministic_retention": 0.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 0,
+            "retained_across_model": 0,
+            "model_stage_retention": null
+          },
+          "template": {
+            "original_occurrences": 16,
+            "retained_after_deterministic": 0,
+            "retained_after_final": 16,
+            "deterministic_retention": 0.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 0,
+            "retained_across_model": 0,
+            "model_stage_retention": null
+          },
+          "url": {
+            "original_occurrences": 40,
+            "retained_after_deterministic": 0,
+            "retained_after_final": 40,
+            "deterministic_retention": 0.0,
+            "final_retention": 1.0,
+            "model_input_occurrences": 1,
+            "retained_across_model": 1,
+            "model_stage_retention": 1.0
+          }
+        },
+        "safety_lexeme_retention": {
+          "negation": {
+            "original_occurrences": 646,
+            "retained_after_deterministic": 622,
+            "retained_after_final": 632,
+            "deterministic_retention": 0.9628482972136223,
+            "final_retention": 0.978328173374613,
+            "model_input_occurrences": 622,
+            "retained_across_model": 608,
+            "model_stage_retention": 0.977491961414791
+          },
+          "obligation": {
+            "original_occurrences": 159,
+            "retained_after_deterministic": 159,
+            "retained_after_final": 152,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.9559748427672956,
+            "model_input_occurrences": 159,
+            "retained_across_model": 152,
+            "model_stage_retention": 0.9559748427672956
+          },
+          "scope": {
+            "original_occurrences": 315,
+            "retained_after_deterministic": 311,
+            "retained_after_final": 249,
+            "deterministic_retention": 0.9873015873015873,
+            "final_retention": 0.7904761904761904,
+            "model_input_occurrences": 311,
+            "retained_across_model": 245,
+            "model_stage_retention": 0.7877813504823151
+          },
+          "permission": {
+            "original_occurrences": 144,
+            "retained_after_deterministic": 144,
+            "retained_after_final": 52,
+            "deterministic_retention": 1.0,
+            "final_retention": 0.3611111111111111,
+            "model_input_occurrences": 144,
+            "retained_across_model": 52,
+            "model_stage_retention": 0.3611111111111111
+          },
+          "destructive_action": {
+            "original_occurrences": 202,
+            "retained_after_deterministic": 194,
+            "retained_after_final": 200,
+            "deterministic_retention": 0.9603960396039604,
+            "final_retention": 0.9900990099009901,
+            "model_input_occurrences": 194,
+            "retained_across_model": 192,
+            "model_stage_retention": 0.9896907216494846
+          }
+        },
+        "deterministic_transforms": {
+          "exact_duplicate_block_removal": {
+            "candidate_count": 0,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 27.003,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 100
+            },
+            "gate_reasons": {
+              "no_candidate": 100
+            },
+            "gated_estimated_tokens": {}
+          },
+          "force_drop_preprocessing": {
+            "candidate_count": 0,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 9772.388,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 100
+            },
+            "gate_reasons": {
+              "no_candidate": 100
+            },
+            "gated_estimated_tokens": {}
+          },
+          "html_to_markdown": {
+            "candidate_count": 0,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 0.424,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 100
+            },
+            "gate_reasons": {
+              "no_candidate": 100
+            },
+            "gated_estimated_tokens": {}
+          },
+          "json_minification": {
+            "candidate_count": 242,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 1628.2,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "skipped": 53,
+              "no_candidate": 47
+            },
+            "gate_reasons": {
+              "tenant_configuration_disabled": 242,
+              "no_candidate": 47
+            },
+            "gated_estimated_tokens": {
+              "tenant_configuration_disabled": 0,
+              "no_candidate": 0
+            }
+          },
+          "json_to_toon": {
+            "candidate_count": 242,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 0.955,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "skipped": 53,
+              "no_candidate": 47
+            },
+            "gate_reasons": {
+              "json_parse_failed": 174,
+              "below_minimum_size": 68,
+              "no_candidate": 47
+            },
+            "gated_estimated_tokens": {}
+          },
+          "nocompress_wrapper_handling": {
+            "candidate_count": 0,
+            "applied_count": 0,
+            "tokens_saved": 0,
+            "elapsed_ms": 0.392,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "no_candidate": 100
+            },
+            "gate_reasons": {
+              "no_candidate": 100
+            },
+            "gated_estimated_tokens": {}
+          },
+          "placeholder_restoration": {
+            "candidate_count": 1926,
+            "applied_count": 1926,
+            "tokens_saved": 0,
+            "elapsed_ms": 9797.025,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "applied": 100
+            },
+            "gate_reasons": {},
+            "gated_estimated_tokens": {}
+          },
+          "protected_span_substitution": {
+            "candidate_count": 1926,
+            "applied_count": 100,
+            "tokens_saved": 0,
+            "elapsed_ms": 9856.412,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "applied": 100
+            },
+            "gate_reasons": {},
+            "gated_estimated_tokens": {}
+          },
+          "whitespace_canonicalization": {
+            "candidate_count": 1183,
+            "applied_count": 8,
+            "tokens_saved": 0,
+            "elapsed_ms": 9888.87,
+            "counterfactual_would_apply_records": 0,
+            "counterfactual_estimated_tokens": 0,
+            "record_statuses": {
+              "skipped": 92,
+              "no_savings": 8
+            },
+            "gate_reasons": {
+              "no_token_savings": 1175
+            },
+            "gated_estimated_tokens": {}
+          }
+        },
+        "candidate_opportunities": {
+          "blank_line_count": 1157,
+          "duplicate_candidate_characters": 744,
+          "duplicate_candidate_tokens": 0,
+          "estimated_blank_line_removable_tokens": 1157,
+          "exact_duplicate_block_candidate_count": 0,
+          "html_comment_count": 13,
+          "html_region_count": 0,
+          "json_like_invalid_region_count": 196,
+          "markdown_heading_count": 107,
+          "markdown_list_count": 1172,
+          "multiple_space_run_count": 18,
+          "toon_eligible_region_count": 0,
+          "trailing_whitespace_line_count": 8,
+          "valid_json_region_count": 46
+        },
+        "distributions": {
+          "record_reduction_p50": 0.15446663740122915,
+          "record_reduction_p95": 0.19278350515463918,
+          "latency_ms_p50": 4319.649999991059,
+          "latency_ms_p95": 7651.6549999937415,
+          "model_called_latency_ms_p50": 4319.649999991059,
+          "model_called_latency_ms_p95": 7651.6549999937415,
+          "latency_ms_per_1k_tokens_saved": 44771.55239662967,
+          "model_latency_ms_per_1k_model_tokens_saved": 44771.55239662967
+        },
+        "model_deleted_words_top": [
+          {
+            "token": "the",
+            "occurrences_removed": 919,
+            "affected_records": 96
+          },
+          {
+            "token": "and",
+            "occurrences_removed": 735,
+            "affected_records": 93
+          },
+          {
+            "token": "a",
+            "occurrences_removed": 598,
+            "affected_records": 85
+          },
+          {
+            "token": "is",
+            "occurrences_removed": 363,
+            "affected_records": 71
+          },
+          {
+            "token": "this",
+            "occurrences_removed": 241,
+            "affected_records": 89
+          },
+          {
+            "token": "if",
+            "occurrences_removed": 235,
+            "affected_records": 48
+          },
+          {
+            "token": "are",
+            "occurrences_removed": 170,
+            "affected_records": 67
+          },
+          {
+            "token": "or",
+            "occurrences_removed": 166,
+            "affected_records": 56
+          },
+          {
+            "token": "it",
+            "occurrences_removed": 152,
+            "affected_records": 55
+          },
+          {
+            "token": "do",
+            "occurrences_removed": 151,
+            "affected_records": 82
+          },
+          {
+            "token": "that",
+            "occurrences_removed": 144,
+            "affected_records": 57
+          },
+          {
+            "token": "an",
+            "occurrences_removed": 141,
+            "affected_records": 73
+          },
+          {
+            "token": "you",
+            "occurrences_removed": 135,
+            "affected_records": 55
+          },
+          {
+            "token": "means",
+            "occurrences_removed": 117,
+            "affected_records": 9
+          },
+          {
+            "token": "__ck_keep_0000__",
+            "occurrences_removed": 100,
+            "affected_records": 100
+          },
+          {
+            "token": "__ck_keep_0001__",
+            "occurrences_removed": 98,
+            "affected_records": 98
+          },
+          {
+            "token": "__ck_keep_0002__",
+            "occurrences_removed": 97,
+            "affected_records": 97
+          },
+          {
+            "token": "__ck_keep_0003__",
+            "occurrences_removed": 87,
+            "affected_records": 87
+          },
+          {
+            "token": "how",
+            "occurrences_removed": 86,
+            "affected_records": 43
+          },
+          {
+            "token": "__ck_keep_0004__",
+            "occurrences_removed": 80,
+            "affected_records": 80
+          },
+          {
+            "token": "__ck_keep_0008__",
+            "occurrences_removed": 79,
+            "affected_records": 79
+          },
+          {
+            "token": "__ck_keep_0005__",
+            "occurrences_removed": 77,
+            "affected_records": 77
+          },
+          {
+            "token": "__ck_keep_0006__",
+            "occurrences_removed": 77,
+            "affected_records": 77
+          },
+          {
+            "token": "whether",
+            "occurrences_removed": 75,
+            "affected_records": 37
+          },
+          {
+            "token": "__ck_keep_0009__",
+            "occurrences_removed": 74,
+            "affected_records": 74
+          },
+          {
+            "token": "__ck_keep_0010__",
+            "occurrences_removed": 74,
+            "affected_records": 74
+          },
+          {
+            "token": "was",
+            "occurrences_removed": 73,
+            "affected_records": 42
+          },
+          {
+            "token": "__ck_keep_0007__",
+            "occurrences_removed": 73,
+            "affected_records": 73
+          },
+          {
+            "token": "__ck_keep_0011__",
+            "occurrences_removed": 73,
+            "affected_records": 73
+          },
+          {
+            "token": "for",
+            "occurrences_removed": 72,
+            "affected_records": 42
+          },
+          {
+            "token": "will",
+            "occurrences_removed": 69,
+            "affected_records": 48
+          },
+          {
+            "token": "be",
+            "occurrences_removed": 69,
+            "affected_records": 43
+          },
+          {
+            "token": "__ck_keep_0012__",
+            "occurrences_removed": 68,
+            "affected_records": 68
+          },
+          {
+            "token": "but",
+            "occurrences_removed": 63,
+            "affected_records": 32
+          },
+          {
+            "token": "when",
+            "occurrences_removed": 60,
+            "affected_records": 33
+          },
+          {
+            "token": "__ck_keep_0013__",
+            "occurrences_removed": 60,
+            "affected_records": 60
+          },
+          {
+            "token": "in",
+            "occurrences_removed": 59,
+            "affected_records": 31
+          },
+          {
+            "token": "does",
+            "occurrences_removed": 56,
+            "affected_records": 27
+          },
+          {
+            "token": "to",
+            "occurrences_removed": 55,
+            "affected_records": 30
+          },
+          {
+            "token": "with",
+            "occurrences_removed": 54,
+            "affected_records": 26
+          },
+          {
+            "token": "could",
+            "occurrences_removed": 53,
+            "affected_records": 24
+          },
+          {
+            "token": "__ck_keep_0014__",
+            "occurrences_removed": 52,
+            "affected_records": 52
+          },
+          {
+            "token": "its",
+            "occurrences_removed": 50,
+            "affected_records": 37
+          },
+          {
+            "token": "change-surface",
+            "occurrences_removed": 48,
+            "affected_records": 12
+          },
+          {
+            "token": "have",
+            "occurrences_removed": 47,
+            "affected_records": 37
+          },
+          {
+            "token": "__ck_keep_0015__",
+            "occurrences_removed": 47,
+            "affected_records": 47
+          },
+          {
+            "token": "your",
+            "occurrences_removed": 46,
+            "affected_records": 29
+          },
+          {
+            "token": "__ck_keep_0016__",
+            "occurrences_removed": 46,
+            "affected_records": 46
+          },
+          {
+            "token": "enough",
+            "occurrences_removed": 46,
+            "affected_records": 37
+          },
+          {
+            "token": "of",
+            "occurrences_removed": 45,
+            "affected_records": 36
+          }
+        ],
+        "tenants": [
+          {
+            "tenant_id": "39a5e4a0-681c-463d-ae7b-bca25d4487ae",
+            "tenant_profile_id": "default:base",
+            "records": 100,
+            "original_tokens": 77456,
+            "deterministic_tokens_saved": 0,
+            "model_tokens_saved": 11537,
+            "integrity_failures": 2,
+            "total_reduction": 0.14894908076843627,
+            "integrity_failure_rate": 0.02
+          }
+        ]
+      }
+    }
+  ],
+  "combined": {
+    "warning": "Use only as a descriptive baseline; cohort mixes may differ over time.",
+    "provenance": {
+      "compressor_git_commit": [
+        "6cfa689fc738352e44b1fa913a2d2897f83b559f",
+        "9d09aa042c9c85dd8b861bf77c426c8bb3bde67c-dirty"
+      ],
+      "deployment_version": [
+        "2026.07.13.122324"
+      ],
+      "model_checkpoint": [
+        "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+      ],
+      "model_revision": [
+        "5f0c82792b7ea14c6484e015b6a072009496b7f2"
+      ],
+      "configuration_sha256": [
+        "3a1891efd996c9674d01ff29f9a5dbcc5a9d9d4646b2fe32c52e7210f85d29c7"
+      ]
+    },
+    "metrics": {
+      "records": 334,
+      "stage_savings": {
+        "original_tokens": 567133,
+        "deterministic_tokens": 560600,
+        "final_tokens": 501703,
+        "deterministic_tokens_saved": 6533,
+        "model_tokens_saved": 58897,
+        "total_tokens_saved": 65430,
+        "deterministic_reduction": 0.011519343787083454,
+        "model_incremental_reduction": 0.1050606493043168,
+        "total_reduction": 0.11536976335356962,
+        "deterministic_share_of_savings": 0.09984716490906312
+      },
+      "pathways": {
+        "model_called_records": 283,
+        "model_call_rate": 0.8473053892215568,
+        "deterministic_changed_records": 128,
+        "model_changed_records": 283,
+        "unchanged_records": 51
+      },
+      "integrity": {
+        "integrity_failures": 3,
+        "integrity_failure_rate": 0.008982035928143712,
+        "json_applicable_records": 0,
+        "json_failures": 0,
+        "json_failure_rate_when_applicable": null,
+        "protected_span_applicable_records": 297,
+        "protected_span_failures": 3,
+        "protected_span_failure_rate_when_applicable": 0.010101010101010102,
+        "protected_spans_missing_by_type": {
+          "inline_code": 14,
+          "url": 2
+        },
+        "protected_spans_changed_by_type": {
+          "inline_code": 14,
+          "url": 2
+        },
+        "placeholder_failures": 0,
+        "structural_warning_records": 3,
+        "structural_warning_count": 3,
+        "structural_warning_types": {
+          "protected_span_missing_or_changed": 3
+        },
+        "constraint_evaluated_records": 0,
+        "constraint_coverage": 0.0,
+        "constraint_failures": 0,
+        "required_term_evaluated_records": 0,
+        "required_term_coverage": 0.0,
+        "required_term_failures": 0
+      },
+      "protected_span_retention": {
+        "constant": {
+          "original_occurrences": 5967,
+          "retained_after_deterministic": 5675,
+          "retained_after_final": 5965,
+          "deterministic_retention": 0.951064186358304,
+          "final_retention": 0.999664823194235,
+          "model_input_occurrences": 5675,
+          "retained_across_model": 5673,
+          "model_stage_retention": 0.9996475770925111
+        },
+        "constraint": {
+          "original_occurrences": 74,
+          "retained_after_deterministic": 74,
+          "retained_after_final": 74,
+          "deterministic_retention": 1.0,
+          "final_retention": 1.0,
+          "model_input_occurrences": 74,
+          "retained_across_model": 74,
+          "model_stage_retention": 1.0
+        },
+        "email": {
+          "original_occurrences": 2,
+          "retained_after_deterministic": 1,
+          "retained_after_final": 2,
+          "deterministic_retention": 0.5,
+          "final_retention": 1.0,
+          "model_input_occurrences": 1,
+          "retained_across_model": 1,
+          "model_stage_retention": 1.0
+        },
+        "identifier": {
+          "original_occurrences": 229,
+          "retained_after_deterministic": 229,
+          "retained_after_final": 229,
+          "deterministic_retention": 1.0,
+          "final_retention": 1.0,
+          "model_input_occurrences": 229,
+          "retained_across_model": 229,
+          "model_stage_retention": 1.0
+        },
+        "inline_code": {
+          "original_occurrences": 5121,
+          "retained_after_deterministic": 4891,
+          "retained_after_final": 5107,
+          "deterministic_retention": 0.9550868970904121,
+          "final_retention": 0.9972661589533294,
+          "model_input_occurrences": 4891,
+          "retained_across_model": 4877,
+          "model_stage_retention": 0.9971375996728685
+        },
+        "markdown_link": {
+          "original_occurrences": 107,
+          "retained_after_deterministic": 61,
+          "retained_after_final": 107,
+          "deterministic_retention": 0.5700934579439252,
+          "final_retention": 1.0,
+          "model_input_occurrences": 61,
+          "retained_across_model": 61,
+          "model_stage_retention": 1.0
+        },
+        "number": {
+          "original_occurrences": 6992,
+          "retained_after_deterministic": 5069,
+          "retained_after_final": 6991,
+          "deterministic_retention": 0.7249713958810069,
+          "final_retention": 0.9998569794050344,
+          "model_input_occurrences": 5141,
+          "retained_across_model": 5140,
+          "model_stage_retention": 0.9998054853141413
+        },
+        "template": {
+          "original_occurrences": 110,
+          "retained_after_deterministic": 94,
+          "retained_after_final": 110,
+          "deterministic_retention": 0.8545454545454545,
+          "final_retention": 1.0,
+          "model_input_occurrences": 95,
+          "retained_across_model": 95,
+          "model_stage_retention": 1.0
+        },
+        "url": {
+          "original_occurrences": 100,
+          "retained_after_deterministic": 60,
+          "retained_after_final": 100,
+          "deterministic_retention": 0.6,
+          "final_retention": 1.0,
+          "model_input_occurrences": 61,
+          "retained_across_model": 61,
+          "model_stage_retention": 1.0
+        }
+      },
+      "safety_lexeme_retention": {
+        "negation": {
+          "original_occurrences": 6919,
+          "retained_after_deterministic": 6895,
+          "retained_after_final": 6321,
+          "deterministic_retention": 0.9965312906489378,
+          "final_retention": 0.9135713253360312,
+          "model_input_occurrences": 6895,
+          "retained_across_model": 6297,
+          "model_stage_retention": 0.9132704858593184
+        },
+        "obligation": {
+          "original_occurrences": 2112,
+          "retained_after_deterministic": 2112,
+          "retained_after_final": 1719,
+          "deterministic_retention": 1.0,
+          "final_retention": 0.8139204545454546,
+          "model_input_occurrences": 2112,
+          "retained_across_model": 1719,
+          "model_stage_retention": 0.8139204545454546
+        },
+        "scope": {
+          "original_occurrences": 3772,
+          "retained_after_deterministic": 3768,
+          "retained_after_final": 2993,
+          "deterministic_retention": 0.9989395546129375,
+          "final_retention": 0.7934782608695652,
+          "model_input_occurrences": 3768,
+          "retained_across_model": 2989,
+          "model_stage_retention": 0.7932590233545648
+        },
+        "permission": {
+          "original_occurrences": 1317,
+          "retained_after_deterministic": 1317,
+          "retained_after_final": 878,
+          "deterministic_retention": 1.0,
+          "final_retention": 0.6666666666666666,
+          "model_input_occurrences": 1317,
+          "retained_across_model": 878,
+          "model_stage_retention": 0.6666666666666666
+        },
+        "destructive_action": {
+          "original_occurrences": 732,
+          "retained_after_deterministic": 724,
+          "retained_after_final": 716,
+          "deterministic_retention": 0.9890710382513661,
+          "final_retention": 0.9781420765027322,
+          "model_input_occurrences": 724,
+          "retained_across_model": 708,
+          "model_stage_retention": 0.9779005524861878
+        }
+      },
+      "deterministic_transforms": {
+        "exact_duplicate_block_removal": {
+          "candidate_count": 120,
+          "applied_count": 0,
+          "tokens_saved": 0,
+          "elapsed_ms": 147.981,
+          "counterfactual_would_apply_records": 0,
+          "counterfactual_estimated_tokens": 0,
+          "record_statuses": {
+            "no_candidate": 317,
+            "skipped": 17
+          },
+          "gate_reasons": {
+            "no_candidate": 317,
+            "duplicate_not_structurally_safe_to_remove": 120
+          },
+          "gated_estimated_tokens": {}
+        },
+        "force_drop_preprocessing": {
+          "candidate_count": 0,
+          "applied_count": 0,
+          "tokens_saved": 0,
+          "elapsed_ms": 45002.488,
+          "counterfactual_would_apply_records": 0,
+          "counterfactual_estimated_tokens": 0,
+          "record_statuses": {
+            "no_candidate": 334
+          },
+          "gate_reasons": {
+            "no_candidate": 334
+          },
+          "gated_estimated_tokens": {}
+        },
+        "html_to_markdown": {
+          "candidate_count": 40,
+          "applied_count": 0,
+          "tokens_saved": 0,
+          "elapsed_ms": 1.608,
+          "counterfactual_would_apply_records": 0,
+          "counterfactual_estimated_tokens": 0,
+          "record_statuses": {
+            "no_candidate": 326,
+            "skipped": 8
+          },
+          "gate_reasons": {
+            "no_candidate": 326,
+            "below_minimum_size": 40
+          },
+          "gated_estimated_tokens": {}
+        },
+        "json_minification": {
+          "candidate_count": 1614,
+          "applied_count": 0,
+          "tokens_saved": 0,
+          "elapsed_ms": 8141.75,
+          "counterfactual_would_apply_records": 0,
+          "counterfactual_estimated_tokens": 0,
+          "record_statuses": {
+            "no_candidate": 180,
+            "skipped": 154
+          },
+          "gate_reasons": {
+            "no_candidate": 180,
+            "tenant_configuration_disabled": 1614
+          },
+          "gated_estimated_tokens": {
+            "no_candidate": 0,
+            "tenant_configuration_disabled": 0
+          }
+        },
+        "json_to_toon": {
+          "candidate_count": 1614,
+          "applied_count": 12,
+          "tokens_saved": 6533,
+          "elapsed_ms": 1596.545,
+          "counterfactual_would_apply_records": 0,
+          "counterfactual_estimated_tokens": 0,
+          "record_statuses": {
+            "no_candidate": 180,
+            "skipped": 142,
+            "applied": 12
+          },
+          "gate_reasons": {
+            "no_candidate": 180,
+            "below_minimum_size": 369,
+            "json_parse_failed": 457
+          },
+          "gated_estimated_tokens": {}
+        },
+        "nocompress_wrapper_handling": {
+          "candidate_count": 0,
+          "applied_count": 0,
+          "tokens_saved": 0,
+          "elapsed_ms": 1.328,
+          "counterfactual_would_apply_records": 0,
+          "counterfactual_estimated_tokens": 0,
+          "record_statuses": {
+            "no_candidate": 334
+          },
+          "gate_reasons": {
+            "no_candidate": 334
+          },
+          "gated_estimated_tokens": {}
+        },
+        "placeholder_restoration": {
+          "candidate_count": 8851,
+          "applied_count": 8851,
+          "tokens_saved": 0,
+          "elapsed_ms": 44506.083,
+          "counterfactual_would_apply_records": 0,
+          "counterfactual_estimated_tokens": 0,
+          "record_statuses": {
+            "no_candidate": 51,
+            "applied": 283
+          },
+          "gate_reasons": {
+            "no_candidate": 51
+          },
+          "gated_estimated_tokens": {}
+        },
+        "protected_span_substitution": {
+          "candidate_count": 8851,
+          "applied_count": 283,
+          "tokens_saved": 0,
+          "elapsed_ms": 44568.516,
+          "counterfactual_would_apply_records": 0,
+          "counterfactual_estimated_tokens": 0,
+          "record_statuses": {
+            "no_candidate": 51,
+            "applied": 283
+          },
+          "gate_reasons": {
+            "no_candidate": 51
+          },
+          "gated_estimated_tokens": {}
+        },
+        "whitespace_canonicalization": {
+          "candidate_count": 17611,
+          "applied_count": 36,
+          "tokens_saved": 0,
+          "elapsed_ms": 44476.327,
+          "counterfactual_would_apply_records": 0,
+          "counterfactual_estimated_tokens": 0,
+          "record_statuses": {
+            "skipped": 261,
+            "no_candidate": 37,
+            "no_savings": 36
+          },
+          "gate_reasons": {
+            "no_token_savings": 17575,
+            "no_candidate": 37
+          },
+          "gated_estimated_tokens": {}
+        }
+      },
+      "candidate_opportunities": {
+        "blank_line_count": 12062,
+        "duplicate_candidate_characters": 71120,
+        "duplicate_candidate_tokens": 7171,
+        "estimated_blank_line_removable_tokens": 12062,
+        "exact_duplicate_block_candidate_count": 120,
+        "html_comment_count": 51,
+        "html_region_count": 40,
+        "json_like_invalid_region_count": 1296,
+        "markdown_heading_count": 2390,
+        "markdown_list_count": 12788,
+        "multiple_space_run_count": 4447,
+        "toon_eligible_region_count": 16,
+        "trailing_whitespace_line_count": 1102,
+        "valid_json_region_count": 318
+      },
+      "distributions": {
+        "record_reduction_p50": 0.14965361185948056,
+        "record_reduction_p95": 0.17647058823529413,
+        "latency_ms_p50": 4704.0,
+        "latency_ms_p95": 24482.199999999928,
+        "model_called_latency_ms_p50": 5113.300000011921,
+        "model_called_latency_ms_p95": 52032.249999999905,
+        "latency_ms_per_1k_tokens_saved": 39852.69906770482,
+        "model_latency_ms_per_1k_model_tokens_saved": 42639.49946516667
+      },
+      "model_deleted_words_top": [
+        {
+          "token": "the",
+          "occurrences_removed": 7133,
+          "affected_records": 275
+        },
+        {
+          "token": "a",
+          "occurrences_removed": 3634,
+          "affected_records": 249
+        },
+        {
+          "token": "and",
+          "occurrences_removed": 3508,
+          "affected_records": 264
+        },
+        {
+          "token": "is",
+          "occurrences_removed": 2610,
+          "affected_records": 202
+        },
+        {
+          "token": "this",
+          "occurrences_removed": 1159,
+          "affected_records": 251
+        },
+        {
+          "token": "or",
+          "occurrences_removed": 1082,
+          "affected_records": 160
+        },
+        {
+          "token": "do",
+          "occurrences_removed": 1031,
+          "affected_records": 225
+        },
+        {
+          "token": "that",
+          "occurrences_removed": 1024,
+          "affected_records": 170
+        },
+        {
+          "token": "it",
+          "occurrences_removed": 986,
+          "affected_records": 160
+        },
+        {
+          "token": "are",
+          "occurrences_removed": 863,
+          "affected_records": 195
+        },
+        {
+          "token": "if",
+          "occurrences_removed": 750,
+          "affected_records": 141
+        },
+        {
+          "token": "you",
+          "occurrences_removed": 690,
+          "affected_records": 159
+        },
+        {
+          "token": "when",
+          "occurrences_removed": 630,
+          "affected_records": 99
+        },
+        {
+          "token": "to",
+          "occurrences_removed": 623,
+          "affected_records": 130
+        },
+        {
+          "token": "an",
+          "occurrences_removed": 599,
+          "affected_records": 210
+        },
+        {
+          "token": "in",
+          "occurrences_removed": 440,
+          "affected_records": 113
+        },
+        {
+          "token": "yes",
+          "occurrences_removed": 440,
+          "affected_records": 19
+        },
+        {
+          "token": "not",
+          "occurrences_removed": 400,
+          "affected_records": 26
+        },
+        {
+          "token": "be",
+          "occurrences_removed": 370,
+          "affected_records": 126
+        },
+        {
+          "token": "what",
+          "occurrences_removed": 363,
+          "affected_records": 78
+        },
+        {
+          "token": "means",
+          "occurrences_removed": 352,
+          "affected_records": 28
+        },
+        {
+          "token": "of",
+          "occurrences_removed": 329,
+          "affected_records": 123
+        },
+        {
+          "token": "must",
+          "occurrences_removed": 304,
+          "affected_records": 17
+        },
+        {
+          "token": "but",
+          "occurrences_removed": 297,
+          "affected_records": 97
+        },
+        {
+          "token": "as",
+          "occurrences_removed": 294,
+          "affected_records": 71
+        },
+        {
+          "token": "its",
+          "occurrences_removed": 285,
+          "affected_records": 104
+        },
+        {
+          "token": "for",
+          "occurrences_removed": 264,
+          "affected_records": 129
+        },
+        {
+          "token": "these",
+          "occurrences_removed": 264,
+          "affected_records": 75
+        },
+        {
+          "token": "how",
+          "occurrences_removed": 263,
+          "affected_records": 132
+        },
+        {
+          "token": "them",
+          "occurrences_removed": 255,
+          "affected_records": 78
+        },
+        {
+          "token": "does",
+          "occurrences_removed": 247,
+          "affected_records": 89
+        },
+        {
+          "token": "whether",
+          "occurrences_removed": 232,
+          "affected_records": 107
+        },
+        {
+          "token": "can",
+          "occurrences_removed": 224,
+          "affected_records": 103
+        },
+        {
+          "token": "your",
+          "occurrences_removed": 220,
+          "affected_records": 90
+        },
+        {
+          "token": "will",
+          "occurrences_removed": 217,
+          "affected_records": 146
+        },
+        {
+          "token": "any",
+          "occurrences_removed": 215,
+          "affected_records": 86
+        },
+        {
+          "token": "was",
+          "occurrences_removed": 208,
+          "affected_records": 119
+        },
+        {
+          "token": "has",
+          "occurrences_removed": 193,
+          "affected_records": 99
+        },
+        {
+          "token": "with",
+          "occurrences_removed": 188,
+          "affected_records": 83
+        },
+        {
+          "token": "would",
+          "occurrences_removed": 176,
+          "affected_records": 84
+        },
+        {
+          "token": "have",
+          "occurrences_removed": 169,
+          "affected_records": 114
+        },
+        {
+          "token": "they",
+          "occurrences_removed": 158,
+          "affected_records": 23
+        },
+        {
+          "token": "could",
+          "occurrences_removed": 156,
+          "affected_records": 75
+        },
+        {
+          "token": "their",
+          "occurrences_removed": 153,
+          "affected_records": 50
+        },
+        {
+          "token": "all",
+          "occurrences_removed": 147,
+          "affected_records": 28
+        },
+        {
+          "token": "change-surface",
+          "occurrences_removed": 141,
+          "affected_records": 33
+        },
+        {
+          "token": "only",
+          "occurrences_removed": 137,
+          "affected_records": 17
+        },
+        {
+          "token": "where",
+          "occurrences_removed": 137,
+          "affected_records": 49
+        },
+        {
+          "token": "always",
+          "occurrences_removed": 134,
+          "affected_records": 43
+        },
+        {
+          "token": "i",
+          "occurrences_removed": 133,
+          "affected_records": 38
+        }
+      ],
+      "tenants": [
+        {
+          "tenant_id": "39a5e4a0-681c-463d-ae7b-bca25d4487ae",
+          "tenant_profile_id": "default:base",
+          "records": 262,
+          "original_tokens": 201170,
+          "deterministic_tokens_saved": 0,
+          "model_tokens_saved": 30105,
+          "integrity_failures": 2,
+          "total_reduction": 0.14964955013172937,
+          "integrity_failure_rate": 0.007633587786259542
+        },
+        {
+          "tenant_id": "43e74de1-2c6d-4826-9d9e-6a0187a937af",
+          "tenant_profile_id": "default:base",
+          "records": 72,
+          "original_tokens": 365963,
+          "deterministic_tokens_saved": 6533,
+          "model_tokens_saved": 28792,
+          "integrity_failures": 1,
+          "total_reduction": 0.09652615155083984,
+          "integrity_failure_rate": 0.013888888888888888
+        }
+      ]
+    }
+  }
+}

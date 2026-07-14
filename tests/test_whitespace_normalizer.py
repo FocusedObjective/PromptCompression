@@ -1,3 +1,5 @@
+from app.compression_pipeline import PromptPreprocessor
+from app.token_estimator import TokenEstimate
 from app.whitespace_normalizer import normalize_whitespace
 
 
@@ -124,3 +126,54 @@ def test_common_html_content_tags_are_not_protected():
 
     assert result.kind == "prose"
     assert result.compressible is True
+
+
+def test_strict_prose_whitespace_requires_tokenizer_positive_savings():
+    text = "Summary   has     copied spacing."
+
+    positive = PromptPreprocessor(
+        strict_prose_whitespace=True,
+        token_estimator=lambda value: TokenEstimate(
+            count=10 if value == text else 7,
+            estimator="test:stub",
+            tokenizer_backed=True,
+        ),
+        require_tokenizer_backed_gates=True,
+        min_whitespace_savings_tokens=2,
+        min_whitespace_reduction=0.005,
+    ).prepare(text)
+    no_savings = PromptPreprocessor(
+        strict_prose_whitespace=True,
+        token_estimator=lambda _value: TokenEstimate(
+            count=10,
+            estimator="test:stub",
+            tokenizer_backed=True,
+        ),
+        require_tokenizer_backed_gates=True,
+        min_whitespace_savings_tokens=2,
+        min_whitespace_reduction=0.005,
+    ).prepare(text)
+
+    assert "".join(segment.text for segment in positive) == "Summary has copied spacing."
+    assert "".join(segment.text for segment in no_savings) == text
+
+
+def test_strict_whitespace_preserves_critical_clause_bytes():
+    clause = "Keep retry_limit   at 3 unless legal approves a written amendment."
+    text = f"Summary   has copied spacing. {clause}"
+    preprocessor = PromptPreprocessor(
+        strict_prose_whitespace=True,
+        token_estimator=lambda value: TokenEstimate(
+            count=len(value),
+            estimator="test:characters",
+            tokenizer_backed=True,
+        ),
+        require_tokenizer_backed_gates=True,
+        min_whitespace_savings_tokens=2,
+        min_whitespace_reduction=0.005,
+    )
+
+    output = "".join(segment.text for segment in preprocessor.prepare(text))
+
+    assert output.startswith("Summary has copied spacing.")
+    assert clause in output

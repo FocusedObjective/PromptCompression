@@ -3,6 +3,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.analytics import DetailedAnalytics
+from app.experiment_profiles import EXPERIMENT_PROFILE_IDS
 from app.token_estimator import REGEX_TOKEN_ESTIMATOR
 
 DEFAULT_AGGRESSIVENESS = 0.15
@@ -119,6 +120,23 @@ class CompressRequest(BaseModel):
             "not add force-keep tokens or otherwise alter compression."
         ),
     )
+    experiment_profile: str | None = Field(
+        default=None,
+        description=(
+            "Allowlisted debug/benchmark experiment profile. Not available on "
+            "the v1 production API."
+        ),
+    )
+
+    @field_validator("experiment_profile")
+    @classmethod
+    def validate_experiment_profile(cls, value: str | None) -> str | None:
+        if value is not None and value not in EXPERIMENT_PROFILE_IDS:
+            raise ValueError(
+                "experiment_profile must be one of: "
+                + ", ".join(EXPERIMENT_PROFILE_IDS)
+            )
+        return value
 
 
 class LabeledToken(BaseModel):
@@ -196,6 +214,8 @@ class CompressionDiagnosticsResponse(BaseModel):
     json_minified_segment_count: int = 0
     duplicate_block_candidate_count: int = 0
     duplicate_block_candidate_tokens: int = 0
+    duplicate_wrapper_alias_count: int = 0
+    duplicate_wrapper_alias_tokens_saved: int = 0
     compression_mode: str = "model_force"
     compression_path: str = "unchanged"
     model_gate_decision: str = "run"
@@ -210,6 +230,10 @@ class CompressionDiagnosticsResponse(BaseModel):
     structured_density: float = 0.0
     identifier_density: float = 0.0
     analytics: DetailedAnalytics | None = None
+    experiment_profile: str = "baseline"
+    output_rollback_count: int = 0
+    output_rollback_reason: str | None = None
+    rejected_output_sha256: str | None = None
 
 
 class TokenSavingsResponse(BaseModel):
@@ -250,6 +274,7 @@ class CompressResponse(BaseModel):
     labeled_tokens: list[LabeledToken] = Field(default_factory=list)
     output_sections: list[OutputSection] = Field(default_factory=list)
     diagnostics: CompressionDiagnosticsResponse | None = None
+    experiment_profile: str = "baseline"
 
 
 class V1CompressionSettings(BaseModel):

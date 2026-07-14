@@ -1,4 +1,8 @@
-from app.protected_spans import force_tokens_for_text, protected_spans_for_text
+from app.protected_spans import (
+    critical_clause_spans,
+    force_tokens_for_text,
+    protected_spans_for_text,
+)
 
 
 def test_force_tokens_include_structure_and_negation():
@@ -34,6 +38,19 @@ def test_protected_spans_include_exact_money_ids_and_constraints():
         ("ORD-7781", "identifier"),
         ("$15,000", "money"),
         ("2026-08-15", "number"),
+    ]
+
+
+def test_critical_clause_spans_preserve_policy_relationships_exactly():
+    text = (
+        "Context only. The customer may receive a credit only if the outage "
+        "exceeds 240 minutes. Keep retry_limit at 3 unless legal approves a "
+        "written amendment."
+    )
+
+    assert [span.text for span in critical_clause_spans(text)] == [
+        "The customer may receive a credit only if the outage exceeds 240 minutes.",
+        "Keep retry_limit at 3 unless legal approves a written amendment.",
     ]
 
 
