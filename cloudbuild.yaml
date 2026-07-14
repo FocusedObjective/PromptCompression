@@ -4,6 +4,12 @@ steps:
       - build
       - --build-arg
       - COMPRESSOR_MODEL=${_COMPRESSOR_MODEL}
+      - --build-arg
+      - COMPRESSOR_MODEL_REVISION=${_COMPRESSOR_MODEL_REVISION}
+      - --build-arg
+      - COMPRESSOR_GIT_COMMIT=${_COMPRESSOR_GIT_COMMIT}
+      - --build-arg
+      - COMPRESSOR_SOURCE_SHA256=${_COMPRESSOR_SOURCE_SHA256}
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
       - .
@@ -16,3 +22,6 @@ substitutions:
   _REPO: prompt-compression
   _SERVICE: prompt-compression
   _COMPRESSOR_MODEL: microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
+  _COMPRESSOR_MODEL_REVISION: main
+  _COMPRESSOR_GIT_COMMIT: unknown
+  _COMPRESSOR_SOURCE_SHA256: unknown

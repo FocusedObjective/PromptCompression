@@ -1439,6 +1439,7 @@ def estimate_tokens(request: TokenEstimateRequest) -> TokenEstimateResponse:
 def compress(
     request: CompressRequest,
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    x_request_id: Annotated[str | None, Header(alias="X-Request-ID")] = None,
 ) -> CompressResponse:
     tenant_profile = _tenant_profile_from_request(
         body_tenant_id=request.tenant_id,
@@ -1460,6 +1461,14 @@ def compress(
         )
         if not request.apply_deterministic_transforms:
             compression_kwargs["apply_deterministic_transforms"] = False
+        if request.evaluate_disabled_transforms:
+            compression_kwargs["evaluate_disabled_transforms"] = True
+        if request.evaluation_constraints is not None:
+            compression_kwargs["evaluation_constraints"] = (
+                request.evaluation_constraints.model_dump()
+            )
+        if x_request_id:
+            compression_kwargs["request_id"] = x_request_id
         result = compression_service.compress(**compression_kwargs)
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

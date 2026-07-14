@@ -366,12 +366,21 @@ class _ChunkedCompressionStats:
     placeholder_counts: tuple[int, ...] = ()
     char_counts: tuple[int, ...] = ()
     fallback_reason: str | None = None
+    model_output_text: str = ""
+    force_token_count: int = 0
 
 
 @dataclass(frozen=True)
 class _ChunkedCompressionResult:
     expanded: "_ExpandedCompression"
     stats: _ChunkedCompressionStats
+
+
+@dataclass(frozen=True)
+class _CompressedModelChunkResult:
+    expanded: "_ExpandedCompression | None"
+    model_output_text: str
+    force_token_count: int
 
 
 @dataclass(frozen=True)
@@ -1305,6 +1314,8 @@ class PromptCompressionService:
         llmlingua_call_count = 0
         skipped_chunk_count = 0
         fallback_reason: str | None = None
+        model_output_parts: list[str] = []
+        force_token_count = 0
 
         for chunk in chunks:
             placeholder_count = len(chunk.placeholders)
@@ -1338,10 +1349,11 @@ class PromptCompressionService:
                     labeled_tokens,
                     output_sections,
                 )
+                model_output_parts.append(chunk.text)
                 continue
 
             llmlingua_call_count += 1
-            expanded_chunk = self._compress_prepared_model_chunk(
+            compressed_chunk = self._compress_prepared_model_chunk(
                 compressor=compressor,
                 chunk=chunk,
                 target_rate=target_rate,
@@ -1350,6 +1362,9 @@ class PromptCompressionService:
                 max_force_tokens=max_force_tokens,
                 timings=timings,
             )
+            model_output_parts.append(compressed_chunk.model_output_text)
+            force_token_count += compressed_chunk.force_token_count
+            expanded_chunk = compressed_chunk.expanded
             if expanded_chunk is None:
                 skipped_chunk_count += 1
                 if fallback_reason is None:
@@ -1385,6 +1400,8 @@ class PromptCompressionService:
                 placeholder_counts=tuple(placeholder_counts),
                 char_counts=tuple(char_counts),
                 fallback_reason=fallback_reason,
+                model_output_text="".join(model_output_parts),
+                force_token_count=force_token_count,
             ),
         )
 
@@ -1409,7 +1426,7 @@ class PromptCompressionService:
         tenant_profile: TenantCompressionProfile,
         max_force_tokens: int,
         timings: dict[str, float] | None,
-    ) -> _ExpandedCompression | None:
+    ) -> _CompressedModelChunkResult:
         required_tokens = [placeholder.token for placeholder in chunk.placeholders]
 
         force_tokens_start = time.perf_counter()
@@ -1449,7 +1466,11 @@ class PromptCompressionService:
                     _elapsed_ms(placeholder_validation_start),
                 )
             LOGGER.warning("Skipping compressed output because placeholders changed")
-            return None
+            return _CompressedModelChunkResult(
+                expanded=None,
+                model_output_text=compressed_model_text,
+                force_token_count=len(force_tokens),
+            )
         if timings is not None:
             _add_timing(
                 timings,
@@ -1472,7 +1493,11 @@ class PromptCompressionService:
         )
         if timings is not None:
             _add_timing(timings, "model_expand_ms", _elapsed_ms(expand_start))
-        return expanded
+        return _CompressedModelChunkResult(
+            expanded=expanded,
+            model_output_text=compressed_model_text,
+            force_token_count=len(force_tokens),
+        )
 
     def _should_compress_segment(
         self,
@@ -2135,10 +2160,14 @@ class PromptCompressionService:
         allow_cpu_model_auto: bool | None = None,
         collect_diagnostics: bool = True,
         apply_deterministic_transforms: bool = True,
+        evaluate_disabled_transforms: bool = False,
+        evaluation_constraints: dict[str, list[str]] | None = None,
+        request_id: str | None = None,
     ) -> CompressionResult:
         start = time.perf_counter()
         timings = dict.fromkeys(TIMED_PHASES, 0.0)
         profile = tenant_profile or TenantCompressionProfile()
+        model_was_loaded = self.is_loaded
         compression_mode = self._normalize_compression_mode(mode)
 
         phase_start = time.perf_counter()
@@ -2390,7 +2419,12 @@ class PromptCompressionService:
                     deterministic_text=(
                         prepared.text
                         if llmlingua_called and prepared is not None
-                        else compressed_text
+                        else deterministic_text
+                    ),
+                    model_output_text=(
+                        chunk_stats.model_output_text
+                        if llmlingua_called and chunk_stats is not None
+                        else deterministic_text
                     ),
                     final_text=compressed_text,
                     prepared_segments=prepared_segments,
@@ -2401,7 +2435,16 @@ class PromptCompressionService:
                     deterministic_tokens=(
                         self.estimate_compression_tokens(prepared.text, profile).count
                         if llmlingua_called and prepared is not None
-                        else compressed_estimate.count
+                        else deterministic_estimate.count
+                    ),
+                    post_deterministic_tokens=deterministic_estimate.count,
+                    model_output_tokens=(
+                        self.estimate_compression_tokens(
+                            chunk_stats.model_output_text,
+                            profile,
+                        ).count
+                        if llmlingua_called and chunk_stats is not None
+                        else deterministic_estimate.count
                     ),
                     final_tokens=compressed_estimate.count,
                     target_rate=target_rate,
@@ -2419,15 +2462,23 @@ class PromptCompressionService:
                         else [item.token for item in prepared.placeholders]
                     ),
                     force_token_count=(
-                        len(force_tokens_for_text(prepared.text))
-                        if prepared is not None
-                        else len(force_tokens_for_text(deterministic_text))
-                    ) + len(profile.force_keep_tokens),
+                        chunk_stats.force_token_count
+                        if chunk_stats is not None
+                        else (
+                            len(force_tokens_for_text(prepared.text))
+                            if prepared is not None
+                            else len(force_tokens_for_text(deterministic_text))
+                        ) + len(profile.force_keep_tokens)
+                    ),
                     duplicate_candidate_count=duplicate_blocks.candidate_count,
                     duplicate_candidate_tokens=duplicate_blocks.candidate_tokens,
                     attribution_residual_tokens=(
                         token_savings.attribution_residual_tokens
                     ),
+                    evaluate_disabled_transforms=evaluate_disabled_transforms,
+                    evaluation_constraints=evaluation_constraints,
+                    request_id=request_id,
+                    cold_model_load=llmlingua_called and not model_was_loaded,
                 ),
             )
             timings["diagnostics_ms"] += _elapsed_ms(phase_start)

@@ -12,6 +12,7 @@ from app.compressor import (
 from app.eval_suite import EvalCase
 from app.schemas import (
     CompressRequest,
+    EvaluationConstraints,
     EvalRunRequest,
     TenantCompressionSettings,
     TokenEstimateRequest,
@@ -41,6 +42,9 @@ class FakeCompressionService:
         latency_budget_ms: float | None = None,
         allow_cpu_model_auto: bool | None = None,
         collect_diagnostics: bool = True,
+        evaluate_disabled_transforms: bool = False,
+        evaluation_constraints: dict[str, list[str]] | None = None,
+        request_id: str | None = None,
     ) -> CompressionResult:
         self.calls.append((text, aggressiveness, include_sections))
         self.tenant_profiles.append(tenant_profile)
@@ -52,6 +56,9 @@ class FakeCompressionService:
         self.last_latency_budget_ms = latency_budget_ms
         self.last_allow_cpu_model_auto = allow_cpu_model_auto
         self.last_collect_diagnostics = collect_diagnostics
+        self.last_evaluate_disabled_transforms = evaluate_disabled_transforms
+        self.last_evaluation_constraints = evaluation_constraints
+        self.last_request_id = request_id
         labels = [
             CompressionToken(text="Prompts", kept=True),
             CompressionToken(text="are", kept=False),
@@ -421,6 +428,33 @@ def test_compress_response_includes_diagnostics_when_requested(monkeypatch):
         == response.diagnostics.model_incremental_tokens_saved
     )
     assert service.last_collect_diagnostics is True
+
+
+def test_compress_passes_benchmark_only_analytics_controls(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    main.compress(
+        CompressRequest(
+            text="Keep UT-1042.",
+            include_diagnostics=True,
+            evaluate_disabled_transforms=True,
+            evaluation_constraints=EvaluationConstraints(
+                required_substrings=["UT-1042"],
+                required_json_keys=["ticket_id"],
+            ),
+        ),
+        x_request_id="benchmark-request-42",
+    )
+
+    assert service.last_evaluate_disabled_transforms is True
+    assert service.last_evaluation_constraints == {
+        "required_substrings": ["UT-1042"],
+        "required_whitespace_insensitive_substrings": [],
+        "forbidden_substrings": [],
+        "required_json_keys": ["ticket_id"],
+    }
+    assert service.last_request_id == "benchmark-request-42"
 
 
 def test_compress_passes_cpu_model_auto_override(monkeypatch):

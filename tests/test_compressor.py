@@ -6,7 +6,7 @@ from app.compressor import (
     build_token_savings,
 )
 from app.tenant_profiles import build_tenant_profile
-from app.token_estimator import estimate_huggingface_tokens, estimate_token_count
+from app.token_estimator import TokenEstimate, estimate_huggingface_tokens, estimate_token_count
 from tests.pipeline_helpers import RecordingCompressor, build_service_with_pipeline
 
 
@@ -307,6 +307,154 @@ def test_detailed_analytics_unchanged_hashes_match():
     assert analytics is not None
     assert analytics.original_sha256 == analytics.deterministic_sha256
     assert analytics.deterministic_sha256 == analytics.final_sha256
+
+
+def test_stage_accounting_separates_placeholder_overhead_from_net_savings():
+    compressor = ManglingProtectedTextCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    service.protected_span_coalesce_gap_chars = 0
+    text = "Please review " + " ".join(
+        f"ORD-{index:04d}" for index in range(1, 20)
+    )
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    assert result.diagnostics is not None
+    analytics = result.diagnostics.analytics
+    assert analytics is not None
+    stages = analytics.stages
+    assert stages.model_input_with_placeholders.tokens > (
+        stages.post_deterministic_content.tokens
+    )
+    assert stages.model_input_with_placeholders.placeholder_token_delta == (
+        stages.model_input_with_placeholders.tokens
+        - stages.post_deterministic_content.tokens
+    )
+    assert stages.final_restored.net_model_tokens_saved == (
+        stages.post_deterministic_content.tokens - stages.final_restored.tokens
+    )
+    assert stages.final_restored.total_tokens_saved == (
+        stages.original.tokens - stages.final_restored.tokens
+    )
+    restoration = next(
+        item
+        for item in analytics.deterministic_transforms
+        if item.transform == "placeholder_restoration"
+    )
+    substitution = next(
+        item
+        for item in analytics.deterministic_transforms
+        if item.transform == "protected_span_substitution"
+    )
+    assert restoration.tokens_saved == 0
+    assert substitution.tokens_saved == 0
+    assert substitution.token_delta == (
+        stages.model_input_with_placeholders.placeholder_token_delta
+    )
+
+
+def test_disabled_json_minification_counterfactual_does_not_change_output():
+    service = PromptCompressionService()
+    service.preprocessor.min_json_chars = 1
+    service.preprocessor.min_json_lines = 1
+    service.preprocessor.min_toon_savings = 1.0
+    service.estimate_compression_tokens = lambda value, _profile: TokenEstimate(
+        count=len(value),
+        estimator="test:characters",
+        tokenizer_backed=False,
+    )
+    text = '{\n  "ticket": "UT-1042",\n  "status": "open"\n}'
+
+    baseline = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+    evaluated = service.compress(
+        text,
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        evaluate_disabled_transforms=True,
+    )
+
+    assert evaluated.compressed_text == baseline.compressed_text
+    assert evaluated.diagnostics is not None
+    analytics = evaluated.diagnostics.analytics
+    assert analytics is not None
+    diagnostic = next(
+        item
+        for item in analytics.deterministic_transforms
+        if item.transform == "json_minification"
+    )
+    assert diagnostic.enabled is False
+    assert diagnostic.gate_reason_counts == {"tenant_configuration_disabled": 1}
+    assert diagnostic.counterfactual is not None
+    assert diagnostic.counterfactual.would_apply is True
+    assert diagnostic.counterfactual.estimated_tokens_saved > 0
+    assert diagnostic.counterfactual.output_sha256
+
+
+def test_evaluation_constraints_report_quality_without_influencing_compression():
+    service = PromptCompressionService()
+    text = "Keep UT-1042 and remove nothing."
+    constraints = {
+        "required_substrings": ["UT-1042", "missing-value"],
+        "required_whitespace_insensitive_substrings": ["Keep   UT-1042"],
+        "forbidden_substrings": ["remove nothing"],
+        "required_json_keys": [],
+    }
+
+    baseline = service.compress(
+        text,
+        aggressiveness=0.0,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+    evaluated = service.compress(
+        text,
+        aggressiveness=0.0,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+        evaluation_constraints=constraints,
+    )
+
+    assert evaluated.compressed_text == baseline.compressed_text
+    assert evaluated.diagnostics is not None
+    analytics = evaluated.diagnostics.analytics
+    assert analytics is not None
+    checks = analytics.evaluation_constraints
+    assert checks is not None
+    assert checks.passed is False
+    assert checks.missing_required_substrings == ["missing-value"]
+    assert checks.missing_required_whitespace_insensitive_substrings == []
+    assert checks.present_forbidden_substrings == ["remove nothing"]
+
+
+def test_repeatability_metadata_matches_identical_deterministic_runs():
+    service = PromptCompressionService()
+    text = "Repeatable benchmark prompt."
+
+    first = service.compress(
+        text,
+        aggressiveness=0.0,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+    second = service.compress(
+        text,
+        aggressiveness=0.0,
+        mode=COMPRESSION_MODE_DETERMINISTIC,
+    )
+
+    assert first.diagnostics is not None and second.diagnostics is not None
+    first_repeat = first.diagnostics.analytics.repeatability
+    second_repeat = second.diagnostics.analytics.repeatability
+    assert first_repeat.cache_status == "not_configured"
+    assert first_repeat.cache_bypassed is True
+    assert second_repeat.deterministic_repeat_count == (
+        first_repeat.deterministic_repeat_count + 1
+    )
+    assert second_repeat.deterministic_matches_previous is True
 
 
 def test_token_savings_arithmetic_for_all_normal_paths():

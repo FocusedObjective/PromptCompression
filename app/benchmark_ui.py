@@ -816,7 +816,7 @@ BENCHMARK_HTML = """
 
     function baseRow(testCase, repeat, measured) {
       return {
-        schema_version: "benchmark.v2",
+        schema_version: "benchmark.v3",
         status: "started",
         error: "",
         measured,
@@ -856,6 +856,7 @@ BENCHMARK_HTML = """
           mode: compressionModeInput.value,
           include_sections: includeSectionsInput.checked,
           include_diagnostics: true,
+          evaluate_disabled_transforms: true,
         };
         const latencyBudget = Number(latencyBudgetInput.value);
         if (latencyBudgetInput.value.trim() && Number.isFinite(latencyBudget)) {
@@ -908,7 +909,7 @@ BENCHMARK_HTML = """
       row.original_sha256 = analytics.original_sha256 || "";
       row.final_text = data.compressed_text || "";
       row.analytics = analytics;
-      row.stages = {
+      row.stages = analytics.stages || {
         deterministicText: analytics.deterministic_text,
         deterministicSha256: analytics.deterministic_sha256,
         deterministicCharacters: analytics.deterministic_characters,

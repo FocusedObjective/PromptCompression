@@ -301,7 +301,7 @@ def main() -> int:
     cases = build_cases(target_tokens, json_ratios, html_ratios)
     cohort_id = cohort_id_for_cases(cases)
     metadata["cohort_id"] = cohort_id
-    metadata["benchmark_schema_version"] = "benchmark.v2"
+    metadata["benchmark_schema_version"] = "benchmark.v3"
     print(f"Generating {len(cases)} prompt cases...")
     write_case_manifest(output_dir / "cases.json", cases, metadata)
     if args.save_prompts:
@@ -727,6 +727,7 @@ def run_one_http(
         ],
         "include_sections": args.include_sections,
         "include_diagnostics": True,
+        "evaluate_disabled_transforms": True,
     }
     if args.latency_budget_ms is not None:
         payload["latency_budget_ms"] = args.latency_budget_ms
@@ -785,6 +786,7 @@ def run_one_in_process(
             mode=base_row["requested_compression_mode"],
             latency_budget_ms=args.latency_budget_ms,
             collect_diagnostics=True,
+            evaluate_disabled_transforms=True,
             apply_deterministic_transforms=base_row[
                 "apply_deterministic_transforms"
             ],
@@ -838,7 +840,7 @@ def base_result_row(
     cohort_id: str,
 ) -> dict[str, Any]:
     row = {
-        "schema_version": "benchmark.v2",
+        "schema_version": "benchmark.v3",
         "status": "started",
         "error": "",
         "measured": measured,
@@ -921,7 +923,7 @@ def add_response_fields(row: dict[str, Any], body: dict[str, Any]) -> dict[str, 
             "output_chars": len(body.get("compressed_text", "")),
             "final_text": body.get("compressed_text", ""),
             "analytics": analytics,
-            "stages": {
+            "stages": analytics.get("stages") or {
                 "deterministicText": analytics.get("deterministic_text"),
                 "deterministicSha256": analytics.get("deterministic_sha256"),
                 "deterministicCharacters": analytics.get("deterministic_characters"),

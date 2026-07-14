@@ -45,6 +45,13 @@ class TenantCompressionSettings(BaseModel):
     )
 
 
+class EvaluationConstraints(BaseModel):
+    required_substrings: list[str] = Field(default_factory=list)
+    required_whitespace_insensitive_substrings: list[str] = Field(default_factory=list)
+    forbidden_substrings: list[str] = Field(default_factory=list)
+    required_json_keys: list[str] = Field(default_factory=list)
+
+
 class CompressRequest(BaseModel):
     tenant_id: str | None = Field(
         default=None,
@@ -96,6 +103,20 @@ class CompressRequest(BaseModel):
         description=(
             "Apply deterministic preprocessing before the model. Benchmark paired "
             "conditions may disable it; production callers should normally leave it on."
+        ),
+    )
+    evaluate_disabled_transforms: bool = Field(
+        default=False,
+        description=(
+            "Evaluate disabled deterministic transforms without changing output. "
+            "Intended for authorized benchmark diagnostics only."
+        ),
+    )
+    evaluation_constraints: EvaluationConstraints | None = Field(
+        default=None,
+        description=(
+            "Non-influencing benchmark checks evaluated after compression. These do "
+            "not add force-keep tokens or otherwise alter compression."
         ),
     )
 

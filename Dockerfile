@@ -14,9 +14,14 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
 ARG COMPRESSOR_MODEL=microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
-ENV COMPRESSOR_MODEL=${COMPRESSOR_MODEL}
+ARG COMPRESSOR_MODEL_REVISION=main
+ARG COMPRESSOR_GIT_COMMIT=unknown
+ARG COMPRESSOR_SOURCE_SHA256=unknown
+ENV COMPRESSOR_MODEL=${COMPRESSOR_MODEL} \
+    COMPRESSOR_GIT_COMMIT=${COMPRESSOR_GIT_COMMIT} \
+    COMPRESSOR_SOURCE_SHA256=${COMPRESSOR_SOURCE_SHA256}
 RUN mkdir -p /cache/huggingface/hub \
-    && python -c "import os; from huggingface_hub import snapshot_download; snapshot_download(os.environ['COMPRESSOR_MODEL'], cache_dir=os.environ['HF_HUB_CACHE'])"
+    && python -c "from pathlib import Path; from huggingface_hub import snapshot_download; path = snapshot_download('${COMPRESSOR_MODEL}', revision='${COMPRESSOR_MODEL_REVISION}', cache_dir='/cache/huggingface/hub'); Path('/app/model_revision.txt').write_text(Path(path).name, encoding='utf-8')"
 ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1
 

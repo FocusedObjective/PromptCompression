@@ -8,17 +8,22 @@ import platform
 import re
 import sys
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Any, Callable
 
 from app.protected_spans import protected_spans_for_text
 from app.version import DEPLOYMENT_VERSION
 
 
-DIAGNOSTICS_SCHEMA_VERSION = "compression-diagnostics.v2"
-BENCHMARK_SCHEMA_VERSION = "benchmark.v2"
+DIAGNOSTICS_SCHEMA_VERSION = "compression-diagnostics.v3"
+BENCHMARK_SCHEMA_VERSION = "benchmark.v3"
+
+_REPEATABILITY_LOCK = Lock()
+_REPEATABILITY: dict[str, tuple[str, int]] = {}
 
 TRANSFORM_CODES = (
     "whitespace_canonicalization",
@@ -64,9 +69,61 @@ class TransformDiagnostic:
     input_tokens: int
     output_tokens: int
     tokens_saved: int
+    token_delta: int
     status: str
     reason: str
     elapsed_ms: float
+    enabled: bool = True
+    gate_reason_counts: dict[str, int] = field(default_factory=dict)
+    gate_reason_estimated_tokens_saved: dict[str, int] = field(default_factory=dict)
+    counterfactual: "CounterfactualDiagnostic | None" = None
+
+
+@dataclass(frozen=True)
+class CounterfactualDiagnostic:
+    would_apply: bool
+    estimated_tokens_saved: int
+    output_sha256: str
+
+
+@dataclass(frozen=True)
+class StageDiagnostic:
+    sha256: str
+    characters: int
+    tokens: int
+    net_tokens_saved: int | None = None
+    placeholder_token_delta: int | None = None
+    raw_model_tokens_saved: int | None = None
+    net_model_tokens_saved: int | None = None
+    total_tokens_saved: int | None = None
+
+
+@dataclass(frozen=True)
+class CompressionStages:
+    original: StageDiagnostic
+    post_deterministic_content: StageDiagnostic
+    model_input_with_placeholders: StageDiagnostic
+    model_output_before_restoration: StageDiagnostic
+    final_restored: StageDiagnostic
+
+
+@dataclass(frozen=True)
+class EvaluationConstraintsResult:
+    passed: bool
+    missing_required_substrings: list[str] = field(default_factory=list)
+    missing_required_whitespace_insensitive_substrings: list[str] = field(
+        default_factory=list
+    )
+    present_forbidden_substrings: list[str] = field(default_factory=list)
+    missing_required_json_keys: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RepeatabilityMetadata:
+    cache_status: str
+    cache_bypassed: bool
+    deterministic_repeat_count: int
+    deterministic_matches_previous: bool | None
 
 
 @dataclass(frozen=True)
@@ -104,8 +161,10 @@ class IntegrityValidation:
 @dataclass(frozen=True)
 class CompressionProvenance:
     compressor_git_commit: str
+    compressor_source_sha256: str
     deployment_version: str
     model_checkpoint: str
+    model_revision: str
     tokenizer_name: str
     tokenizer_version: str
     configuration_sha256: str
@@ -117,12 +176,16 @@ class CompressionProvenance:
     diagnostics_schema_version: str
     token_estimator: str
     runtime_versions: dict[str, str]
+    seed: int
+    deterministic_algorithms_enabled: bool
 
 
 @dataclass(frozen=True)
 class DetailedAnalytics:
     diagnostics_schema_version: str
     original_sha256: str
+    request_id: str
+    stages: CompressionStages
     deterministic_text: str
     deterministic_sha256: str
     deterministic_characters: int
@@ -130,6 +193,7 @@ class DetailedAnalytics:
     deterministic_tokens_saved: int
     deterministic_transforms: list[TransformDiagnostic]
     deterministic_gate_reasons: dict[str, int]
+    deterministic_gate_potential_tokens_saved: dict[str, int]
     deterministic_component_tokens_saved: int
     deterministic_attribution_residual_tokens: int
     deterministic_attribution_residual_reason: str | None
@@ -152,6 +216,10 @@ class DetailedAnalytics:
     model_skip_or_fallback_reason: str | None
     attribution_residual_tokens: int
     attribution_residual_reason: str | None
+    evaluation_constraints: EvaluationConstraintsResult | None
+    repeatability: RepeatabilityMetadata
+    timing_semantics: dict[str, str]
+    cold_model_load: bool
     integrity: IntegrityValidation
     provenance: CompressionProvenance
 
@@ -182,6 +250,13 @@ def build_detailed_analytics(
     duplicate_candidate_count: int,
     duplicate_candidate_tokens: int,
     attribution_residual_tokens: int,
+    model_output_text: str,
+    post_deterministic_tokens: int,
+    model_output_tokens: int,
+    evaluate_disabled_transforms: bool = False,
+    evaluation_constraints: dict[str, list[str]] | None = None,
+    request_id: str | None = None,
+    cold_model_load: bool = False,
 ) -> DetailedAnalytics:
     def estimate(value: str) -> int:
         return service.estimate_compression_tokens(value, profile).count
@@ -192,6 +267,7 @@ def build_detailed_analytics(
         force_dropped_text=force_dropped_text,
         pipeline_text=pipeline_text,
         deterministic_text=deterministic_text,
+        model_output_text=model_output_text,
         final_text=final_text,
         prepared_segments=prepared_segments,
         final_segments=final_segments,
@@ -200,6 +276,7 @@ def build_detailed_analytics(
         placeholder_tokens=placeholder_tokens,
         duplicate_candidate_count=duplicate_candidate_count,
         duplicate_candidate_tokens=duplicate_candidate_tokens,
+        evaluate_disabled_transforms=evaluate_disabled_transforms,
     )
     opportunities = _candidate_opportunities(
         service,
@@ -209,6 +286,7 @@ def build_detailed_analytics(
         duplicate_candidate_tokens,
     )
     gate_reasons: Counter[str] = Counter()
+    gate_potential_tokens: Counter[str] = Counter()
     for transform in transforms:
         if transform.status == "applied":
             continue
@@ -217,6 +295,10 @@ def build_detailed_analytics(
             if transform.status == "no_candidate"
             else max(1, transform.candidate_count - transform.applied_count)
         )
+        if transform.counterfactual is not None:
+            gate_potential_tokens[transform.reason] += (
+                transform.counterfactual.estimated_tokens_saved
+            )
     if opportunities.json_like_invalid_region_count:
         gate_reasons["json_parse_failed"] += (
             opportunities.json_like_invalid_region_count
@@ -227,24 +309,63 @@ def build_detailed_analytics(
         placeholder_tokens,
     )
     provenance = _provenance(service, profile, token_estimator)
-    incremental_saved = max(0, deterministic_tokens - final_tokens)
-    deterministic_saved = max(0, original_tokens - deterministic_tokens)
+    net_model_saved = max(0, post_deterministic_tokens - final_tokens)
+    net_deterministic_saved = max(0, original_tokens - post_deterministic_tokens)
+    legacy_model_incremental_saved = max(0, deterministic_tokens - final_tokens)
+    legacy_deterministic_saved = max(0, original_tokens - deterministic_tokens)
     component_saved = sum(
         item.tokens_saved
         for item in transforms
-        if item.transform != "placeholder_restoration"
+        if item.transform not in {
+            "protected_span_substitution",
+            "placeholder_restoration",
+        }
     )
-    deterministic_residual = deterministic_saved - component_saved
+    deterministic_residual = net_deterministic_saved - component_saved
+    resolved_request_id = request_id or str(uuid.uuid4())
+    repeatability = _repeatability_metadata(
+        original_sha256=sha256_text(input_text),
+        configuration_sha256=provenance.configuration_sha256,
+        deterministic_sha256=sha256_text(pipeline_text),
+    )
+    placeholder_delta = deterministic_tokens - post_deterministic_tokens
+    raw_model_saved = max(0, deterministic_tokens - model_output_tokens)
+    total_saved = max(0, original_tokens - final_tokens)
+    stages = CompressionStages(
+        original=_stage(input_text, original_tokens),
+        post_deterministic_content=StageDiagnostic(
+            **_stage_values(pipeline_text, post_deterministic_tokens),
+            net_tokens_saved=net_deterministic_saved,
+        ),
+        model_input_with_placeholders=StageDiagnostic(
+            **_stage_values(deterministic_text, deterministic_tokens),
+            placeholder_token_delta=placeholder_delta,
+        ),
+        model_output_before_restoration=StageDiagnostic(
+            **_stage_values(model_output_text, model_output_tokens),
+            raw_model_tokens_saved=raw_model_saved,
+        ),
+        final_restored=StageDiagnostic(
+            **_stage_values(final_text, final_tokens),
+            net_model_tokens_saved=net_model_saved,
+            total_tokens_saved=total_saved,
+        ),
+    )
     return DetailedAnalytics(
         diagnostics_schema_version=DIAGNOSTICS_SCHEMA_VERSION,
         original_sha256=sha256_text(input_text),
+        request_id=resolved_request_id,
+        stages=stages,
         deterministic_text=deterministic_text,
         deterministic_sha256=sha256_text(deterministic_text),
         deterministic_characters=len(deterministic_text),
         deterministic_tokens=deterministic_tokens,
-        deterministic_tokens_saved=deterministic_saved,
+        deterministic_tokens_saved=legacy_deterministic_saved,
         deterministic_transforms=transforms,
         deterministic_gate_reasons=dict(sorted(gate_reasons.items())),
+        deterministic_gate_potential_tokens_saved=dict(
+            sorted(gate_potential_tokens.items())
+        ),
         deterministic_component_tokens_saved=component_saved,
         deterministic_attribution_residual_tokens=deterministic_residual,
         deterministic_attribution_residual_reason=(
@@ -259,9 +380,11 @@ def build_detailed_analytics(
         final_sha256=sha256_text(final_text),
         final_characters=len(final_text),
         final_tokens=final_tokens,
-        model_incremental_tokens_saved=incremental_saved,
+        model_incremental_tokens_saved=legacy_model_incremental_saved,
         model_incremental_reduction=(
-            0.0 if deterministic_tokens <= 0 else incremental_saved / deterministic_tokens
+            0.0
+            if deterministic_tokens <= 0
+            else legacy_model_incremental_saved / deterministic_tokens
         ),
         model_called=model_called,
         model_call_count=model_call_count,
@@ -277,6 +400,16 @@ def build_detailed_analytics(
         attribution_residual_reason=(
             None if attribution_residual_tokens == 0 else "token_estimator_non_additivity"
         ),
+        evaluation_constraints=_evaluate_constraints(
+            final_text, evaluation_constraints
+        ),
+        repeatability=repeatability,
+        timing_semantics={
+            "total_ms": "inclusive",
+            "phase_timings": "exclusive",
+            "diagnostics_ms": "exclusive_observer_overhead",
+        },
+        cold_model_load=cold_model_load,
         integrity=integrity,
         provenance=provenance,
     )
@@ -290,6 +423,7 @@ def _transform_diagnostics(
     force_dropped_text: str,
     pipeline_text: str,
     deterministic_text: str,
+    model_output_text: str,
     final_text: str,
     prepared_segments: list[Any],
     final_segments: list[Any],
@@ -298,6 +432,7 @@ def _transform_diagnostics(
     placeholder_tokens: list[str],
     duplicate_candidate_count: int,
     duplicate_candidate_tokens: int,
+    evaluate_disabled_transforms: bool,
 ) -> list[TransformDiagnostic]:
     diagnostics: list[TransformDiagnostic] = []
 
@@ -312,10 +447,19 @@ def _transform_diagnostics(
         candidate_characters: int | None = None,
         candidate_tokens: int | None = None,
         started: float | None = None,
+        enabled: bool = True,
+        gate_reason_counts: dict[str, int] | None = None,
+        gate_reason_estimated_tokens_saved: dict[str, int] | None = None,
+        counterfactual: CounterfactualDiagnostic | None = None,
+        tokens_saved_override: int | None = None,
     ) -> None:
         source_tokens = estimate(source) if source else 0
         output_tokens = estimate(output) if output else 0
-        saved = max(0, source_tokens - output_tokens)
+        saved = (
+            max(0, source_tokens - output_tokens)
+            if tokens_saved_override is None
+            else tokens_saved_override
+        )
         applied = int(source != output) if applied_count is None else applied_count
         if applied:
             status = "applied" if saved > 0 or code in {
@@ -344,11 +488,28 @@ def _transform_diagnostics(
                 input_tokens=source_tokens,
                 output_tokens=output_tokens,
                 tokens_saved=saved,
+                token_delta=output_tokens - source_tokens,
                 status=status,
                 reason=stable_reason,
                 elapsed_ms=(
                     0.0 if started is None else (time.perf_counter() - started) * 1000
                 ),
+                enabled=enabled,
+                gate_reason_counts=(
+                    gate_reason_counts
+                    if gate_reason_counts is not None
+                    else ({stable_reason: max(1, candidate_count - applied)} if status != "applied" else {})
+                ),
+                gate_reason_estimated_tokens_saved=(
+                    gate_reason_estimated_tokens_saved
+                    if gate_reason_estimated_tokens_saved is not None
+                    else (
+                        {stable_reason: counterfactual.estimated_tokens_saved}
+                        if status != "applied" and counterfactual is not None
+                        else {}
+                    )
+                ),
+                counterfactual=counterfactual,
             )
         )
 
@@ -395,11 +556,27 @@ def _transform_diagnostics(
                 reason = "below_minimum_size"
         elif code == "nocompress_wrapper_handling":
             candidate_count = nocompress_candidate_count
+        counterfactual = None
+        enabled = True
         if code == "json_minification" and not service.preprocessor.enable_json_minify:
             reason = "tenant_configuration_disabled"
+            enabled = False
+            if evaluate_disabled_transforms:
+                counterfactual = _json_minification_counterfactual(
+                    service, input_text, profile
+                )
         elif candidates and source == output:
             reason = "no_token_savings"
-        add(code, source, output, candidate_count, reason=reason, started=started)
+        add(
+            code,
+            source,
+            output,
+            candidate_count,
+            reason=reason,
+            started=started,
+            enabled=enabled,
+            counterfactual=counterfactual,
+        )
 
     started = time.perf_counter()
     force_candidates = sum(
@@ -442,17 +619,19 @@ def _transform_diagnostics(
         applied_count=int(bool(protected_count and pipeline_text != deterministic_text)),
         reason="inside_protected_span",
         started=started,
+        tokens_saved_override=0,
     )
     started = time.perf_counter()
     restored_count = sum(token not in final_text for token in placeholder_tokens)
     add(
         "placeholder_restoration",
-        deterministic_text,
+        model_output_text,
         final_text,
         protected_count,
         applied_count=restored_count,
         reason="transform_failed" if restored_count != protected_count else None,
         started=started,
+        tokens_saved_override=0,
     )
     order = {name: index for index, name in enumerate(TRANSFORM_CODES)}
     return sorted(diagnostics, key=lambda item: order[item.transform])
@@ -570,6 +749,146 @@ def _canonical_json_hash(text: str) -> str | None:
     return sha256_text(canonical)
 
 
+def _stage(text: str, tokens: int) -> StageDiagnostic:
+    return StageDiagnostic(**_stage_values(text, tokens))
+
+
+def _stage_values(text: str, tokens: int) -> dict[str, str | int]:
+    return {
+        "sha256": sha256_text(text),
+        "characters": len(text),
+        "tokens": tokens,
+    }
+
+
+def _json_minification_counterfactual(
+    service: Any,
+    text: str,
+    profile: Any,
+) -> CounterfactualDiagnostic:
+    cursor = 0
+    original_parts: list[str] = []
+    minified_parts: list[str] = []
+    while cursor < len(text):
+        start = service.preprocessor._find_json_start(text, cursor)
+        if start is None:
+            break
+        end = service.preprocessor._find_balanced_json_end(text, start)
+        if end is None:
+            cursor = start + 1
+            continue
+        candidate = text[start:end]
+        try:
+            value = json.loads(candidate)
+        except json.JSONDecodeError:
+            cursor = end
+            continue
+        original_parts.append(candidate)
+        minified_parts.append(
+            json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        )
+        cursor = end
+    original = "".join(original_parts)
+    minified = "".join(minified_parts)
+    original_tokens = (
+        service.estimate_compression_tokens(original, profile).count if original else 0
+    )
+    minified_tokens = (
+        service.estimate_compression_tokens(minified, profile).count if minified else 0
+    )
+    savings = max(0, original_tokens - minified_tokens)
+    return CounterfactualDiagnostic(
+        would_apply=bool(original_parts and savings > 0),
+        estimated_tokens_saved=savings,
+        output_sha256=sha256_text(minified),
+    )
+
+
+def _evaluate_constraints(
+    output: str,
+    constraints: dict[str, list[str]] | None,
+) -> EvaluationConstraintsResult | None:
+    if not constraints:
+        return None
+    required = constraints.get("required_substrings", [])
+    whitespace_required = constraints.get(
+        "required_whitespace_insensitive_substrings", []
+    )
+    forbidden = constraints.get("forbidden_substrings", [])
+    json_keys = constraints.get("required_json_keys", [])
+    normalized_output = re.sub(r"\s+", " ", output).strip()
+    available_json_keys = _json_keys_in_text(output)
+    result = EvaluationConstraintsResult(
+        passed=True,
+        missing_required_substrings=[value for value in required if value not in output],
+        missing_required_whitespace_insensitive_substrings=[
+            value
+            for value in whitespace_required
+            if re.sub(r"\s+", " ", value).strip() not in normalized_output
+        ],
+        present_forbidden_substrings=[value for value in forbidden if value in output],
+        missing_required_json_keys=[
+            value for value in json_keys if value not in available_json_keys
+        ],
+    )
+    passed = not (
+        result.missing_required_substrings
+        or result.missing_required_whitespace_insensitive_substrings
+        or result.present_forbidden_substrings
+        or result.missing_required_json_keys
+    )
+    return EvaluationConstraintsResult(
+        passed=passed,
+        missing_required_substrings=result.missing_required_substrings,
+        missing_required_whitespace_insensitive_substrings=(
+            result.missing_required_whitespace_insensitive_substrings
+        ),
+        present_forbidden_substrings=result.present_forbidden_substrings,
+        missing_required_json_keys=result.missing_required_json_keys,
+    )
+
+
+def _json_keys_in_text(text: str) -> set[str]:
+    keys: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            keys.update(str(key) for key in value)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    try:
+        visit(json.loads(text.strip()))
+    except json.JSONDecodeError:
+        for match in re.finditer(r'"(?P<key>[^"\\]+)"\s*:', text):
+            keys.add(match.group("key"))
+    return keys
+
+
+def _repeatability_metadata(
+    *,
+    original_sha256: str,
+    configuration_sha256: str,
+    deterministic_sha256: str,
+) -> RepeatabilityMetadata:
+    key = f"{configuration_sha256}:{original_sha256}"
+    with _REPEATABILITY_LOCK:
+        previous = _REPEATABILITY.get(key)
+        repeat_count = 1 if previous is None else previous[1] + 1
+        _REPEATABILITY[key] = (deterministic_sha256, repeat_count)
+    return RepeatabilityMetadata(
+        cache_status="not_configured",
+        cache_bypassed=True,
+        deterministic_repeat_count=repeat_count,
+        deterministic_matches_previous=(
+            None if previous is None else previous[0] == deterministic_sha256
+        ),
+    )
+
+
 def _provenance(service: Any, profile: Any, token_estimator: str) -> CompressionProvenance:
     settings = {
         "device": service.device,
@@ -614,8 +933,10 @@ def _provenance(service: Any, profile: Any, token_estimator: str) -> Compression
     )
     return CompressionProvenance(
         compressor_git_commit=_git_commit(),
+        compressor_source_sha256=_source_sha256(),
         deployment_version=DEPLOYMENT_VERSION,
         model_checkpoint=service.model_name,
+        model_revision=_model_revision(),
         tokenizer_name=token_estimator,
         tokenizer_version=_package_version("transformers"),
         configuration_sha256=sha256_text(config_json),
@@ -642,6 +963,8 @@ def _provenance(service: Any, profile: Any, token_estimator: str) -> Compression
             "torch": _package_version("torch"),
             "transformers": _package_version("transformers"),
         },
+        seed=int(os.getenv("COMPRESSOR_SEED", "0")),
+        deterministic_algorithms_enabled=_deterministic_algorithms_enabled(),
     )
 
 
@@ -650,6 +973,25 @@ def _package_version(name: str) -> str:
         return importlib.metadata.version(name)
     except importlib.metadata.PackageNotFoundError:
         return "not_installed"
+
+
+def _model_revision() -> str:
+    configured = os.getenv("COMPRESSOR_MODEL_REVISION")
+    if configured:
+        return configured
+    revision_file = Path("/app/model_revision.txt")
+    try:
+        return revision_file.read_text(encoding="utf-8").strip() or "unknown"
+    except OSError:
+        return "local_or_unknown"
+
+
+def _deterministic_algorithms_enabled() -> bool:
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return False
+    check = getattr(torch, "are_deterministic_algorithms_enabled", None)
+    return bool(check()) if callable(check) else False
 
 
 def _git_commit() -> str:
@@ -671,3 +1013,20 @@ def _git_commit() -> str:
         return head
     except OSError:
         return "unknown"
+
+
+def _source_sha256() -> str:
+    configured = os.getenv("COMPRESSOR_SOURCE_SHA256")
+    if configured:
+        return configured
+    root = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    try:
+        for path in sorted(root.rglob("*.py")):
+            digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    except OSError:
+        return "unknown"
+    return digest.hexdigest()

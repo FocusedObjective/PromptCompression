@@ -213,19 +213,40 @@ measurements adds work. Enable them explicitly in the request with:
 }
 ```
 
-Diagnostics schema `compression-diagnostics.v2` adds an `analytics` object.
+Diagnostics schema `compression-diagnostics.v3` adds an `analytics` object.
 It is intentionally expensive and contains the exact deterministic/model-stage
-text, so only enable it for authorized benchmark inputs. The model-stage hash is
-always the deterministic hash. For deterministic-only runs, deterministic text
-is exactly the final text.
+text, so only enable it for authorized benchmark inputs. Version 3 separates
+content compression from temporary placeholder expansion and model restoration.
+The older flat analytics fields remain for backward compatibility.
 
 Sanitized shape (hashes shortened here only for readability):
 
 ```json
 {
   "analytics": {
-    "diagnostics_schema_version": "compression-diagnostics.v2",
+    "diagnostics_schema_version": "compression-diagnostics.v3",
+    "request_id": "9da52f6a-...",
     "original_sha256": "91b7...",
+    "stages": {
+      "original": {"sha256": "91b7...", "characters": 37, "tokens": 10},
+      "post_deterministic_content": {
+        "sha256": "91b7...", "characters": 37, "tokens": 10,
+        "net_tokens_saved": 0
+      },
+      "model_input_with_placeholders": {
+        "sha256": "22cc...", "characters": 30, "tokens": 12,
+        "placeholder_token_delta": 2
+      },
+      "model_output_before_restoration": {
+        "sha256": "48aa...", "characters": 24, "tokens": 8,
+        "raw_model_tokens_saved": 4
+      },
+      "final_restored": {
+        "sha256": "7a5d...", "characters": 31, "tokens": 9,
+        "net_model_tokens_saved": 1,
+        "total_tokens_saved": 1
+      }
+    },
     "deterministic_text": "Review __CK_KEEP_0000__ now.",
     "deterministic_sha256": "22cc...",
     "deterministic_characters": 30,
@@ -242,10 +263,13 @@ Sanitized shape (hashes shortened here only for readability):
         "output_characters": 30,
         "input_tokens": 10,
         "output_tokens": 8,
-        "tokens_saved": 2,
+        "tokens_saved": 0,
+        "token_delta": 2,
         "status": "applied",
         "reason": "applied",
-        "elapsed_ms": 0.08
+        "elapsed_ms": 0.08,
+        "enabled": true,
+        "gate_reason_counts": {}
       }
     ],
     "deterministic_gate_reasons": {"no_candidate": 6},
@@ -257,9 +281,11 @@ Sanitized shape (hashes shortened here only for readability):
       "structural_validation_warnings": []
     },
     "provenance": {
-      "benchmark_schema_version": "benchmark.v2",
-      "diagnostics_schema_version": "compression-diagnostics.v2",
+      "benchmark_schema_version": "benchmark.v3",
+      "diagnostics_schema_version": "compression-diagnostics.v3",
       "compressor_git_commit": "0123456789abcdef",
+      "compressor_source_sha256": "cb62...",
+      "model_revision": "c4c5...",
       "configuration_sha256": "73de..."
     }
   }
@@ -279,6 +305,28 @@ Stable deterministic gate reasons are `no_candidate`,
 `transform_failed`, and `duplicate_not_structurally_safe_to_remove`. An applied
 transform uses reason `applied`. Status values are `applied`, `no_candidate`,
 `skipped`, `failed`, and `no_savings`.
+
+For disabled-transform opportunity analysis and unbiased reliability checks,
+benchmark callers may additionally send:
+
+```json
+{
+  "include_diagnostics": true,
+  "evaluate_disabled_transforms": true,
+  "evaluation_constraints": {
+    "required_substrings": ["UT-1042"],
+    "required_whitespace_insensitive_substrings": [],
+    "forbidden_substrings": [],
+    "required_json_keys": ["ticket_id"]
+  }
+}
+```
+
+Counterfactuals report only whether a disabled transform would apply, estimated
+token savings, and an output hash; they never change the returned compressed
+text. Evaluation constraints run after compression and never become force-keep
+tokens. Deep diagnostics are available on `/compress`; `/v1/compress` retains
+its compatibility schema.
 
 ### `POST /tokens/estimate`
 
@@ -689,7 +737,7 @@ python scripts\benchmark_performance.py `
   --label "tenant=kanban-zone"
 ```
 
-All conditions reuse the same in-memory cases. Each `benchmark.v2` JSONL record
+All conditions reuse the same in-memory cases. Each `benchmark.v3` JSONL record
 includes `cohort_id`, `condition_id`, `prompt_id`, `original_sha256`, the original
 and final text, nested `stages`, candidate opportunities, integrity results, and
 provenance. Export aborts if prompt IDs or original hashes diverge between paired
