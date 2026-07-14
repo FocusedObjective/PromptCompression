@@ -147,6 +147,7 @@ def test_index_returns_prompt_compression_ui():
     assert "Prompt Compression" in body
     assert "Eval Suite" in body
     assert 'href="/benchmark"' in body
+    assert 'href="/experiments"' in body
     assert 'href="/research"' in body
     assert "Dropped Words Highlighted" in body
     assert "Diagnostic Logs" in body
@@ -265,6 +266,7 @@ def test_eval_index_returns_eval_ui():
     assert "Prompt Compression Eval" in body
     assert "Run Selected" in body
     assert 'href="/benchmark"' in body
+    assert 'href="/experiments"' in body
     assert 'href="/research"' in body
     assert "/eval/run" in body
 
@@ -275,6 +277,7 @@ def test_benchmark_index_returns_benchmark_page():
 
     assert "Performance Benchmark" in body
     assert 'href="/eval"' in body
+    assert 'href="/experiments"' in body
     assert "include_diagnostics" in body
     assert "Download Raw JSONL" in body
     assert "LLMLingua p50" in body
@@ -300,12 +303,36 @@ def test_research_index_returns_research_page():
 
     assert "Prompt Compression Research" in body
     assert 'href="/benchmark"' in body
+    assert 'href="/experiments"' in body
     assert "LLMLingua-2 BERT-base" in body
     assert "PCToolkit Assessment" in body
     assert "not as a production runtime dependency" in body
     assert "SCOPE: A Generative Approach" in body
     assert "Toolkit for Prompt Compression" in body
     assert "Hugging Face PEFT" in body
+
+
+def test_experiments_index_returns_evidence_ledger():
+    response = main.experiments_index()
+    body = response.body.decode()
+
+    assert "Compression experiments, with receipts." in body
+    assert "Current phases" in body
+    assert "Fixed safety corpus" in body
+    assert "Delivery Tower prompt slice" in body
+    assert "Integrity rollback &amp; critical-clause shielding" in body
+    assert "json_minify_safe" in body
+    assert "safe_stack_v1" in body
+    assert "15.9%" in body
+    assert 'href="/benchmark"' in body
+    assert 'aria-current="page"' in body
+
+
+def test_experiments_http_allows_iframe_embedding():
+    response = TestClient(main.app).get("/experiments")
+
+    assert response.status_code == 200
+    assert response.headers["content-security-policy"] == "frame-ancestors *"
 
 
 def test_eval_cases_endpoint_returns_fixture_cases():

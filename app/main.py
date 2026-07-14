@@ -16,6 +16,7 @@ from app.compressor import (
 from app.eval_suite import evaluate_compression, load_eval_cases, quality_passed
 from app.eval_ui import EVAL_HTML
 from app.embed_ui import EMBED_HTML
+from app.experiments_ui import EXPERIMENTS_HTML
 from app.message_compression import (
     compress_user_messages,
     estimate_content_token_details,
@@ -574,6 +575,7 @@ APP_HTML = """
         <nav class="nav-links" aria-label="Primary navigation">
           <a class="nav-link" href="/eval">Eval Suite</a>
           <a class="nav-link" href="/benchmark">Benchmark</a>
+          <a class="nav-link" href="/experiments">Experiments</a>
           <a class="nav-link" href="/research">Research</a>
         </nav>
       </div>
@@ -1313,6 +1315,11 @@ def eval_index() -> HTMLResponse:
 @app.get("/research", response_class=HTMLResponse)
 def research_index() -> HTMLResponse:
     return HTMLResponse(content=RESEARCH_HTML, headers=DASHBOARD_EMBED_HEADERS)
+
+
+@app.get("/experiments", response_class=HTMLResponse)
+def experiments_index() -> HTMLResponse:
+    return HTMLResponse(content=EXPERIMENTS_HTML, headers=DASHBOARD_EMBED_HEADERS)
 
 
 @app.get("/benchmark", response_class=HTMLResponse)

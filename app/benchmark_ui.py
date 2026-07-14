@@ -340,6 +340,7 @@ BENCHMARK_HTML = """
         <nav class="nav-links" aria-label="Primary navigation">
           <a class="nav-link" href="/">Compression UI</a>
           <a class="nav-link" href="/eval">Eval Suite</a>
+          <a class="nav-link" href="/experiments">Experiments</a>
           <a class="nav-link" href="/research">Research</a>
           <a class="nav-link" href="/docs">API Docs</a>
         </nav>
