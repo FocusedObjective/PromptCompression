@@ -11,16 +11,16 @@ steps:
       - --build-arg
       - COMPRESSOR_SOURCE_SHA256=${_COMPRESSOR_SOURCE_SHA256}
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:latest
       - .
 
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:latest
 
 substitutions:
   _REGION: us-central1
   _REPO: prompt-compression
-  _SERVICE: prompt-compression
+  _IMAGE_NAME: prompt-compression-cpu-retired
   _COMPRESSOR_MODEL: microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
   _COMPRESSOR_MODEL_REVISION: main
   _COMPRESSOR_GIT_COMMIT: unknown

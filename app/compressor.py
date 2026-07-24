@@ -1,6 +1,7 @@
 import os
 import time
-from dataclasses import dataclass, field
+from collections import Counter
+from dataclasses import dataclass, field, replace
 import logging
 import math
 from pathlib import Path
@@ -18,6 +19,7 @@ from app.protected_spans import (
     force_tokens_for_text,
     protected_spans_for_text,
 )
+from app.structured_json import TaggedJsonTransformResult, transform_tagged_json
 from app.tenant_profiles import (
     DEFAULT_PROFILE_ID,
     DEFAULT_PROFILE_SOURCE,
@@ -61,11 +63,29 @@ DEFAULT_ALLOW_CPU_MODEL_AUTO = os.getenv(
     "COMPRESSOR_ALLOW_CPU_MODEL_AUTO",
     "false",
 ).lower() in {"1", "true", "yes", "on"}
-DEFAULT_MIN_MODEL_CANDIDATE_TOKENS = int(
-    os.getenv("COMPRESSOR_MIN_MODEL_CANDIDATE_TOKENS", "20000")
+DEFAULT_CPU_MIN_MODEL_CANDIDATE_TOKENS = int(
+    os.getenv(
+        "COMPRESSOR_CPU_MIN_MODEL_CANDIDATE_TOKENS",
+        os.getenv("COMPRESSOR_MIN_MODEL_CANDIDATE_TOKENS", "20000"),
+    )
 )
-DEFAULT_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS = int(
-    os.getenv("COMPRESSOR_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS", "2000")
+DEFAULT_GPU_MIN_MODEL_CANDIDATE_TOKENS = int(
+    os.getenv(
+        "COMPRESSOR_GPU_MIN_MODEL_CANDIDATE_TOKENS",
+        os.getenv("COMPRESSOR_MIN_MODEL_CANDIDATE_TOKENS", "2000"),
+    )
+)
+DEFAULT_CPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS = int(
+    os.getenv(
+        "COMPRESSOR_CPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS",
+        os.getenv("COMPRESSOR_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS", "2000"),
+    )
+)
+DEFAULT_GPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS = int(
+    os.getenv(
+        "COMPRESSOR_GPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS",
+        os.getenv("COMPRESSOR_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS", "200"),
+    )
 )
 DEFAULT_MIN_MODEL_INCREMENTAL_REDUCTION = float(
     os.getenv("COMPRESSOR_MIN_MODEL_INCREMENTAL_REDUCTION", "0.05")
@@ -496,10 +516,21 @@ class PromptCompressionService:
         )
         self.model_auto_enabled = DEFAULT_MODEL_AUTO_ENABLED
         self.allow_cpu_model_auto = DEFAULT_ALLOW_CPU_MODEL_AUTO
-        self.min_model_candidate_tokens = max(0, DEFAULT_MIN_MODEL_CANDIDATE_TOKENS)
+        self.min_model_candidate_tokens = max(
+            0,
+            (
+                DEFAULT_CPU_MIN_MODEL_CANDIDATE_TOKENS
+                if self._device_is_cpu()
+                else DEFAULT_GPU_MIN_MODEL_CANDIDATE_TOKENS
+            ),
+        )
         self.min_model_incremental_savings_tokens = max(
             0,
-            DEFAULT_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS,
+            (
+                DEFAULT_CPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS
+                if self._device_is_cpu()
+                else DEFAULT_GPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS
+            ),
         )
         self.min_model_incremental_reduction = max(
             0.0,
@@ -882,7 +913,9 @@ class PromptCompressionService:
         self,
         prepared: _PreparedModelInput,
         placeholder_limit: int,
+        max_chunk_chars: int | None = None,
     ) -> list[_ModelInputChunk]:
+        resolved_chunk_chars = self._resolved_model_chunk_chars(max_chunk_chars)
         chunks: list[_ModelInputChunk] = []
         parts: list[str] = []
         placeholders: list[_CompressionPlaceholder] = []
@@ -915,8 +948,8 @@ class PromptCompressionService:
                 and len(placeholders) + len(unit_placeholders) > placeholder_limit
             )
             exceeds_char_limit = (
-                self.max_model_chunk_chars > 0
-                and char_count + len(text) > self.max_model_chunk_chars
+                resolved_chunk_chars > 0
+                and char_count + len(text) > resolved_chunk_chars
             )
             current_exceeds_placeholder_limit = (
                 len(placeholders) > placeholder_limit
@@ -939,31 +972,50 @@ class PromptCompressionService:
                 continue
 
             for text_part in self._split_text_for_model_chunks(
-                prepared.text[cursor:position]
+                prepared.text[cursor:position],
+                max_chunk_chars=resolved_chunk_chars,
             ):
                 append_unit(text_part, [])
 
             append_unit(placeholder.token, [placeholder])
             cursor = position + len(placeholder.token)
 
-        for text_part in self._split_text_for_model_chunks(prepared.text[cursor:]):
+        for text_part in self._split_text_for_model_chunks(
+            prepared.text[cursor:],
+            max_chunk_chars=resolved_chunk_chars,
+        ):
             append_unit(text_part, [])
 
         flush()
         return chunks
 
-    def _split_text_for_model_chunks(self, text: str) -> list[str]:
+    def _resolved_model_chunk_chars(self, override: int | None) -> int:
+        if override is None:
+            return self.max_model_chunk_chars
+        return min(96_000, max(4_000, override))
+
+    def _split_text_for_model_chunks(
+        self,
+        text: str,
+        *,
+        max_chunk_chars: int | None = None,
+    ) -> list[str]:
+        resolved_chunk_chars = (
+            self.max_model_chunk_chars
+            if max_chunk_chars is None
+            else max_chunk_chars
+        )
         if (
             not text
-            or self.max_model_chunk_chars <= 0
-            or len(text) <= self.max_model_chunk_chars
+            or resolved_chunk_chars <= 0
+            or len(text) <= resolved_chunk_chars
         ):
             return [text] if text else []
 
         chunks: list[str] = []
         cursor = 0
         while cursor < len(text):
-            end = min(len(text), cursor + self.max_model_chunk_chars)
+            end = min(len(text), cursor + resolved_chunk_chars)
             if end < len(text):
                 newline_break = text.rfind("\n", cursor + 1, end)
                 space_break = text.rfind(" ", cursor + 1, end)
@@ -1355,6 +1407,7 @@ class PromptCompressionService:
         target_rate: float,
         include_sections: bool,
         tenant_profile: TenantCompressionProfile,
+        model_chunk_chars: int | None = None,
         timings: dict[str, float] | None = None,
     ) -> _ChunkedCompressionResult:
         max_force_tokens = self._max_force_tokens(compressor)
@@ -1362,6 +1415,7 @@ class PromptCompressionService:
         chunks = self._split_prepared_model_input(
             prepared,
             placeholder_limit=placeholder_limit,
+            max_chunk_chars=model_chunk_chars,
         )
 
         output_parts: list[str] = []
@@ -1604,6 +1658,8 @@ class PromptCompressionService:
         deterministic_reduction: float,
         latency_budget_ms: float | None,
         allow_cpu_model_auto: bool | None,
+        min_model_candidate_tokens: int | None,
+        model_chunk_chars: int | None,
     ) -> _ModelGateEvaluation:
         candidate_tokens = sum(
             candidate.token_count
@@ -1671,6 +1727,25 @@ class PromptCompressionService:
                 identifier_density=identifier_density,
             )
 
+        def prepare() -> _ModelGateEvaluation:
+            return _ModelGateEvaluation(
+                should_run=False,
+                decision="prepare",
+                reason=None,
+                candidate_tokens=candidate_tokens,
+                candidate_chars=candidate_chars,
+                expected_incremental_savings_tokens=(
+                    expected_incremental_savings_tokens
+                ),
+                expected_incremental_reduction=expected_incremental_reduction,
+                projected_latency_ms=None,
+                projected_chunk_count=0,
+                protected_density=protected_density,
+                structured_density=structured_density,
+                placeholder_count=0,
+                identifier_density=identifier_density,
+            )
+
         if mode == COMPRESSION_MODE_DETERMINISTIC:
             return skip("llmlingua_skipped_mode_deterministic")
         if target_rate >= 1.0:
@@ -1691,9 +1766,14 @@ class PromptCompressionService:
             and not cpu_model_auto_allowed
         ):
             return skip("llmlingua_skipped_cpu_auto_disabled")
+        candidate_token_floor = (
+            self.min_model_candidate_tokens
+            if min_model_candidate_tokens is None
+            else max(0, min_model_candidate_tokens)
+        )
         if (
             mode == COMPRESSION_MODE_MODEL_AUTO
-            and candidate_tokens < self.min_model_candidate_tokens
+            and candidate_tokens < candidate_token_floor
         ):
             return skip("llmlingua_skipped_low_candidate_tokens")
         if mode == COMPRESSION_MODE_MODEL_AUTO and (
@@ -1722,8 +1802,6 @@ class PromptCompressionService:
         expected_incremental_savings_tokens = int(
             candidate_tokens * expected_incremental_reduction
         )
-        projected_chunk_count = self._projected_model_chunk_count(model_input_chars)
-        projected_latency_ms = self._project_model_latency_ms(projected_chunk_count)
 
         if mode == COMPRESSION_MODE_MODEL_FORCE:
             return run()
@@ -1732,6 +1810,22 @@ class PromptCompressionService:
             return skip("llmlingua_skipped_high_protected_density")
         if structured_density > self.max_structured_density:
             return skip("llmlingua_skipped_high_structured_density")
+        if (
+            expected_incremental_savings_tokens
+            < self.min_model_incremental_savings_tokens
+            or expected_incremental_reduction
+            < self.min_model_incremental_reduction
+        ):
+            return skip("llmlingua_skipped_low_expected_incremental_savings")
+        if prepared is None:
+            return prepare()
+
+        projected_chunk_count = self._projected_model_chunk_count(
+            model_input_chars,
+            model_chunk_chars=model_chunk_chars,
+        )
+        projected_latency_ms = self._project_model_latency_ms(projected_chunk_count)
+
         if placeholder_count > self.max_model_auto_placeholders:
             return skip("llmlingua_skipped_high_placeholder_count")
         if (
@@ -1749,22 +1843,20 @@ class PromptCompressionService:
         )
         if projected_latency_ms > max_latency_ms:
             return skip("llmlingua_skipped_high_projected_latency")
-        if (
-            expected_incremental_savings_tokens
-            < self.min_model_incremental_savings_tokens
-            or expected_incremental_reduction
-            < self.min_model_incremental_reduction
-        ):
-            return skip("llmlingua_skipped_low_expected_incremental_savings")
-
         return run()
 
-    def _projected_model_chunk_count(self, model_input_chars: int) -> int:
+    def _projected_model_chunk_count(
+        self,
+        model_input_chars: int,
+        *,
+        model_chunk_chars: int | None = None,
+    ) -> int:
         if model_input_chars <= 0:
             return 0
-        if self.max_model_chunk_chars <= 0:
+        resolved_chunk_chars = self._resolved_model_chunk_chars(model_chunk_chars)
+        if resolved_chunk_chars <= 0:
             return 1
-        return max(1, math.ceil(model_input_chars / self.max_model_chunk_chars))
+        return max(1, math.ceil(model_input_chars / resolved_chunk_chars))
 
     def _project_model_latency_ms(self, projected_chunk_count: int) -> float | None:
         if projected_chunk_count <= 0:
@@ -2358,6 +2450,85 @@ class PromptCompressionService:
             return False
         return True
 
+    def _compress_tagged_json_values(
+        self,
+        text: str,
+        *,
+        aggressiveness: float,
+        profile: TenantCompressionProfile,
+        mode: str,
+        latency_budget_ms: float | None,
+        allow_cpu_model_auto: bool | None,
+        min_model_candidate_tokens: int | None,
+        model_chunk_chars: int | None,
+        allow_inline_paths: bool,
+    ) -> TaggedJsonTransformResult:
+        if "<compress-json" not in text.lower():
+            return TaggedJsonTransformResult(text=text)
+
+        # Prevent a selected value from recursively inheriting the outer JSON
+        # authorization. It is compressed as ordinary text and then placed back
+        # into a deterministically rebuilt object.
+        value_profile = replace(
+            profile,
+            json_compression_policy_id=None,
+            json_value_compression_paths=(),
+        )
+
+        def compress_value(_path: str, value: str) -> str | None:
+            if "<compress-json" in value.lower():
+                return None
+
+            original_estimate = self.estimate_compression_tokens(value, value_profile)
+            if original_estimate.count < profile.json_value_min_tokens:
+                return None
+
+            result = self.compress(
+                text=value,
+                aggressiveness=aggressiveness,
+                include_sections=False,
+                tenant_profile=value_profile,
+                mode=mode,
+                latency_budget_ms=latency_budget_ms,
+                allow_cpu_model_auto=allow_cpu_model_auto,
+                min_model_candidate_tokens=min_model_candidate_tokens,
+                model_chunk_chars=model_chunk_chars,
+                collect_diagnostics=False,
+            )
+            if (
+                not result.compressed_text.strip()
+                or result.compressed_tokens >= result.original_tokens
+                or result.reduction > profile.json_value_max_reduction
+                or not self._preserves_protected_span_values(
+                    value,
+                    result.compressed_text,
+                )
+            ):
+                return None
+            return result.compressed_text
+
+        return transform_tagged_json(
+            text,
+            policy_id=profile.json_compression_policy_id,
+            value_paths=profile.json_value_compression_paths,
+            max_values=profile.json_value_max_values,
+            compress_value=compress_value,
+            allow_inline_paths=allow_inline_paths,
+        )
+
+    def _preserves_protected_span_values(
+        self,
+        original_text: str,
+        compressed_text: str,
+    ) -> bool:
+        required = Counter(
+            span.text for span in protected_spans_for_text(original_text)
+        )
+        return all(
+            compressed_text.count(value) >= count
+            for value, count in required.items()
+        )
+
     def compress(
         self,
         text: str,
@@ -2367,12 +2538,16 @@ class PromptCompressionService:
         mode: str | None = None,
         latency_budget_ms: float | None = None,
         allow_cpu_model_auto: bool | None = None,
+        min_model_candidate_tokens: int | None = None,
+        model_chunk_chars: int | None = None,
         collect_diagnostics: bool = True,
+        collect_detailed_analytics: bool = True,
         apply_deterministic_transforms: bool = True,
         evaluate_disabled_transforms: bool = False,
         evaluation_constraints: dict[str, list[str]] | None = None,
         request_id: str | None = None,
         experiment_profile: str | ExperimentProfile | None = None,
+        allow_inline_json_compression_paths: bool = False,
     ) -> CompressionResult:
         start = time.perf_counter()
         timings = dict.fromkeys(TIMED_PHASES, 0.0)
@@ -2397,8 +2572,23 @@ class PromptCompressionService:
         timings["target_rate_ms"] = _elapsed_ms(phase_start)
 
         phase_start = time.perf_counter()
+        tagged_json = (
+            self._compress_tagged_json_values(
+                text,
+                aggressiveness=aggressiveness,
+                profile=profile,
+                mode=compression_mode,
+                latency_budget_ms=latency_budget_ms,
+                allow_cpu_model_auto=allow_cpu_model_auto,
+                min_model_candidate_tokens=min_model_candidate_tokens,
+                model_chunk_chars=model_chunk_chars,
+                allow_inline_paths=allow_inline_json_compression_paths,
+            )
+            if apply_deterministic_transforms
+            else TaggedJsonTransformResult(text=text)
+        )
         prepared_segments = (
-            active_preprocessor.prepare(text)
+            active_preprocessor.prepare(tagged_json.text)
             if apply_deterministic_transforms
             else [CompressionSegment(text=text, compressible=True, kind="prose", source_text=text)]
         )
@@ -2503,7 +2693,10 @@ class PromptCompressionService:
         fallback_used = False
         fallback_reason = None
         llmlingua_called = False
-        if any(should_compress_segments):
+        if (
+            any(should_compress_segments)
+            and compression_mode == COMPRESSION_MODE_MODEL_FORCE
+        ):
             phase_start = time.perf_counter()
             prepared = self._prepare_model_input(
                 segments,
@@ -2526,8 +2719,37 @@ class PromptCompressionService:
             deterministic_reduction=deterministic_reduction,
             latency_budget_ms=latency_budget_ms,
             allow_cpu_model_auto=allow_cpu_model_auto,
+            min_model_candidate_tokens=min_model_candidate_tokens,
+            model_chunk_chars=model_chunk_chars,
         )
         timings["model_gate_ms"] = _elapsed_ms(phase_start)
+
+        if model_gate.decision == "prepare":
+            phase_start = time.perf_counter()
+            prepared = self._prepare_model_input(
+                segments,
+                should_compress_segments,
+                critical_clause_shielding=(
+                    resolved_experiment.enable_critical_clause_shielding
+                ),
+            )
+            timings["model_input_ms"] += _elapsed_ms(phase_start)
+            phase_start = time.perf_counter()
+            model_gate = self._evaluate_model_gate(
+                mode=compression_mode,
+                text=text,
+                segments=segments,
+                should_compress_segments=should_compress_segments,
+                segment_candidates=segment_candidates,
+                prepared=prepared,
+                target_rate=target_rate,
+                deterministic_reduction=deterministic_reduction,
+                latency_budget_ms=latency_budget_ms,
+                allow_cpu_model_auto=allow_cpu_model_auto,
+                min_model_candidate_tokens=min_model_candidate_tokens,
+                model_chunk_chars=model_chunk_chars,
+            )
+            timings["model_gate_ms"] += _elapsed_ms(phase_start)
 
         if model_gate.should_run:
             phase_start = time.perf_counter()
@@ -2551,6 +2773,7 @@ class PromptCompressionService:
                 target_rate,
                 include_sections=include_sections,
                 tenant_profile=profile,
+                model_chunk_chars=model_chunk_chars,
                 timings=timings,
             )
             expanded = chunked_result.expanded
@@ -2775,18 +2998,21 @@ class PromptCompressionService:
                         resolved_experiment.enable_duplicate_wrapper_aliases
                     ),
                     tenant_boilerplate_enabled=tenant_boilerplate_enabled,
-                ),
+                )
+                if collect_detailed_analytics
+                else None,
                 experiment_profile=resolved_experiment.profile_id,
                 output_rollback_count=int(output_rollback_reason is not None),
                 output_rollback_reason=output_rollback_reason,
                 rejected_output_sha256=rejected_output_sha256,
             )
             timings["diagnostics_ms"] += _elapsed_ms(phase_start)
-        warnings = []
+        warnings = list(tagged_json.warnings)
         if model_gate.decision == "skip" and model_gate.reason is not None:
             warnings.append(model_gate.reason)
         if output_rollback_reason is not None:
             warnings.append(output_rollback_reason)
+        warnings = list(dict.fromkeys(warnings))
 
         return CompressionResult(
             compressed_text=compressed_text,

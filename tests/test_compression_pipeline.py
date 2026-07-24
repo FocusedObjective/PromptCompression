@@ -224,12 +224,13 @@ and html?"""
 
     assert [section.kind for section in result.output_sections].count("html") == 2
     assert any(
-        section.kind == "protected" and section.text == "Do not remove API"
+        section.kind == "protected"
+        and section.text == "Do not remove API keys, URLs, dates, or hard constraints."
         for section in result.output_sections
     )
     assert compressor.inputs == [
         "__CK_KEEP_0000__\n\n"
-        "__CK_KEEP_0001__ keys, URLs, dates, or hard constraints.\n\n"
+        "__CK_KEEP_0001__\n\n"
         "__CK_KEEP_0002__\n\n"
         "and html?"
     ]

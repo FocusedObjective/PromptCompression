@@ -16,6 +16,11 @@ class TenantCompressionProfile:
     min_rate: float | None = None
     force_keep_tokens: tuple[str, ...] = ()
     force_drop_phrases: tuple[str, ...] = ()
+    json_compression_policy_id: str | None = None
+    json_value_compression_paths: tuple[str, ...] = ()
+    json_value_min_tokens: int = 200
+    json_value_max_reduction: float = 0.25
+    json_value_max_values: int = 8
 
 
 def build_tenant_profile(
@@ -26,11 +31,18 @@ def build_tenant_profile(
     min_rate: float | None = None,
     force_keep_tokens: Iterable[str] | None = None,
     force_drop_phrases: Iterable[str] | None = None,
+    json_compression_policy_id: str | None = None,
+    json_value_compression_paths: Iterable[str] | None = None,
+    json_value_min_tokens: int = 200,
+    json_value_max_reduction: float = 0.25,
+    json_value_max_values: int = 8,
 ) -> TenantCompressionProfile:
     normalized_tenant_id = _clean_value(tenant_id) or DEFAULT_TENANT_ID
     normalized_profile_id = _clean_value(profile_id)
     keep_tokens = _clean_unique(force_keep_tokens or ())
     drop_phrases = _clean_unique(force_drop_phrases or ())
+    normalized_json_policy_id = _clean_value(json_compression_policy_id)
+    json_value_paths = _clean_unique(json_value_compression_paths or ())
     source = (
         API_PROFILE_SOURCE
         if (
@@ -40,6 +52,8 @@ def build_tenant_profile(
             or min_rate is not None
             or keep_tokens
             or drop_phrases
+            or normalized_json_policy_id is not None
+            or json_value_paths
         )
         else DEFAULT_PROFILE_SOURCE
     )
@@ -59,6 +73,11 @@ def build_tenant_profile(
         min_rate=min_rate,
         force_keep_tokens=keep_tokens,
         force_drop_phrases=drop_phrases,
+        json_compression_policy_id=normalized_json_policy_id,
+        json_value_compression_paths=json_value_paths,
+        json_value_min_tokens=max(1, json_value_min_tokens),
+        json_value_max_reduction=max(0.0, min(1.0, json_value_max_reduction)),
+        json_value_max_values=max(1, json_value_max_values),
     )
 
 

@@ -14,7 +14,10 @@ class ExperimentProfile:
     enable_literal_aliases: bool | None = None
     enable_duplicate_wrapper_aliases: bool = False
     enable_tenant_boilerplate: bool = False
-    enable_critical_clause_shielding: bool = False
+    # Shielding is the permanent fail-closed default. Benchmark-only ablations
+    # may explicitly disable it, while final integrity validation and rollback
+    # remain unconditional in the compressor.
+    enable_critical_clause_shielding: bool = True
     require_tokenizer_backed_gates: bool = False
     min_whitespace_savings_tokens: int = 0
     min_whitespace_reduction: float = 0.0
@@ -36,6 +39,10 @@ class ExperimentProfile:
 
 _PROFILES = {
     "baseline": ExperimentProfile(profile_id="baseline"),
+    "critical_clause_shielding_off_ablation": ExperimentProfile(
+        profile_id="critical_clause_shielding_off_ablation",
+        enable_critical_clause_shielding=False,
+    ),
     "strict_whitespace_token_positive": ExperimentProfile(
         profile_id="strict_whitespace_token_positive",
         strict_prose_whitespace=True,

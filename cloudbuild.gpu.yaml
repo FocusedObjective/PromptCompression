@@ -9,16 +9,17 @@ steps:
       - --build-arg
       - COMPRESSOR_MODEL=${_COMPRESSOR_MODEL}
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:${_IMAGE_TAG}
       - .
 
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:${_IMAGE_TAG}
 
 substitutions:
   _REGION: us-central1
   _REPO: prompt-compression
-  _SERVICE: prompt-compression-gpu
+  _IMAGE_NAME: prompt-compression-gpu
+  _IMAGE_TAG: latest
   _GPU_BASE_IMAGE: us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-cu124.2-4.py310
   _COMPRESSOR_MODEL: microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
 

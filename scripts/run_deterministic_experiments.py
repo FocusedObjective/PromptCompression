@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import statistics
 import sys
+import time
 from typing import Any
 
 
@@ -34,6 +35,40 @@ def load_cases(path: Path) -> list[dict[str, Any]]:
 
 
 def condition_matrix(profile_id: str, include_model: bool) -> list[dict[str, Any]]:
+    if profile_id == "critical_clause_shielding_off_ablation":
+        conditions = [
+            {
+                "condition_id": f"{profile_id}__shielding_on_deterministic__det_on",
+                "profile": "baseline",
+                "mode": COMPRESSION_MODE_DETERMINISTIC,
+                "apply_deterministic": True,
+            },
+            {
+                "condition_id": f"{profile_id}__shielding_off_deterministic__det_on",
+                "profile": profile_id,
+                "mode": COMPRESSION_MODE_DETERMINISTIC,
+                "apply_deterministic": True,
+            },
+        ]
+        if include_model:
+            conditions.extend(
+                [
+                    {
+                        "condition_id": f"{profile_id}__shielding_on_model_force__det_on",
+                        "profile": "baseline",
+                        "mode": COMPRESSION_MODE_MODEL_FORCE,
+                        "apply_deterministic": True,
+                    },
+                    {
+                        "condition_id": f"{profile_id}__shielding_off_model_force__det_on",
+                        "profile": profile_id,
+                        "mode": COMPRESSION_MODE_MODEL_FORCE,
+                        "apply_deterministic": True,
+                    },
+                ]
+            )
+        return conditions
+
     conditions = [
         {
             "condition_id": f"{profile_id}__baseline_deterministic__det_on",
@@ -94,21 +129,36 @@ def run_profile(
                     "forbidden_substrings": case.get("forbidden_substrings", []),
                     "required_json_keys": [],
                 }
-                result = service.compress(
-                    case["text"],
-                    aggressiveness=float(case.get("default_aggressiveness", 0.25)),
-                    include_sections=False,
-                    tenant_profile=tenant_profile,
-                    mode=condition["mode"],
-                    collect_diagnostics=True,
-                    apply_deterministic_transforms=condition["apply_deterministic"],
-                    evaluate_disabled_transforms=True,
-                    evaluation_constraints=constraints,
-                    request_id=(
-                        f"{profile_id}:{condition['condition_id']}:{case['id']}:{repeat}"
-                    ),
-                    experiment_profile=condition["profile"],
-                )
+                started = time.perf_counter()
+                try:
+                    result = service.compress(
+                        case["text"],
+                        aggressiveness=float(case.get("default_aggressiveness", 0.25)),
+                        include_sections=False,
+                        tenant_profile=tenant_profile,
+                        mode=condition["mode"],
+                        collect_diagnostics=True,
+                        apply_deterministic_transforms=condition["apply_deterministic"],
+                        evaluate_disabled_transforms=True,
+                        evaluation_constraints=constraints,
+                        request_id=(
+                            f"{profile_id}:{condition['condition_id']}:{case['id']}:{repeat}"
+                        ),
+                        experiment_profile=condition["profile"],
+                    )
+                except Exception as exc:
+                    records.append(
+                        export_error_record(
+                            case=case,
+                            repeat=repeat,
+                            condition=condition,
+                            tenant_id=tenant_id,
+                            constraints=constraints,
+                            error=exc,
+                            elapsed_ms=(time.perf_counter() - started) * 1000,
+                        )
+                    )
+                    continue
                 records.append(
                     export_record(
                         case=case,
@@ -161,6 +211,10 @@ def export_record(
         result.compressed_text,
         constraints,
     )
+    downstream_evaluation = evaluate_downstream_checks(
+        case,
+        result.compressed_text,
+    )
     stages = {
         "deterministicText": analytics.deterministic_text,
         "deterministicSha256": analytics.deterministic_sha256,
@@ -198,6 +252,7 @@ def export_record(
         "evaluation_constraints": constraints,
         "evaluation_constraint_results": constraint_results,
         "required_terms_retained": required_terms_retained,
+        "downstream_evaluation": downstream_evaluation,
         "validation": {
             "integrityPassed": (
                 analytics.integrity.protected_span_validation_passed
@@ -208,6 +263,7 @@ def export_record(
             "constraintsPassed": (
                 True if constraint_results is None else constraint_results["passed"]
             ),
+            "downstreamPassed": downstream_evaluation["passed"],
         },
         "provenance": asdict(analytics.provenance),
         "diagnostics": {
@@ -217,6 +273,109 @@ def export_record(
             "token_estimator": result.token_estimator,
             "timings": asdict(result.diagnostics.timings),
         },
+    }
+
+
+def export_error_record(
+    *,
+    case: dict[str, Any],
+    repeat: int,
+    condition: dict[str, Any],
+    tenant_id: str,
+    constraints: dict[str, list[str]],
+    error: Exception,
+    elapsed_ms: float,
+) -> dict[str, Any]:
+    error_class = type(error).__name__
+    error_reason = str(error) or error_class
+    timeout = isinstance(error, TimeoutError) or "timeout" in error_reason.lower()
+    return {
+        "schema_version": "benchmark.v3",
+        "status": "error",
+        "prompt_id": case["id"],
+        "case_id": case["id"],
+        "category": case.get("category"),
+        "condition_id": condition["condition_id"],
+        "repeat": repeat,
+        "tenant_id": tenant_id,
+        "experiment_profile": condition["profile"],
+        "compression_mode": condition["mode"],
+        "apply_deterministic_transforms": condition["apply_deterministic"],
+        "original_text": case["text"],
+        "final_text": None,
+        "original_tokens": None,
+        "final_tokens": None,
+        "latency_ms": elapsed_ms,
+        "stages": {},
+        "candidateOpportunities": {},
+        "integrity": {},
+        "evaluation_constraints": constraints,
+        "evaluation_constraint_results": None,
+        "required_terms_retained": None,
+        "downstream_evaluation": None,
+        "validation": {
+            "integrityPassed": None,
+            "constraintsPassed": None,
+            "downstreamPassed": None,
+        },
+        "provenance": {},
+        "diagnostics": {},
+        "error": error_reason,
+        "error_class": error_class,
+        "error_reason": error_reason,
+        "timed_out": timeout,
+    }
+
+
+def evaluate_downstream_checks(
+    case: dict[str, Any],
+    output: str,
+) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    paragraphs = [value for value in output.split("\n\n") if value.strip()]
+    for index, raw_check in enumerate(case.get("downstream_checks", [])):
+        required = list(raw_check.get("required_substrings", []))
+        missing = [value for value in required if value not in output]
+        ordered = bool(raw_check.get("ordered", False))
+        order_passed = True
+        if ordered and not missing:
+            cursor = 0
+            for value in required:
+                position = output.find(value, cursor)
+                if position < 0:
+                    order_passed = False
+                    break
+                cursor = position + len(value)
+        elif ordered:
+            order_passed = False
+        same_paragraph = bool(raw_check.get("same_paragraph", False))
+        paragraph_passed = not same_paragraph or any(
+            all(value in paragraph for value in required) for paragraph in paragraphs
+        )
+        results.append(
+            {
+                "id": str(raw_check.get("id") or f"downstream_{index}"),
+                "category": str(raw_check.get("category") or "uncategorized"),
+                "passed": not missing and order_passed and paragraph_passed,
+                "missing_required_substrings": missing,
+                "ordered": ordered,
+                "order_passed": order_passed,
+                "same_paragraph": same_paragraph,
+                "same_paragraph_passed": paragraph_passed,
+            }
+        )
+
+    categories: dict[str, dict[str, int]] = {}
+    for result in results:
+        category = result["category"]
+        summary = categories.setdefault(category, {"checks": 0, "failures": 0})
+        summary["checks"] += 1
+        summary["failures"] += int(not result["passed"])
+    return {
+        "applicable": bool(results),
+        "passed": all(result["passed"] for result in results),
+        "categories": categories,
+        "checks": results,
     }
 
 

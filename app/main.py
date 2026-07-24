@@ -706,6 +706,7 @@ Output:
           <div class="tag-reference-title">Optional preserve controls</div>
           <ul class="tag-list">
             <li><code>&lt;nocompress&gt;...&lt;/nocompress&gt;</code> skips model compression and removes the wrapper.</li>
+            <li><code>&lt;compress-json paths=&quot;$.description,$.comments[*].body&quot;&gt;...&lt;/compress-json&gt;</code> lets this profiler compress only the selected JSON string values.</li>
             <li><code>```json ... ```</code> protects JSON fences exactly as code.</li>
             <li>Medium/large raw JSON converts to TOON when safe; exact JSON, schemas/templates, tool exchanges, duplicate-key JSON, and low-savings cases stay verbatim.</li>
             <li>Full downloaded HTML pages convert to compact Markdown when structure can be preserved with meaningful savings.</li>
@@ -1232,6 +1233,7 @@ Output:
         requestPayload.mode = compressionModeInput.value;
         requestPayload.include_sections = true;
         requestPayload.include_diagnostics = true;
+        requestPayload.allow_inline_json_compression_paths = true;
         const latencyBudgetMs = boundedNumberInput(latencyBudgetMsInput, 0, 600000);
         if (latencyBudgetMs !== null) {
           requestPayload.latency_budget_ms = latencyBudgetMs;
@@ -1464,8 +1466,13 @@ def compress(
             mode=mode,
             latency_budget_ms=request.latency_budget_ms,
             allow_cpu_model_auto=request.allow_cpu_model_auto,
+            min_model_candidate_tokens=request.min_model_candidate_tokens,
+            model_chunk_chars=request.model_chunk_chars,
             collect_diagnostics=request.include_diagnostics,
+            collect_detailed_analytics=request.include_detailed_analytics,
         )
+        if request.allow_inline_json_compression_paths:
+            compression_kwargs["allow_inline_json_compression_paths"] = True
         if not request.apply_deterministic_transforms:
             compression_kwargs["apply_deterministic_transforms"] = False
         if request.evaluate_disabled_transforms:
@@ -1703,6 +1710,21 @@ def _tenant_profile_from_request(
         min_rate=None if settings is None else settings.min_rate,
         force_keep_tokens=() if settings is None else settings.force_keep_tokens,
         force_drop_phrases=() if settings is None else settings.force_drop_phrases,
+        json_compression_policy_id=(
+            None if settings is None else settings.json_compression_policy_id
+        ),
+        json_value_compression_paths=(
+            () if settings is None else settings.json_value_compression_paths
+        ),
+        json_value_min_tokens=(
+            200 if settings is None else settings.json_value_min_tokens
+        ),
+        json_value_max_reduction=(
+            0.25 if settings is None else settings.json_value_max_reduction
+        ),
+        json_value_max_values=(
+            8 if settings is None else settings.json_value_max_values
+        ),
     )
 
 

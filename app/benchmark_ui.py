@@ -108,6 +108,13 @@ BENCHMARK_HTML = """
       font-size: 12px;
     }
 
+    .stat small {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
     .toolbar,
     .panel {
       background: var(--panel);
@@ -336,7 +343,10 @@ BENCHMARK_HTML = """
     <header>
       <div>
         <h1>Performance Benchmark</h1>
-        <p class="subhead">Measure size, JSON share, latency phases, and token reduction on this deployment.</p>
+        <p class="subhead">
+          Measure the prompt-compressor <code>/compress</code> endpoint directly.
+          Edge routing is not included.
+        </p>
         <nav class="nav-links" aria-label="Primary navigation">
           <a class="nav-link" href="/">Compression UI</a>
           <a class="nav-link" href="/eval">Eval Suite</a>
@@ -347,9 +357,13 @@ BENCHMARK_HTML = """
       </div>
       <div class="stats" aria-live="polite">
         <div class="stat"><strong id="progressStat">-</strong><span>Progress</span></div>
-        <div class="stat"><strong id="clientP50Stat">-</strong><span>Client p50</span></div>
+        <div class="stat"><strong id="clientP50Stat">-</strong><span>Browser p50</span></div>
         <div class="stat"><strong id="llmlinguaP50Stat">-</strong><span>LLMLingua p50</span></div>
-        <div class="stat"><strong id="modelCallStat">-</strong><span>Model calls</span></div>
+        <div class="stat">
+          <strong id="modelRequestStat">-</strong>
+          <span>Model requests</span>
+          <small id="modelChunkStat">- LLMLingua chunks</small>
+        </div>
         <div class="stat"><strong id="errorStat">-</strong><span>Errors</span></div>
       </div>
     </header>
@@ -406,12 +420,24 @@ BENCHMARK_HTML = """
         Apply deterministic transforms
       </label>
       <label class="field">
-        Latency budget ms
-        <input id="latencyBudgetInput" type="number" min="0" step="25" placeholder="model_auto only">
+        Latency budget ms (optional)
+        <input id="latencyBudgetInput" type="number" min="0" step="25" placeholder="blank = service max">
       </label>
       <label class="inline">
         <input id="allowCpuModelAutoInput" type="checkbox" checked>
         Allow CPU model auto
+      </label>
+      <label class="field wide">
+        Auto candidate floor <strong id="minModelCandidateTokensValue">2,000 tokens</strong>
+        <input id="minModelCandidateTokensInput" type="range" min="0" max="12" step="1" value="4">
+      </label>
+      <label class="field wide">
+        Model chunk cap <strong id="modelChunkCharsValue">24,000 chars</strong>
+        <input id="modelChunkCharsInput" type="range" min="0" max="4" step="1" value="1">
+      </label>
+      <label class="field">
+        Protected prose <strong id="protectedProseRatioValue">0%</strong>
+        <input id="protectedProseRatioInput" type="range" min="0" max="1" step="0.05" value="0">
       </label>
       <label class="field">
         Aggressiveness <strong id="aggressivenessValue">0.25</strong>
@@ -420,6 +446,10 @@ BENCHMARK_HTML = """
       <label class="inline">
         <input id="includeSectionsInput" type="checkbox">
         Include sections
+      </label>
+      <label class="inline">
+        <input id="evaluateDisabledTransformsInput" type="checkbox">
+        Deep counterfactual analytics
       </label>
       <div class="actions">
         <button id="runButton" type="button">Run</button>
@@ -442,14 +472,17 @@ BENCHMARK_HTML = """
               <tr>
                 <th>Case</th>
                 <th>Runs</th>
-                <th>Client p50</th>
+                <th>Browser p50</th>
                 <th>Server p50</th>
                 <th>Preprocess p50</th>
                 <th>Selection p50</th>
-                <th>Model calls</th>
+                <th>Model requests</th>
+                <th>Chunks</th>
                 <th>Gate skips</th>
+                <th>Top gate</th>
                 <th>LLMLingua p50</th>
                 <th>Token est. p50</th>
+                <th>Diagnostics p50</th>
                 <th>Reduction avg</th>
               </tr>
             </thead>
@@ -470,7 +503,7 @@ BENCHMARK_HTML = """
                 <th>Case</th>
                 <th>Repeat</th>
                 <th>Status</th>
-                <th>Client</th>
+                <th>Browser</th>
                 <th>Server</th>
                 <th>Preprocess</th>
                 <th>LLMLingua</th>
@@ -519,6 +552,10 @@ BENCHMARK_HTML = """
     const letterOrNumberPattern = /[\\p{L}\\p{N}]/u;
     const rows = [];
     const activeControllers = new Set();
+    const MODEL_CANDIDATE_FLOORS = [
+      0, 256, 512, 1000, 2000, 3000, 6000, 12000, 20000, 24000, 50000, 100000, 200000
+    ];
+    const MODEL_CHUNK_CHAR_CAPS = [12000, 24000, 48000, 72000, 96000];
     let cancelled = false;
     let plannedRuns = 0;
     let completedRuns = 0;
@@ -535,9 +572,16 @@ BENCHMARK_HTML = """
     const applyDeterministicInput = document.getElementById("applyDeterministicInput");
     const latencyBudgetInput = document.getElementById("latencyBudgetInput");
     const allowCpuModelAutoInput = document.getElementById("allowCpuModelAutoInput");
+    const minModelCandidateTokensInput = document.getElementById("minModelCandidateTokensInput");
+    const minModelCandidateTokensValue = document.getElementById("minModelCandidateTokensValue");
+    const modelChunkCharsInput = document.getElementById("modelChunkCharsInput");
+    const modelChunkCharsValue = document.getElementById("modelChunkCharsValue");
+    const protectedProseRatioInput = document.getElementById("protectedProseRatioInput");
+    const protectedProseRatioValue = document.getElementById("protectedProseRatioValue");
     const aggressivenessInput = document.getElementById("aggressivenessInput");
     const aggressivenessValue = document.getElementById("aggressivenessValue");
     const includeSectionsInput = document.getElementById("includeSectionsInput");
+    const evaluateDisabledTransformsInput = document.getElementById("evaluateDisabledTransformsInput");
     const runButton = document.getElementById("runButton");
     const stopButton = document.getElementById("stopButton");
     const downloadRawButton = document.getElementById("downloadRawButton");
@@ -546,7 +590,8 @@ BENCHMARK_HTML = """
     const progressStat = document.getElementById("progressStat");
     const clientP50Stat = document.getElementById("clientP50Stat");
     const llmlinguaP50Stat = document.getElementById("llmlinguaP50Stat");
-    const modelCallStat = document.getElementById("modelCallStat");
+    const modelRequestStat = document.getElementById("modelRequestStat");
+    const modelChunkStat = document.getElementById("modelChunkStat");
     const errorStat = document.getElementById("errorStat");
     const summaryStatus = document.getElementById("summaryStatus");
     const runStatus = document.getElementById("runStatus");
@@ -662,18 +707,37 @@ BENCHMARK_HTML = """
       return String(value).padStart(width, "0");
     }
 
-    function buildProse(tokenBudget) {
-      const sample = proseUnit(1);
-      const unitTokens = Math.max(1, estimateTokenCount(sample));
+    function buildProse(tokenBudget, protectedRatio) {
+      const boundedRatio = Math.max(0, Math.min(1, protectedRatio));
+      const plainTokens = estimateTokenCount(plainProseUnit());
+      const protectedTokens = estimateTokenCount(protectedProseUnit(1));
+      const unitTokens = Math.max(
+        1,
+        plainTokens * (1 - boundedRatio) + protectedTokens * boundedRatio,
+      );
       const count = Math.max(1, Math.ceil(tokenBudget / unitTokens));
       const parts = [];
       for (let index = 1; index <= count; index += 1) {
-        parts.push(proseUnit(index));
+        const protectedUnitsThroughHere = Math.floor(index * boundedRatio);
+        const protectedUnitsBeforeHere = Math.floor((index - 1) * boundedRatio);
+        parts.push(
+          protectedUnitsThroughHere > protectedUnitsBeforeHere
+            ? protectedProseUnit(index)
+            : plainProseUnit(),
+        );
       }
       return parts.join("");
     }
 
-    function proseUnit(index) {
+    function plainProseUnit() {
+      return (
+        "The support team reviewed queue latency, retry pressure, payment " +
+        "authorization drift, account ownership, contract timing, and follow-up " +
+        "notes before preparing a concise executive summary for operations. "
+      );
+    }
+
+    function protectedProseUnit(index) {
       const key = pad(index, 6);
       return (
         `Incident INC-${key} shows queue latency, retry pressure, ` +
@@ -781,11 +845,11 @@ BENCHMARK_HTML = """
       return String(value).replace(".", "p");
     }
 
-    function buildCase(targetTokens, jsonRatio, htmlRatio) {
+    function buildCase(targetTokens, jsonRatio, htmlRatio, protectedProseRatio) {
       const jsonTokenBudget = Math.floor(targetTokens * jsonRatio);
       const htmlTokenBudget = Math.floor(targetTokens * htmlRatio);
       const proseTokenBudget = Math.max(1, targetTokens - jsonTokenBudget - htmlTokenBudget);
-      const prose = buildProse(proseTokenBudget);
+      const prose = buildProse(proseTokenBudget, protectedProseRatio);
       const jsonBlock = buildJsonBlock(jsonTokenBudget);
       const htmlBlock = buildHtmlBlock(htmlTokenBudget);
       const parts = [
@@ -802,10 +866,14 @@ BENCHMARK_HTML = """
       const syntheticJsonTokens = jsonBlock ? estimateTokenCount(jsonBlock) : 0;
       const syntheticHtmlTokens = htmlBlock ? estimateTokenCount(htmlBlock) : 0;
       return {
-        case_id: `tok${targetTokens}_json${formatRatio(jsonRatio)}_html${formatRatio(htmlRatio)}`,
+        case_id: (
+          `tok${targetTokens}_json${formatRatio(jsonRatio)}_html${formatRatio(htmlRatio)}` +
+          `_protected${formatRatio(protectedProseRatio)}`
+        ),
         target_tokens: targetTokens,
         json_ratio_target: jsonRatio,
         html_ratio_target: htmlRatio,
+        protected_prose_ratio_target: protectedProseRatio,
         synthetic_input_tokens: syntheticInputTokens,
         synthetic_json_tokens: syntheticJsonTokens,
         synthetic_html_tokens: syntheticHtmlTokens,
@@ -818,7 +886,7 @@ BENCHMARK_HTML = """
       };
     }
 
-    function buildTasks(sizes, jsonRatios, htmlRatios, repeats) {
+    function buildTasks(sizes, jsonRatios, htmlRatios, protectedProseRatio, repeats) {
       const tasks = [];
       for (const targetTokens of sizes) {
         for (const jsonRatio of jsonRatios) {
@@ -827,7 +895,14 @@ BENCHMARK_HTML = """
               continue;
             }
             for (let repeat = 1; repeat <= repeats; repeat += 1) {
-              tasks.push({ targetTokens, jsonRatio, htmlRatio, repeat, measured: true });
+              tasks.push({
+                targetTokens,
+                jsonRatio,
+                htmlRatio,
+                protectedProseRatio,
+                repeat,
+                measured: true,
+              });
             }
           }
         }
@@ -844,11 +919,16 @@ BENCHMARK_HTML = """
         case_id: testCase.case_id,
         prompt_id: testCase.case_id,
         cohort_id: currentCohortId,
-        condition_id: `${experimentProfileInput.value}__${compressionModeInput.value}__${applyDeterministicInput.checked ? "det_on" : "det_off"}`,
+        condition_id: (
+          `${experimentProfileInput.value}__${compressionModeInput.value}` +
+          `__${applyDeterministicInput.checked ? "det_on" : "det_off"}` +
+          `__protected_${formatRatio(testCase.protected_prose_ratio_target)}`
+        ),
         repeat,
         target_tokens: testCase.target_tokens,
         json_ratio_target: testCase.json_ratio_target,
         html_ratio_target: testCase.html_ratio_target,
+        protected_prose_ratio_target: testCase.protected_prose_ratio_target,
         synthetic_input_tokens: testCase.synthetic_input_tokens,
         synthetic_json_tokens: testCase.synthetic_json_tokens,
         synthetic_html_tokens: testCase.synthetic_html_tokens,
@@ -861,13 +941,47 @@ BENCHMARK_HTML = """
       };
     }
 
+    function errorReason(value, fallback) {
+      if (typeof value === "string" && value.trim()) {
+        return value;
+      }
+      if (value && typeof value === "object") {
+        try {
+          return JSON.stringify(value);
+        } catch (error) {
+          return fallback;
+        }
+      }
+      return fallback;
+    }
+
+    function classifyError(reason, fallbackClass) {
+      const normalized = String(reason || "").toLowerCase();
+      if (normalized.includes("timeout") || normalized.includes("timed out")) {
+        return "timeout";
+      }
+      if (normalized === "cancelled") {
+        return "cancelled";
+      }
+      return fallbackClass;
+    }
+
     async function runOne(task) {
-      const testCase = buildCase(task.targetTokens, task.jsonRatio, task.htmlRatio);
+      const testCase = buildCase(
+        task.targetTokens,
+        task.jsonRatio,
+        task.htmlRatio,
+        task.protectedProseRatio,
+      );
       const row = baseRow(testCase, task.repeat, task.measured);
       row.requested_compression_mode = compressionModeInput.value;
       row.requested_experiment_profile = experimentProfileInput.value;
       row.apply_deterministic_transforms = applyDeterministicInput.checked;
       row.allow_cpu_model_auto_override = allowCpuModelAutoInput.checked;
+      row.min_model_candidate_tokens_override = selectedModelCandidateFloor();
+      row.model_chunk_chars_override = selectedModelChunkChars();
+      row.evaluate_disabled_transforms = evaluateDisabledTransformsInput.checked;
+      row.include_detailed_analytics = evaluateDisabledTransformsInput.checked;
       row.latency_budget_ms = latencyBudgetInput.value.trim() || "";
       const controller = new AbortController();
       activeControllers.add(controller);
@@ -881,7 +995,10 @@ BENCHMARK_HTML = """
           apply_deterministic_transforms: applyDeterministicInput.checked,
           include_sections: includeSectionsInput.checked,
           include_diagnostics: true,
-          evaluate_disabled_transforms: true,
+          include_detailed_analytics: evaluateDisabledTransformsInput.checked,
+          evaluate_disabled_transforms: evaluateDisabledTransformsInput.checked,
+          min_model_candidate_tokens: selectedModelCandidateFloor(),
+          model_chunk_chars: selectedModelChunkChars(),
         };
         const latencyBudget = Number(latencyBudgetInput.value);
         if (latencyBudgetInput.value.trim() && Number.isFinite(latencyBudget)) {
@@ -907,13 +1024,19 @@ BENCHMARK_HTML = """
         }
         if (!response.ok) {
           row.status = "error";
-          row.error = data.detail || response.statusText;
+          row.error_reason = errorReason(data.detail, response.statusText || "HTTP error");
+          row.error_class = classifyError(row.error_reason, `http_${response.status}`);
+          row.timed_out = row.error_class === "timeout";
+          row.error = row.error_reason;
           return row;
         }
         return addResponseFields(row, data);
       } catch (error) {
         row.status = "error";
-        row.error = error.name === "AbortError" ? "cancelled" : error.message;
+        row.error_reason = error.name === "AbortError" ? "cancelled" : errorReason(error.message, "request failed");
+        row.error_class = classifyError(row.error_reason, error.name || "client_error");
+        row.timed_out = row.error_class === "timeout";
+        row.error = row.error_reason;
         row.client_wall_ms = performance.now() - started;
         return row;
       } finally {
@@ -927,6 +1050,9 @@ BENCHMARK_HTML = """
       const timings = diagnostics.timings || {};
       row.status = "ok";
       row.error = "";
+      row.error_class = "";
+      row.error_reason = "";
+      row.timed_out = false;
       row.server_elapsed_ms = data.elapsed_ms;
       row.response_original_tokens = data.original_tokens;
       row.response_compressed_tokens = data.compressed_tokens;
@@ -1078,7 +1204,10 @@ BENCHMARK_HTML = """
       const measuredRows = rows.filter((row) => row.measured);
       const groups = new Map();
       for (const row of measuredRows) {
-        const key = `${row.target_tokens}|${row.json_ratio_target}|${row.html_ratio_target}`;
+        const key = (
+          `${row.target_tokens}|${row.json_ratio_target}|${row.html_ratio_target}` +
+          `|${row.protected_prose_ratio_target}`
+        );
         if (!groups.has(key)) {
           groups.set(key, []);
         }
@@ -1086,36 +1215,63 @@ BENCHMARK_HTML = """
       }
       return [...groups.entries()]
         .sort((left, right) => {
-          const [leftTokens, leftJsonRatio, leftHtmlRatio] = left[0].split("|").map(Number);
-          const [rightTokens, rightJsonRatio, rightHtmlRatio] = right[0].split("|").map(Number);
+          const [leftTokens, leftJsonRatio, leftHtmlRatio, leftProtectedRatio] =
+            left[0].split("|").map(Number);
+          const [rightTokens, rightJsonRatio, rightHtmlRatio, rightProtectedRatio] =
+            right[0].split("|").map(Number);
           return (
             leftTokens - rightTokens ||
             leftJsonRatio - rightJsonRatio ||
-            leftHtmlRatio - rightHtmlRatio
+            leftHtmlRatio - rightHtmlRatio ||
+            leftProtectedRatio - rightProtectedRatio
           );
         })
         .map(([key, groupRows]) => {
-          const [targetTokens, jsonRatio, htmlRatio] = key.split("|");
+          const [targetTokens, jsonRatio, htmlRatio, protectedRatio] = key.split("|");
           const okRows = groupRows.filter((row) => row.status === "ok");
           const modelRows = okRows.filter((row) => row.llmlingua_called === true);
+          const modelRequestCount = modelRows.length;
           const modelCallCount = sum(numericValues(okRows, "llmlingua_call_count"));
           const modelGateSkipCount = okRows.filter((row) => row.model_gate_decision === "skip").length;
+          const gateReasonCounts = new Map();
+          for (const row of okRows) {
+            if (row.model_gate_decision !== "skip") {
+              continue;
+            }
+            const reason = row.model_gate_reason || "unspecified";
+            gateReasonCounts.set(reason, (gateReasonCounts.get(reason) || 0) + 1);
+          }
+          const topGateReason = [...gateReasonCounts.entries()].sort(
+            (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+          )[0] || ["-", 0];
           return {
-            case_id: `tok${targetTokens}_json${formatRatio(Number(jsonRatio))}_html${formatRatio(Number(htmlRatio))}`,
+            case_id: (
+              `tok${targetTokens}_json${formatRatio(Number(jsonRatio))}` +
+              `_html${formatRatio(Number(htmlRatio))}` +
+              `_protected${formatRatio(Number(protectedRatio))}`
+            ),
             target_tokens: Number(targetTokens),
             json_ratio_target: Number(jsonRatio),
             html_ratio_target: Number(htmlRatio),
+            protected_prose_ratio_target: Number(protectedRatio),
+            model_chunk_chars_override: (
+              groupRows[0]?.model_chunk_chars_override ?? selectedModelChunkChars()
+            ),
             count: groupRows.length,
             success_count: okRows.length,
             error_count: groupRows.length - okRows.length,
+            model_request_count: modelRequestCount,
             model_call_count: modelCallCount,
             model_gate_skip_count: modelGateSkipCount,
+            model_gate_reason_top: topGateReason[0],
+            model_gate_reason_top_count: topGateReason[1],
             client_wall_ms_p50: percentile(numericValues(okRows, "client_wall_ms"), 0.5),
             server_elapsed_ms_p50: percentile(numericValues(okRows, "server_elapsed_ms"), 0.5),
             timing_preprocessing_ms_p50: percentile(numericValues(okRows, "timing_preprocessing_ms"), 0.5),
             timing_segment_selection_ms_p50: percentile(numericValues(okRows, "timing_segment_selection_ms"), 0.5),
             timing_llmlingua_ms_p50: percentile(numericValues(modelRows, "timing_llmlingua_ms"), 0.5),
             timing_token_estimate_ms_p50: percentile(numericValues(okRows, "timing_token_estimate_ms"), 0.5),
+            timing_diagnostics_ms_p50: percentile(numericValues(okRows, "timing_diagnostics_ms"), 0.5),
             reduction_mean: mean(numericValues(okRows, "reduction")),
           };
         });
@@ -1133,10 +1289,18 @@ BENCHMARK_HTML = """
         appendCell(row, formatMs(item.server_elapsed_ms_p50));
         appendCell(row, formatMs(item.timing_preprocessing_ms_p50));
         appendCell(row, formatMs(item.timing_segment_selection_ms_p50));
-        appendCell(row, `${item.model_call_count}/${item.success_count}`);
+        appendCell(row, `${item.model_request_count}/${item.success_count}`);
+        appendCell(row, item.model_call_count);
         appendCell(row, `${item.model_gate_skip_count}/${item.success_count}`);
+        appendCell(
+          row,
+          item.model_gate_reason_top === "-"
+            ? "-"
+            : `${item.model_gate_reason_top.replace("llmlingua_skipped_", "")} (${item.model_gate_reason_top_count})`,
+        );
         appendCell(row, formatMs(item.timing_llmlingua_ms_p50));
         appendCell(row, formatMs(item.timing_token_estimate_ms_p50));
+        appendCell(row, formatMs(item.timing_diagnostics_ms_p50));
         appendCell(row, formatPercent(item.reduction_mean));
         summaryBody.appendChild(row);
       }
@@ -1180,7 +1344,8 @@ BENCHMARK_HTML = """
       progressStat.textContent = plannedRuns ? `${completedRuns}/${plannedRuns}` : "-";
       clientP50Stat.textContent = formatMs(percentile(numericValues(okRows, "client_wall_ms"), 0.5));
       llmlinguaP50Stat.textContent = formatMs(percentile(numericValues(modelRows, "timing_llmlingua_ms"), 0.5));
-      modelCallStat.textContent = okRows.length ? `${modelCallCount}/${okRows.length}` : "-";
+      modelRequestStat.textContent = okRows.length ? `${modelRows.length}/${okRows.length}` : "-";
+      modelChunkStat.textContent = `${modelCallCount} LLMLingua chunks`;
       errorStat.textContent = String(errorRows.length);
     }
 
@@ -1237,12 +1402,59 @@ BENCHMARK_HTML = """
       applyDeterministicInput.disabled = running;
       latencyBudgetInput.disabled = running;
       allowCpuModelAutoInput.disabled = running;
+      minModelCandidateTokensInput.disabled = running;
+      modelChunkCharsInput.disabled = running;
+      protectedProseRatioInput.disabled = running;
       includeSectionsInput.disabled = running;
+      evaluateDisabledTransformsInput.disabled = running;
+    }
+
+    function selectedModelCandidateFloor() {
+      const index = Math.max(
+        0,
+        Math.min(
+          MODEL_CANDIDATE_FLOORS.length - 1,
+          Number.parseInt(minModelCandidateTokensInput.value, 10) || 0,
+        ),
+      );
+      return MODEL_CANDIDATE_FLOORS[index];
+    }
+
+    function renderModelCandidateFloor() {
+      minModelCandidateTokensValue.textContent =
+        `${selectedModelCandidateFloor().toLocaleString()} tokens`;
+    }
+
+    function selectedModelChunkChars() {
+      const index = Math.max(
+        0,
+        Math.min(
+          MODEL_CHUNK_CHAR_CAPS.length - 1,
+          Number.parseInt(modelChunkCharsInput.value, 10) || 0,
+        ),
+      );
+      return MODEL_CHUNK_CHAR_CAPS[index];
+    }
+
+    function renderModelChunkChars() {
+      modelChunkCharsValue.textContent =
+        `${selectedModelChunkChars().toLocaleString()} chars`;
+    }
+
+    function renderProtectedProseRatio() {
+      protectedProseRatioValue.textContent =
+        `${Math.round(Number(protectedProseRatioInput.value) * 100)}%`;
     }
 
     aggressivenessInput.addEventListener("input", () => {
       aggressivenessValue.textContent = Number(aggressivenessInput.value).toFixed(2);
     });
+    minModelCandidateTokensInput.addEventListener("input", renderModelCandidateFloor);
+    modelChunkCharsInput.addEventListener("input", renderModelChunkChars);
+    protectedProseRatioInput.addEventListener("input", renderProtectedProseRatio);
+    renderModelCandidateFloor();
+    renderModelChunkChars();
+    renderProtectedProseRatio();
 
     stopButton.addEventListener("click", () => {
       cancelled = true;
@@ -1265,6 +1477,7 @@ BENCHMARK_HTML = """
       const sizes = parseNumberList(sizesInput.value, Number.parseInt);
       const jsonRatios = parseNumberList(jsonRatiosInput.value, Number.parseFloat);
       const htmlRatios = parseNumberList(htmlRatiosInput.value, Number.parseFloat);
+      const protectedProseRatio = Number(protectedProseRatioInput.value);
       const repeats = Math.max(1, Number.parseInt(repeatsInput.value, 10) || 1);
       const warmup = Math.max(0, Number.parseInt(warmupInput.value, 10) || 0);
       const concurrency = Math.max(1, Math.min(8, Number.parseInt(concurrencyInput.value, 10) || 1));
@@ -1291,7 +1504,13 @@ BENCHMARK_HTML = """
       logNode.textContent = "";
       cancelled = false;
       completedRuns = 0;
-      const measuredTasks = buildTasks(sizes, jsonRatios, htmlRatios, repeats);
+      const measuredTasks = buildTasks(
+        sizes,
+        jsonRatios,
+        htmlRatios,
+        protectedProseRatio,
+        repeats,
+      );
       plannedRuns = measuredTasks.length;
       setRunning(true);
       setStatus("Running");
@@ -1306,6 +1525,7 @@ BENCHMARK_HTML = """
           targetTokens: smallestSize,
           jsonRatio: smallestRatio,
           htmlRatio: smallestHtmlRatio,
+          protectedProseRatio,
           repeat: -(index + 1),
           measured: false,
         }));

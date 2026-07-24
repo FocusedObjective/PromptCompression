@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import os
 import re
@@ -37,8 +39,8 @@ ENABLE_JSON_MINIFY = os.getenv(
 ).lower() in {"1", "true", "yes", "on"}
 MIN_JSON_MINIFY_SAVINGS = float(os.getenv("COMPRESSOR_MIN_JSON_MINIFY_SAVINGS", "0.05"))
 
-NOCOMPRESS_PATTERN = re.compile(
-    r"<nocompress>(?P<body>.*?)</nocompress>",
+CONTROL_BLOCK_PATTERN = re.compile(
+    r"<(?P<tag>nocompress|protected-json)>(?P<body>.*?)</(?P=tag)>",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -205,18 +207,37 @@ class PromptPreprocessor:
         segments: list[CompressionSegment] = []
         cursor = 0
 
-        for match in NOCOMPRESS_PATTERN.finditer(text):
+        for match in CONTROL_BLOCK_PATTERN.finditer(text):
             segments.extend(self._prepare_compressible_text(text[cursor : match.start()]))
             body = match.group("body")
             if body:
-                segments.append(
-                    CompressionSegment(
-                        text=body,
-                        compressible=False,
-                        kind="nocompress",
-                        source_text=match.group(0),
+                if match.group("tag").lower() == "protected-json":
+                    try:
+                        protected_json = base64.b64decode(
+                            body,
+                            validate=True,
+                        ).decode("utf-8")
+                    except (binascii.Error, UnicodeDecodeError):
+                        protected_json = body
+                    json_segment = self._json_segment_for_candidate(protected_json)
+                    segments.append(
+                        json_segment
+                        or CompressionSegment(
+                            text=protected_json,
+                            compressible=False,
+                            kind="json",
+                            source_text=protected_json,
+                        )
                     )
-                )
+                else:
+                    segments.append(
+                        CompressionSegment(
+                            text=body,
+                            compressible=False,
+                            kind="nocompress",
+                            source_text=match.group(0),
+                        )
+                    )
             cursor = match.end()
 
         segments.extend(self._prepare_compressible_text(text[cursor:]))
@@ -558,10 +579,15 @@ class PromptPreprocessor:
                 source_text=candidate,
             )
 
-        if not self._is_medium_large_json(candidate) and not self.enable_json_minify:
+        is_medium_large = self._is_medium_large_json(candidate)
+        if not is_medium_large and not self.enable_json_minify:
             return None
-        if not self._is_medium_large_json(candidate):
-            return self._json_fallback_segment(candidate, parsed)
+        if not is_medium_large:
+            # A small JSON candidate that fails the minification gates must be
+            # indistinguishable from the baseline path. Returning ``None``
+            # leaves it in the surrounding prose instead of silently turning
+            # it into a protected model-input placeholder.
+            return self._json_minified_segment(candidate, parsed)
 
         try:
             toon = self.toon_encoder(parsed)
@@ -596,31 +622,31 @@ class PromptPreprocessor:
         candidate: str,
         parsed: Any,
     ) -> CompressionSegment:
+        minified = self._json_minified_segment(candidate, parsed)
+        if minified is not None:
+            return minified
+        return CompressionSegment(
+            text=candidate,
+            compressible=False,
+            kind="json",
+            source_text=candidate,
+        )
+
+    def _json_minified_segment(
+        self,
+        candidate: str,
+        parsed: Any,
+    ) -> CompressionSegment | None:
         if not self.enable_json_minify:
-            return CompressionSegment(
-                text=candidate,
-                compressible=False,
-                kind="json",
-                source_text=candidate,
-            )
+            return None
 
         minified = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False)
         if not minified.strip():
-            return CompressionSegment(
-                text=candidate,
-                compressible=False,
-                kind="json",
-                source_text=candidate,
-            )
+            return None
 
         savings = 1.0 - (len(minified) / len(candidate))
         if savings < self.min_json_minify_savings:
-            return CompressionSegment(
-                text=candidate,
-                compressible=False,
-                kind="json",
-                source_text=candidate,
-            )
+            return None
 
         if (self.min_json_minify_savings_tokens or self.require_tokenizer_backed_gates) and not self._passes_token_gate(
             candidate,
@@ -628,12 +654,7 @@ class PromptPreprocessor:
             minimum_tokens=self.min_json_minify_savings_tokens,
             minimum_reduction=self.min_json_minify_savings,
         ):
-            return CompressionSegment(
-                text=candidate,
-                compressible=False,
-                kind="json",
-                source_text=candidate,
-            )
+            return None
 
         return CompressionSegment(
             text=minified,

@@ -44,6 +44,40 @@ class TenantCompressionSettings(BaseModel):
         default_factory=list,
         description="Exact compressible boilerplate phrases to drop before model compression.",
     )
+    json_compression_policy_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_.:-]+$",
+        description=(
+            "Tenant-approved policy referenced by <compress-json policy=\"...\">."
+        ),
+    )
+    json_value_compression_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allowlisted JSONPath subset for string leaves, such as "
+            "$.description or $.comments[*].body."
+        ),
+    )
+    json_value_min_tokens: int = Field(
+        default=200,
+        ge=1,
+        le=1_000_000,
+        description="Minimum estimated tokens for an eligible JSON string.",
+    )
+    json_value_max_reduction: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=1.0,
+        description="Maximum accepted token reduction for each JSON string.",
+    )
+    json_value_max_values: int = Field(
+        default=8,
+        ge=1,
+        le=100,
+        description="Maximum JSON string values compressed in one request.",
+    )
 
 
 class EvaluationConstraints(BaseModel):
@@ -88,6 +122,24 @@ class CompressRequest(BaseModel):
             "to call LLMLingua on CPU when the ROI gate passes."
         ),
     )
+    min_model_candidate_tokens: int | None = Field(
+        default=None,
+        ge=0,
+        le=2_000_000,
+        description=(
+            "Authorized benchmark override for the model_auto candidate-token "
+            "floor. Omit to use the deployment's CPU/GPU-aware default."
+        ),
+    )
+    model_chunk_chars: int | None = Field(
+        default=None,
+        ge=4_000,
+        le=96_000,
+        description=(
+            "Authorized /compress benchmark override for the outer LLMLingua "
+            "chunk-size cap in characters. Omit to use the deployment default."
+        ),
+    )
     include_sections: bool = Field(
         default=False,
         description=(
@@ -98,6 +150,14 @@ class CompressRequest(BaseModel):
     include_diagnostics: bool = Field(
         default=False,
         description="Include phase-level timing and request-shape diagnostics.",
+    )
+    include_detailed_analytics: bool = Field(
+        default=True,
+        description=(
+            "When diagnostics are enabled, also build exact stage text, hashes, "
+            "transform provenance, and integrity analytics. Disable for "
+            "production-path latency benchmarks."
+        ),
     )
     apply_deterministic_transforms: bool = Field(
         default=True,
@@ -111,6 +171,14 @@ class CompressRequest(BaseModel):
         description=(
             "Evaluate disabled deterministic transforms without changing output. "
             "Intended for authorized benchmark diagnostics only."
+        ),
+    )
+    allow_inline_json_compression_paths: bool = Field(
+        default=False,
+        description=(
+            "Profiler/debug opt-in allowing <compress-json paths=\"...\"> to "
+            "select string leaves without a tenant policy. The v1 production "
+            "endpoints do not expose this option."
         ),
     )
     evaluation_constraints: EvaluationConstraints | None = Field(

@@ -3,6 +3,7 @@ from typing import Any
 
 from app.compression_pipeline import PromptPreprocessor
 from app.compressor import PromptCompressionService
+from app.tenant_profiles import build_tenant_profile
 from app.toon_adapter import ToonEncodingError
 from app.token_estimator import TokenEstimate
 from tests.pipeline_helpers import (
@@ -313,6 +314,38 @@ def test_json_minify_safe_profile_reverts_when_tokenizer_reports_no_savings():
     assert result.diagnostics.json_minify_tokens_saved == 0
 
 
+def test_skipped_small_json_minification_is_model_input_neutral():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    service.estimate_compression_tokens = lambda _value, _profile: TokenEstimate(
+        count=20,
+        estimator="test:stub",
+        tokenizer_backed=True,
+    )
+    text = 'Please review {"ticket":"UT-1042","status":"open"} after.'
+
+    baseline = service.compress(text, aggressiveness=0.25)
+    experiment = service.compress(
+        text,
+        aggressiveness=0.25,
+        experiment_profile="json_minify_safe",
+    )
+
+    assert baseline.diagnostics is not None
+    assert experiment.diagnostics is not None
+    assert baseline.diagnostics.analytics is not None
+    assert experiment.diagnostics.analytics is not None
+    assert experiment.diagnostics.json_minify_tokens_saved == 0
+    assert (
+        baseline.diagnostics.analytics.model_input_sha256
+        == experiment.diagnostics.analytics.model_input_sha256
+    )
+    assert compressor.inputs[-2] == compressor.inputs[-1]
+
+
 def test_small_json_does_not_trigger_structured_pipeline():
     compressor = RecordingCompressor()
     service = PromptCompressionService()
@@ -330,6 +363,107 @@ def test_small_json_does_not_trigger_structured_pipeline():
     service.compress(text, aggressiveness=0.25)
 
     assert compressor.inputs == [text]
+
+
+def test_inline_tagged_json_compresses_selected_values_for_profiler_only():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(
+        json_value_min_tokens=1,
+        json_value_max_reduction=0.9,
+    )
+    text = (
+        '<compress-json paths="$.description,$.comments[*].body">'
+        '{"id":"ISSUE-73","title":"Please review exact title",'
+        '"description":"Please review this detailed narrative before launch.",'
+        '"comments":[{"author":"Ada","body":"Please review the long comment."}]}'
+        "</compress-json>"
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        tenant_profile=profile,
+        mode="model_force",
+        allow_inline_json_compression_paths=True,
+    )
+
+    assert compressor.inputs == [
+        "Please review this detailed narrative before launch.",
+        "Please review the long comment.",
+    ]
+    assert "<compress-json" not in result.compressed_text
+    assert "<protected-json>" not in result.compressed_text
+    assert '"id":"ISSUE-73"' in result.compressed_text
+    assert '"title":"Please review exact title"' in result.compressed_text
+    assert '"description":"Review this detailed narrative before launch."' in (
+        result.compressed_text
+    )
+    assert '"body":"Review the long comment."' in result.compressed_text
+
+
+def test_inline_tagged_json_is_not_compressed_without_profiler_opt_in():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(
+        json_value_min_tokens=1,
+        json_value_max_reduction=0.9,
+    )
+    text = (
+        '<compress-json paths="$.description">'
+        '{"description":"Please review this detailed narrative."}'
+        "</compress-json>"
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        tenant_profile=profile,
+        mode="model_force",
+    )
+
+    assert compressor.inputs == []
+    assert "Please review this detailed narrative." in result.compressed_text
+    assert "json_tag_inline_paths_not_authorized" in result.warnings
+
+
+def test_policy_tag_with_paths_uses_tenant_authorized_intersection():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(
+        json_compression_policy_id="issue-v1",
+        json_value_compression_paths=["$.description"],
+        json_value_min_tokens=1,
+        json_value_max_reduction=0.9,
+    )
+    text = (
+        '<compress-json policy="issue-v1" paths="$.title,$.description">'
+        '{"title":"Please review exact title",'
+        '"description":"Please review this detailed narrative."}'
+        "</compress-json>"
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        tenant_profile=profile,
+        mode="model_force",
+    )
+
+    assert compressor.inputs == ["Please review this detailed narrative."]
+    assert '"title":"Please review exact title"' in result.compressed_text
+    assert '"description":"Review this detailed narrative."' in (
+        result.compressed_text
+    )
 
 
 def test_llm_tool_call_json_is_not_toonified():

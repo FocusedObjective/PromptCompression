@@ -112,7 +112,7 @@ PROTECTED_PATTERNS = [pattern for _, pattern in PROTECTED_PATTERN_SPECS]
 CLAUSE_PATTERN = re.compile(r"(?m)(?:^|(?<=[.!?]))[^\n.!?]*[^\s\n.!?][.!?]?")
 CLAUSE_ACTION_PATTERN = re.compile(
     r"\b(?:add|alter|approve|change|create|delete|deliver|emit|exceed|include|"
-    r"increase|keep|modify|output|preserve|provide|raise|receive|remove|respond|"
+    r"imply|increase|keep|modify|output|preserve|provide|raise|receive|remove|respond|"
     r"return|send|set|use|write)(?:s|d|ing)?\b",
     re.IGNORECASE,
 )

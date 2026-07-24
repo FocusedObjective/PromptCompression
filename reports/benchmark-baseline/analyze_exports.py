@@ -140,6 +140,9 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     constraint_failures = 0
     required_term_evaluated = 0
     required_term_failures = 0
+    downstream_evaluated = 0
+    downstream_failures = 0
+    downstream_categories: dict[str, Counter[str]] = defaultdict(Counter)
     model_called = 0
     deterministic_changed = 0
     final_changed_after_model = 0
@@ -255,6 +258,17 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
             required_term_evaluated += 1
             if not record.get("required_terms_retained"):
                 required_term_failures += 1
+        downstream = record.get("downstream_evaluation") or {}
+        if downstream.get("applicable"):
+            downstream_evaluated += 1
+            downstream_failures += int(not downstream.get("passed", False))
+            for category, values in (downstream.get("categories") or {}).items():
+                downstream_categories[str(category)]["checks"] += int(
+                    values.get("checks") or 0
+                )
+                downstream_categories[str(category)]["failures"] += int(
+                    values.get("failures") or 0
+                )
 
         original_count = int(record.get("original_tokens") or 0)
         final_count = int(record.get("final_tokens") or 0)
@@ -345,6 +359,29 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         "records": len(records),
         "successful_records": len(successful_records),
         "error_records": len(error_records),
+        "errors": {
+            "classes": dict(
+                sorted(
+                    Counter(
+                        str(record.get("error_class") or "unknown")
+                        for record in error_records
+                    ).items()
+                )
+            ),
+            "reasons": dict(
+                sorted(
+                    Counter(
+                        str(
+                            record.get("error_reason")
+                            or record.get("error")
+                            or "unknown"
+                        )
+                        for record in error_records
+                    ).items()
+                )
+            ),
+            "timeouts": sum(bool(record.get("timed_out")) for record in error_records),
+        },
         "stage_savings": {
             "original_tokens": original_tokens,
             "deterministic_tokens": deterministic_tokens,
@@ -389,6 +426,15 @@ def analyze_records(records: list[dict[str, Any]]) -> dict[str, Any]:
             "required_term_evaluated_records": required_term_evaluated,
             "required_term_coverage": ratio(required_term_evaluated, len(successful_records)),
             "required_term_failures": required_term_failures,
+            "downstream_evaluated_records": downstream_evaluated,
+            "downstream_coverage": ratio(
+                downstream_evaluated, len(successful_records)
+            ),
+            "downstream_failures": downstream_failures,
+            "downstream_categories": {
+                category: dict(values)
+                for category, values in sorted(downstream_categories.items())
+            },
             "output_rollbacks": output_rollbacks,
             "output_rollback_reasons": dict(sorted(output_rollback_reasons.items())),
         },

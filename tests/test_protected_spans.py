@@ -54,6 +54,14 @@ def test_critical_clause_spans_preserve_policy_relationships_exactly():
     ]
 
 
+def test_critical_clause_spans_include_never_imply_policy():
+    text = "Never imply that credits are automatic. Summarize the remaining context."
+
+    assert [span.text for span in critical_clause_spans(text)] == [
+        "Never imply that credits are automatic.",
+    ]
+
+
 def test_protected_spans_keep_longest_non_overlapping_match():
     text = "The account ORD-7781 costs $15,000."
 

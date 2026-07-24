@@ -1030,6 +1030,10 @@ def _provenance(
         "force_keep_token_count": len(profile.force_keep_tokens),
         "force_drop_phrase_count": len(profile.force_drop_phrases),
         "tenant_min_rate": profile.min_rate,
+        "json_compression_policy_id": profile.json_compression_policy_id,
+        "json_value_compression_path_count": len(
+            profile.json_value_compression_paths
+        ),
     }
     thresholds = {
         "minimum_json_characters": preprocessor.min_json_chars,
@@ -1044,6 +1048,9 @@ def _provenance(
         "minimum_whitespace_savings_tokens": preprocessor.min_whitespace_savings_tokens,
         "minimum_whitespace_reduction": preprocessor.min_whitespace_reduction,
         "minimum_duplicate_block_tokens": service.min_duplicate_block_tokens,
+        "json_value_min_tokens": profile.json_value_min_tokens,
+        "json_value_max_reduction": profile.json_value_max_reduction,
+        "json_value_max_values": profile.json_value_max_values,
     }
     config_json = json.dumps(
         {
@@ -1062,6 +1069,13 @@ def _provenance(
             "min_rate": profile.min_rate,
             "force_keep_tokens": list(profile.force_keep_tokens),
             "force_drop_phrases": list(profile.force_drop_phrases),
+            "json_compression_policy_id": profile.json_compression_policy_id,
+            "json_value_compression_paths": list(
+                profile.json_value_compression_paths
+            ),
+            "json_value_min_tokens": profile.json_value_min_tokens,
+            "json_value_max_reduction": profile.json_value_max_reduction,
+            "json_value_max_values": profile.json_value_max_values,
         },
         sort_keys=True,
     )

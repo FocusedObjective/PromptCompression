@@ -41,10 +41,14 @@ class FakeCompressionService:
         mode: str | None = None,
         latency_budget_ms: float | None = None,
         allow_cpu_model_auto: bool | None = None,
+        min_model_candidate_tokens: int | None = None,
+        model_chunk_chars: int | None = None,
         collect_diagnostics: bool = True,
+        collect_detailed_analytics: bool = True,
         evaluate_disabled_transforms: bool = False,
         evaluation_constraints: dict[str, list[str]] | None = None,
         request_id: str | None = None,
+        allow_inline_json_compression_paths: bool = False,
     ) -> CompressionResult:
         self.calls.append((text, aggressiveness, include_sections))
         self.tenant_profiles.append(tenant_profile)
@@ -55,10 +59,16 @@ class FakeCompressionService:
         self.last_mode = mode
         self.last_latency_budget_ms = latency_budget_ms
         self.last_allow_cpu_model_auto = allow_cpu_model_auto
+        self.last_min_model_candidate_tokens = min_model_candidate_tokens
+        self.last_model_chunk_chars = model_chunk_chars
         self.last_collect_diagnostics = collect_diagnostics
+        self.last_collect_detailed_analytics = collect_detailed_analytics
         self.last_evaluate_disabled_transforms = evaluate_disabled_transforms
         self.last_evaluation_constraints = evaluation_constraints
         self.last_request_id = request_id
+        self.last_allow_inline_json_compression_paths = (
+            allow_inline_json_compression_paths
+        )
         labels = [
             CompressionToken(text="Prompts", kept=True),
             CompressionToken(text="are", kept=False),
@@ -176,9 +186,11 @@ def test_index_returns_prompt_compression_ui():
     assert 'id="tenantForceDropPhrases"' in body
     assert "buildTenantPayload" in body
     assert "&lt;nocompress&gt;...&lt;/nocompress&gt;" in body
+    assert "&lt;compress-json paths=" in body
     assert "markdown fences are protected from compression" in body
     assert "requestPayload.include_sections = true" in body
     assert "requestPayload.include_diagnostics = true" in body
+    assert "requestPayload.allow_inline_json_compression_paths = true" in body
     assert "requestPayload.mode = compressionModeInput.value" in body
     assert "requestPayload.latency_budget_ms = latencyBudgetMs" in body
     assert "requestPayload.allow_cpu_model_auto = true" in body
@@ -281,8 +293,13 @@ def test_benchmark_index_returns_benchmark_page():
     assert "include_diagnostics" in body
     assert "Download Raw JSONL" in body
     assert "LLMLingua p50" in body
-    assert "Model calls" in body
+    assert "Edge routing is not included." in body
+    assert "Browser p50" in body
+    assert "Model requests" in body
+    assert "LLMLingua chunks" in body
     assert "Gate skips" in body
+    assert "Top gate" in body
+    assert "model_gate_reason_top" in body
     assert 'id="htmlRatiosInput"' in body
     assert "HTML ratios" in body
     assert "html_markdown" in body
@@ -290,9 +307,20 @@ def test_benchmark_index_returns_benchmark_page():
     assert '<option value="model_auto" selected>Model auto</option>' in body
     assert 'id="latencyBudgetInput"' in body
     assert 'id="allowCpuModelAutoInput" type="checkbox" checked' in body
+    assert 'id="minModelCandidateTokensInput" type="range"' in body
+    assert 'id="modelChunkCharsInput" type="range"' in body
+    assert 'id="protectedProseRatioInput" type="range"' in body
+    assert 'id="evaluateDisabledTransformsInput" type="checkbox"' in body
     assert "mode: compressionModeInput.value" in body
     assert "payload.latency_budget_ms" in body
     assert "payload.allow_cpu_model_auto = true" in body
+    assert "min_model_candidate_tokens: selectedModelCandidateFloor()" in body
+    assert "model_chunk_chars: selectedModelChunkChars()" in body
+    assert 'placeholder="blank = service max"' in body
+    assert "evaluate_disabled_transforms: evaluateDisabledTransformsInput.checked" in body
+    assert "include_detailed_analytics: evaluateDisabledTransformsInput.checked" in body
+    assert "Diagnostics p50" in body
+    assert "_protected${formatRatio(protectedProseRatio)}" in body
     assert "DIAGNOSTICS" in body
     assert "diagnosticLogFromResponse" in body
 
@@ -323,9 +351,15 @@ def test_experiments_index_returns_evidence_ledger():
     assert "Tenant 1" in body
     assert "Tenant 2" in body
     assert "47 unsafe model candidates" in body
-    assert "39 deterministic tokens" in body
-    assert "documented evidence cohorts" in body
-    assert "Integrity rollback &amp; critical-clause shielding" in body
+    assert "earlier 39-token tenant observation" in body
+    assert "completed evidence cohorts" in body
+    assert "Final integrity validation &amp; rollback" in body
+    assert "Critical-clause shielding" in body
+    assert "Shielding on/off guardrail ablation" in body
+    assert "Resolved and verified: skipped JSON is input-neutral" in body
+    assert "Safety default and final transform decisions" in body
+    assert "624 versus 486 accepted tokens saved" in body
+    assert "categorized relationship, negation, permission" in body
     assert "json_minify_safe" in body
     assert "safe_stack_v1" in body
     assert "15.9%" in body
@@ -498,6 +532,22 @@ def test_compress_passes_benchmark_only_analytics_controls(monkeypatch):
     assert service.last_request_id == "benchmark-request-42"
 
 
+def test_compress_can_request_lightweight_diagnostics(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    main.compress(
+        CompressRequest(
+            text="Prompts are code.",
+            include_diagnostics=True,
+            include_detailed_analytics=False,
+        )
+    )
+
+    assert service.last_collect_diagnostics is True
+    assert service.last_collect_detailed_analytics is False
+
+
 def test_compress_passes_cpu_model_auto_override(monkeypatch):
     service = FakeCompressionService()
     monkeypatch.setattr(main, "compression_service", service)
@@ -509,12 +559,16 @@ def test_compress_passes_cpu_model_auto_override(monkeypatch):
             mode="model_auto",
             latency_budget_ms=500.0,
             allow_cpu_model_auto=True,
+            min_model_candidate_tokens=2_000,
+            model_chunk_chars=48_000,
         )
     )
 
     assert service.last_mode == "model_auto"
     assert service.last_latency_budget_ms == 500.0
     assert service.last_allow_cpu_model_auto is True
+    assert service.last_min_model_candidate_tokens == 2_000
+    assert service.last_model_chunk_chars == 48_000
 
 
 def test_compress_response_includes_sections_when_requested(monkeypatch):
@@ -563,6 +617,14 @@ def test_compress_uses_request_supplied_tenant_profile(monkeypatch):
                 min_rate=0.6,
                 force_keep_tokens=["AcmeTerm", "AcmeTerm", "  SKU-77  "],
                 force_drop_phrases=["Reusable preamble", ""],
+                json_compression_policy_id="issue-v1",
+                json_value_compression_paths=[
+                    "$.description",
+                    "$.comments[*].body",
+                ],
+                json_value_min_tokens=120,
+                json_value_max_reduction=0.2,
+                json_value_max_values=4,
             ),
             text="Prompts are code.",
         )
@@ -577,10 +639,36 @@ def test_compress_uses_request_supplied_tenant_profile(monkeypatch):
     assert profile.min_rate == 0.6
     assert profile.force_keep_tokens == ("AcmeTerm", "SKU-77")
     assert profile.force_drop_phrases == ("Reusable preamble",)
+    assert profile.json_compression_policy_id == "issue-v1"
+    assert profile.json_value_compression_paths == (
+        "$.description",
+        "$.comments[*].body",
+    )
+    assert profile.json_value_min_tokens == 120
+    assert profile.json_value_max_reduction == 0.2
+    assert profile.json_value_max_values == 4
     assert response.tenant_id == "tenant_123"
     assert response.compression_profile == "tenant_123:v1"
     assert response.compression_profile_source == "api"
     assert response.training_sample_recorded is False
+
+
+def test_compress_profiler_can_enable_inline_json_paths(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    main.compress(
+        CompressRequest(
+            text=(
+                '<compress-json paths="$.description">'
+                '{"description":"Long narrative"}'
+                "</compress-json>"
+            ),
+            allow_inline_json_compression_paths=True,
+        )
+    )
+
+    assert service.last_allow_inline_json_compression_paths is True
 
 
 def test_v1_compress_returns_compatible_shape(monkeypatch):

@@ -19,6 +19,20 @@
       "<nocompress>",
       "</nocompress>"
     ],
+    "downstream_checks": [
+      {
+        "id": "retry_threshold_negation",
+        "category": "negation",
+        "required_substrings": ["do not recommend raising retry_count above 3"],
+        "same_paragraph": true
+      },
+      {
+        "id": "required_brief_format",
+        "category": "required_format",
+        "required_substrings": ["Executive summary", "Blockers and owner", "Next three actions"],
+        "ordered": true
+      }
+    ],
     "text": "You are a support operations analyst preparing a concise escalation brief.\nKeep customer IDs, incident dates, URLs, and exact retry limits unchanged.\n\nGoal:\nSummarize the risk, identify likely blockers, and propose next steps.\nDo not remove policy constraints or turn customer data into prose.\n\nCustomer data:\n{\n  \"account\": {\n    \"id\": \"acct_2048\",\n    \"plan\": \"enterprise\",\n    \"region\": \"us-west-2\"\n  },\n  \"incidents\": [\n    {\"id\": \"INC-1001\", \"date\": \"2026-06-18\", \"severity\": \"high\", \"status\": \"open\"},\n    {\"id\": \"INC-1002\", \"date\": \"2026-06-20\", \"severity\": \"medium\", \"status\": \"monitoring\"},\n    {\"id\": \"INC-1003\", \"date\": \"2026-06-22\", \"severity\": \"low\", \"status\": \"resolved\"}\n  ],\n  \"links\": {\n    \"runbook\": \"https://example.com/runbooks/payment-timeouts\",\n    \"dashboard\": \"https://example.com/dashboards/acct_2048\"\n  }\n}\n\nContext notes:\nThe customer reports intermittent checkout timeouts after a deployment window. The service owner suspects retry storms during peak traffic. Support needs a short answer suitable for an account executive.\n\n<nocompress>Hard constraint: do not recommend raising retry_count above 3.</nocompress>\n\nOutput:\n- Executive summary\n- Blockers and owner\n- Next three actions"
   },
   {
@@ -119,6 +133,22 @@
       "unless"
     ],
     "forbidden_substrings": [],
+    "downstream_checks": [
+      {
+        "id": "renewal_exception_relationship",
+        "category": "relationship",
+        "required_substrings": ["ORD-7781", "$15,000", "2026-08-15", "unless legal approves a written amendment"],
+        "ordered": true,
+        "same_paragraph": true
+      },
+      {
+        "id": "credit_permission_threshold",
+        "category": "permission",
+        "required_substrings": ["service credit only if", "outage exceeds 240 minutes", "Never imply that credits are automatic"],
+        "ordered": true,
+        "same_paragraph": true
+      }
+    ],
     "text": "Prepare a vendor-risk summary. Do not delete the contract exception. The account is ORD-7781 and the renewal cap is $15,000 through 2026-08-15 unless legal approves a written amendment. The customer can receive a service credit only if the outage exceeds 240 minutes in a single billing month. Never imply that credits are automatic. The operations team needs a shorter version of this context for an executive update, but all thresholds, dates, identifiers, negations, and exception words must remain available to the downstream model."
   },
   {
@@ -139,6 +169,20 @@
       "pin shard-affinity routing"
     ],
     "forbidden_substrings": [],
+    "downstream_checks": [
+      {
+        "id": "incident_owner_mitigation_deadline",
+        "category": "relationship",
+        "required_substrings": ["CACHE-440", "search ranking drift", "pin shard-affinity routing", "2026-07-02 18:00 UTC"],
+        "ordered": true,
+        "same_paragraph": true
+      },
+      {
+        "id": "incident_answer_format",
+        "category": "required_format",
+        "required_substrings": ["Answer format: incident id, mitigation, deadline"]
+      }
+    ],
     "text": "You are answering a reliability question from the following incident notes. Compress irrelevant context but preserve the paragraph that answers the question.\n\nQuestion: Which incident owns the customer-visible search ranking drift, what mitigation was chosen, and what deadline applies?\n\nParagraph 1: The checkout latency review belongs to PAY-118 and only affects sandbox merchants during replay tests.\nParagraph 2: The email unsubscribe regression belongs to MKT-772 and was already rolled back by the lifecycle team.\nParagraph 3: The nightly warehouse load had a harmless retry storm in JOB-204, but customers never saw it.\nParagraph 4: Incident CACHE-440 owns the customer-visible search ranking drift. The mitigation is to pin shard-affinity routing until the vector index backfill finishes. Deadline: 2026-07-02 18:00 UTC.\nParagraph 5: The mobile release notes mention a dark-mode rendering defect that is cosmetic and tracked by APP-901.\nParagraph 6: The CRM export queue was slow for one internal tenant, but no external service-level objective was breached.\nParagraph 7: The analytics team is tuning dashboard sample rates and does not need executive escalation.\nParagraph 8: The support macro cleanup can wait until next sprint because it only changes internal wording.\n\nAnswer format: incident id, mitigation, deadline."
   },
   {
@@ -158,6 +202,22 @@
       "exact dollar amount"
     ],
     "forbidden_substrings": [],
+    "downstream_checks": [
+      {
+        "id": "math_revenue_relationship",
+        "category": "relationship",
+        "required_substrings": ["24 packages", "9 packages", "7 packages", "$3.50", "returns 2 packages", "do not count as sales revenue"],
+        "ordered": true,
+        "same_paragraph": true
+      },
+      {
+        "id": "math_answer_format",
+        "category": "required_format",
+        "required_substrings": ["Do not round", "exact dollar amount"],
+        "ordered": true,
+        "same_paragraph": true
+      }
+    ],
     "text": "Solve the math problem, but first compress the prompt for a downstream model. Mara starts Monday with 24 packages of printer paper. She sells 9 packages before lunch and 7 packages after lunch. Each package sells for $3.50. A separate customer returns 2 packages, but returned packages do not count as sales revenue. Do not round the answer. The final answer must be an exact dollar amount. Keep every quantity, the return rule, the unit, and the answer-format constraint available to the downstream model."
   },
   {
@@ -179,6 +239,20 @@
       "not (A and B) or (C and not D)"
     ],
     "forbidden_substrings": [],
+    "downstream_checks": [
+      {
+        "id": "boolean_negation_expression",
+        "category": "negation",
+        "required_substrings": ["not (A and B) or (C and not D)", "A = true", "B = false", "C = false", "D = true"],
+        "ordered": true,
+        "same_paragraph": true
+      },
+      {
+        "id": "boolean_answer_format",
+        "category": "required_format",
+        "required_substrings": ["only true or false"]
+      }
+    ],
     "text": "Evaluate the boolean expression for a downstream model. The exact expression is not (A and B) or (C and not D). The truth assignments are A = true, B = false, C = false, and D = true. Preserve every operator, parenthesis, and assignment exactly because changing a negation changes the answer. The downstream response should contain only true or false, but the compressed prompt must keep the full reasoning inputs."
   },
   {

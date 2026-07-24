@@ -26,6 +26,13 @@ def test_error_rows_are_not_counted_as_integrity_failures_or_latency_samples():
         "final_tokens": 3,
         "latency_ms": 125.0,
         "validation": {"integrityPassed": True},
+        "downstream_evaluation": {
+            "applicable": True,
+            "passed": True,
+            "categories": {
+                "relationship": {"checks": 1, "failures": 0},
+            },
+        },
         "provenance": {"resolved_compression_settings": {}},
         "stages": {},
     }
@@ -35,6 +42,9 @@ def test_error_rows_are_not_counted_as_integrity_failures_or_latency_samples():
         "final_tokens": None,
         "latency_ms": 0,
         "validation": {"integrityPassed": None},
+        "error_class": "TimeoutError",
+        "error_reason": "model timeout after 300 seconds",
+        "timed_out": True,
         "provenance": {},
         "stages": {},
     }
@@ -44,7 +54,17 @@ def test_error_rows_are_not_counted_as_integrity_failures_or_latency_samples():
     assert metrics["records"] == 2
     assert metrics["successful_records"] == 1
     assert metrics["error_records"] == 1
+    assert metrics["errors"]["classes"] == {"TimeoutError": 1}
+    assert metrics["errors"]["reasons"] == {
+        "model timeout after 300 seconds": 1
+    }
+    assert metrics["errors"]["timeouts"] == 1
     assert metrics["integrity"]["integrity_evaluated_records"] == 1
     assert metrics["integrity"]["integrity_failures"] == 0
     assert metrics["integrity"]["integrity_failure_rate"] == 0.0
     assert metrics["distributions"]["latency_ms_p50"] == 125.0
+    assert metrics["integrity"]["downstream_evaluated_records"] == 1
+    assert metrics["integrity"]["downstream_failures"] == 0
+    assert metrics["integrity"]["downstream_categories"] == {
+        "relationship": {"checks": 1, "failures": 0}
+    }

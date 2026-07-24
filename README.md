@@ -138,6 +138,22 @@ Tenant fields are optional. They are request scoped and are not loaded from a
 local database. If `aggressiveness` is omitted, `tenant_profile.default_aggressiveness`
 is used when provided.
 
+Tagged JSON can selectively compress long narrative string values while
+keeping the surrounding structure protected. Production callers authorize
+paths through `tenant_profile`; the `/compress` profiler can instead opt into a
+simple inline form:
+
+```xml
+<compress-json paths="$.description,$.comments[*].body">
+{"id":"ISSUE-73","description":"Long narrative...","comments":[{"body":"Long comment..."}]}
+</compress-json>
+```
+
+Set `allow_inline_json_compression_paths` to `true` on the `/compress` request.
+Inline authorization is disabled by default and unavailable on the v1
+production endpoints. See [Tagged JSON Compression](docs/tagged-json-compression.md)
+for tenant policies, supported paths, safety gates, and fallback behavior.
+
 Set `include_sections` to `true` only for UI/debug views that need per-section
 labels and protected-block rendering. It defaults to `false` to keep responses
 small and skip word-label generation.
@@ -522,6 +538,17 @@ LLMLingua calls with little expected token savings. Tune
 `COMPRESSOR_MIN_SEGMENT_CHARS` and `COMPRESSOR_MIN_SEGMENT_TOKENS` if you prefer
 more compression over latency.
 
+`model_auto` also uses device-aware request-level ROI floors. CPU defaults to
+20,000 model-candidate tokens and 2,000 expected saved tokens; GPU defaults to
+2,000 candidates and 200 expected saved tokens. Override them independently
+with `COMPRESSOR_CPU_MIN_MODEL_CANDIDATE_TOKENS`,
+`COMPRESSOR_GPU_MIN_MODEL_CANDIDATE_TOKENS`,
+`COMPRESSOR_CPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS`, and
+`COMPRESSOR_GPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS`. The legacy
+`COMPRESSOR_MIN_MODEL_CANDIDATE_TOKENS` and
+`COMPRESSOR_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS` still set both devices when a
+device-specific value is absent.
+
 ## VS Code
 
 Included files:
@@ -603,82 +630,14 @@ Windows user.
 
 ## Cloud Run Hosting Shape
 
-Cloud Run sends traffic to the port in its `PORT` environment variable. The
-Dockerfile uses that value and falls back to `8080` for local Docker runs.
+Production is the single GPU-backed Cloud Run service named
+`prompt-compression`. Its Artifact Registry image is named
+`prompt-compression-gpu`; the image name is not a deployable service name.
 
-Set your project and region:
-
-```powershell
-gcloud config set project YOUR_PROJECT_ID
-$env:REGION="us-central1"
-$env:SERVICE="prompt-compression"
-$env:REPO="prompt-compression"
-$env:PROJECT_ID="$(gcloud config get-value project)"
-$env:IMAGE="$env:REGION-docker.pkg.dev/$env:PROJECT_ID/$env:REPO/$env:SERVICE`:latest"
-```
-
-Enable the required services:
-
-```powershell
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
-```
-
-Create the Artifact Registry repository once:
-
-```powershell
-gcloud artifacts repositories create $env:REPO `
-  --repository-format=docker `
-  --location=$env:REGION `
-  --description="Prompt Compression images"
-```
-
-Build and push the image with Cloud Build:
-
-```powershell
-gcloud builds submit `
-  --config cloudbuild.yaml `
-  --substitutions="_REGION=$env:REGION,_REPO=$env:REPO,_SERVICE=$env:SERVICE" `
-  .
-```
-
-Deploy to Cloud Run:
-
-```powershell
-gcloud run deploy $env:SERVICE `
-  --image $env:IMAGE `
-  --region $env:REGION `
-  --platform managed `
-  --allow-unauthenticated `
-  --port 8080 `
-  --cpu 2 `
-  --memory 4Gi `
-  --concurrency 1 `
-  --timeout 300s `
-  --set-env-vars "COMPRESSOR_DEVICE=cpu,COMPRESSOR_MIN_RATE=0.45"
-```
-
-Use `--no-allow-unauthenticated` instead of `--allow-unauthenticated` if the API
-should require IAM authentication.
-
-Check the deployed service:
-
-```powershell
-$env:SERVICE_URL="$(gcloud run services describe $env:SERVICE --region $env:REGION --format='value(status.url)')"
-curl "$env:SERVICE_URL/health"
-$env:API_URL="$env:SERVICE_URL/compress"
-python scripts\smoke_test.py
-```
-
-For lower cold-start latency, redeploy with `--min-instances 1`. That keeps one
-instance warm and increases idle cost. To use a different Hugging Face model,
-rebuild through `cloudbuild.yaml` with `_COMPRESSOR_MODEL=...` so the runtime
-stays offline and deterministic.
-
-Later optimization steps:
-
-- Export the classifier to ONNX.
-- Quantize to INT8.
-- Add metrics for latency, reduction percentage, and model version.
+Use [`DEPLOYMENT_GPU.md`](DEPLOYMENT_GPU.md) for every production build,
+deployment, rollback, and verification. `Dockerfile` and `cloudbuild.yaml` are
+retained only for local CPU development and must not be deployed to the
+production service.
 
 ## Performance Benchmark
 
@@ -697,6 +656,14 @@ The page runs requests from your browser against that deployment's `/compress`
 endpoint, captures the diagnostics timing fields, and provides raw JSONL and
 summary CSV downloads. Use concurrency `1` when comparing Cloud Run CPU/memory
 shapes unless you intentionally want to measure overlapping requests.
+The auto-candidate slider overrides the deployment floor for that benchmark
+cohort. Deep counterfactual analytics is off by default because it hashes and
+re-estimates exact stage texts and performs extra research-only work; enable it
+only when measuring transform opportunities, not production-path latency.
+Lightweight phase diagnostics remain enabled. JSON ratio, HTML ratio, and
+protected-prose ratio are separate controls: a
+`json0_html0_protected0` case is ordinary prose, while raising protected prose
+deliberately adds IDs, dates, and URLs.
 
 Against a deployed service:
 

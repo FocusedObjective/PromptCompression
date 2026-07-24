@@ -5,6 +5,7 @@ from app.compressor import (
     _parse_adapter_slots,
     build_token_savings,
 )
+from app.experiment_profiles import ExperimentProfile, resolve_experiment_profile
 from app.tenant_profiles import build_tenant_profile
 from app.token_estimator import TokenEstimate, estimate_huggingface_tokens, estimate_token_count
 from tests.pipeline_helpers import RecordingCompressor, build_service_with_pipeline
@@ -113,6 +114,26 @@ class AlteringCriticalClauseCompressor(RecordingCompressor):
         self.force_tokens_values.append(force_tokens)
         self.return_word_label_values.append(return_word_label)
         output = text.replace("may receive", "will receive")
+        return {
+            "compressed_prompt": output,
+            "origin_tokens": len(text.split()),
+            "compressed_tokens": len(output.split()),
+            "fn_labeled_original_prompt": "",
+        }
+
+
+class RemovingNeverClauseCompressor(RecordingCompressor):
+    def compress_prompt_llmlingua2(
+        self,
+        text: str,
+        rate: float,
+        force_tokens: list[str],
+        return_word_label: bool,
+    ) -> dict[str, str | int]:
+        self.inputs.append(text)
+        self.force_tokens_values.append(force_tokens)
+        self.return_word_label_values.append(return_word_label)
+        output = text.replace("Never imply that credits are automatic.", "")
         return {
             "compressed_prompt": output,
             "origin_tokens": len(text.split()),
@@ -350,7 +371,15 @@ def test_model_critical_clause_change_rolls_back_to_deterministic_output():
     service.min_segment_tokens = 1
     text = "The customer may receive a credit only if support approves the exception."
 
-    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        include_sections=False,
+        experiment_profile=ExperimentProfile(
+            profile_id="critical_clause_shielding_off_test",
+            enable_critical_clause_shielding=False,
+        ),
+    )
 
     assert result.compressed_text == text
     assert result.token_savings is not None
@@ -358,6 +387,66 @@ def test_model_critical_clause_change_rolls_back_to_deterministic_output():
     assert result.diagnostics is not None
     assert result.diagnostics.output_rollback_reason == (
         "output_rejected_integrity_constraint"
+    )
+
+
+def test_default_profile_shields_critical_clause_before_model_call():
+    compressor = AlteringCriticalClauseCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    text = "The customer may receive a credit only if support approves the exception."
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    assert result.compressed_text == text
+    assert compressor.inputs
+    assert "may receive" not in compressor.inputs[0]
+    assert "__CK_KEEP_" in compressor.inputs[0]
+    assert result.diagnostics is not None
+    assert result.diagnostics.output_rollback_count == 0
+    assert result.diagnostics.analytics is not None
+    assert (
+        result.diagnostics.analytics.provenance.resolved_experiment_profile[
+            "enable_critical_clause_shielding"
+        ]
+        is True
+    )
+
+
+def test_never_imply_clause_rolls_back_when_shielding_is_disabled():
+    compressor = RemovingNeverClauseCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    text = "Never imply that credits are automatic. Summarize the account."
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        include_sections=False,
+        experiment_profile=ExperimentProfile(
+            profile_id="critical_clause_shielding_off_test",
+            enable_critical_clause_shielding=False,
+        ),
+    )
+
+    assert result.compressed_text == text
+    assert result.diagnostics is not None
+    assert result.diagnostics.output_rollback_reason == (
+        "output_rejected_integrity_constraint"
+    )
+
+
+def test_shielding_off_profile_is_benchmark_only_ablation():
+    assert resolve_experiment_profile("baseline").enable_critical_clause_shielding is True
+    assert (
+        resolve_experiment_profile(
+            "critical_clause_shielding_off_ablation"
+        ).enable_critical_clause_shielding
+        is False
     )
 
 
@@ -715,6 +804,7 @@ def test_model_auto_low_candidate_skip_avoids_density_scans():
 
     service._protected_density_for_model_candidates = fail_density_scan
     service._identifier_density_for_model_candidates = fail_density_scan
+    service._prepare_model_input = fail_density_scan
 
     result = service.compress(
         "Please review this longer prompt.",
@@ -726,6 +816,44 @@ def test_model_auto_low_candidate_skip_avoids_density_scans():
     assert result.diagnostics is not None
     assert result.diagnostics.model_gate_reason == (
         "llmlingua_skipped_low_candidate_tokens"
+    )
+
+
+def test_model_auto_request_can_override_candidate_floor():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.allow_cpu_model_auto = True
+    service.min_model_candidate_tokens = 20_000
+    service.min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.max_model_projected_latency_ms = 1000.0
+    service.skip_model_if_deterministic_reduction_gte = 1.0
+    service.cpu_p50_fixed_overhead_ms = 1.0
+    service.cpu_p50_llmlingua_chunk_ms = 1.0
+    service.cpu_p50_token_estimate_ms = 1.0
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+        min_model_candidate_tokens=1,
+    )
+
+    assert compressor.inputs == ["Please review this longer prompt."]
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_gate_decision == "run"
+
+
+def test_model_auto_candidate_defaults_are_device_aware(monkeypatch):
+    monkeypatch.setenv("COMPRESSOR_DEVICE", "cpu")
+    cpu_service = PromptCompressionService()
+    monkeypatch.setenv("COMPRESSOR_DEVICE", "cuda")
+    gpu_service = PromptCompressionService()
+
+    assert gpu_service.min_model_candidate_tokens < cpu_service.min_model_candidate_tokens
+    assert (
+        gpu_service.min_model_incremental_savings_tokens
+        < cpu_service.min_model_incremental_savings_tokens
     )
 
 
@@ -800,6 +928,11 @@ def test_model_auto_skips_high_protected_density():
     service.gpu_p50_llmlingua_chunk_ms = 1.0
     service.gpu_p50_token_estimate_ms = 1.0
 
+    def fail_model_input_preparation(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("model input should not be prepared for a density skip")
+
+    service._prepare_model_input = fail_model_input_preparation
+
     result = service.compress(
         "Please review https://example.com/run/123 and ORD-7781 before launch.",
         aggressiveness=0.25,
@@ -811,6 +944,24 @@ def test_model_auto_skips_high_protected_density():
     assert result.diagnostics is not None
     assert result.diagnostics.protected_density > service.max_protected_density
     assert result.diagnostics.identifier_density > 0
+
+
+def test_deterministic_mode_skips_model_input_preparation():
+    service = build_service_with_pipeline(RecordingCompressor())
+
+    def fail_model_input_preparation(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("deterministic mode should not prepare model input")
+
+    service._prepare_model_input = fail_model_input_preparation
+
+    result = service.compress(
+        "Please review ORD-7781 before launch.",
+        aggressiveness=0.25,
+        mode="deterministic",
+    )
+
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_gate_reason == "llmlingua_skipped_mode_deterministic"
 
 
 def test_model_auto_skips_high_placeholder_count():
@@ -1326,12 +1477,13 @@ def test_protected_prose_spans_are_placeholdered_before_model_call():
     assert "ORD-7781" not in compressor.inputs[0]
     assert "$15,000" not in compressor.inputs[0]
     assert "2026-08-15" not in compressor.inputs[0]
-    assert compressor.force_tokens_values[0][:2] == [
-        "__CK_KEEP_0000__",
-        "__CK_KEEP_0001__",
-    ]
+    assert [
+        value
+        for value in compressor.force_tokens_values[0]
+        if value.startswith("__CK_KEEP_")
+    ] == ["__CK_KEEP_0000__"]
     assert result.diagnostics is not None
-    assert result.diagnostics.placeholder_count == 2
+    assert result.diagnostics.placeholder_count == 1
     assert "Do not delete" in result.compressed_text
     assert "ORD-7781" in result.compressed_text
     assert "$15,000" in result.compressed_text
@@ -1471,6 +1623,30 @@ def test_long_model_input_chunks_by_char_limit_without_placeholders():
     assert result.diagnostics.model_chunk_count == 3
     assert result.diagnostics.llmlingua_call_count == 3
     assert result.diagnostics.chunk_chars_max <= service.max_model_chunk_chars
+
+
+def test_request_chunk_override_is_scoped_without_mutating_service_default():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.max_model_chunk_chars = 35
+    text = (
+        "Please review alpha content. "
+        "Please review beta content. "
+        "Please review gamma content."
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        include_sections=False,
+        model_chunk_chars=4_000,
+    )
+
+    assert compressor.inputs == [text]
+    assert service.max_model_chunk_chars == 35
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_chunk_count == 1
+    assert result.diagnostics.llmlingua_call_count == 1
 
 
 def test_placeholder_sections_keep_model_word_labels_for_ui():

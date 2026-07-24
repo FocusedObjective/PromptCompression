@@ -404,7 +404,7 @@ EXPERIMENTS_HTML = """
 <body>
   <main class="shell">
     <header class="masthead">
-      <p class="eyebrow">Evidence ledger · Updated July 14, 2026</p>
+      <p class="eyebrow">Evidence ledger · Updated July 15, 2026</p>
       <h1>Compression experiments, with receipts.</h1>
       <p class="lede">A living record of what we tried, what actually saved tokens, what stayed intact, and what still needs proof. Experiments graduate only when savings are causal, repeatable, tokenizer-positive, and safe on held-out tenant data.</p>
       <nav class="nav-links" aria-label="Primary navigation">
@@ -418,10 +418,10 @@ EXPERIMENTS_HTML = """
     </header>
 
     <section class="snapshot" aria-label="Program snapshot">
-      <div class="metric"><strong>8</strong><span>implemented experiments and safety controls</span></div>
-      <div class="metric"><strong>4</strong><span>documented evidence cohorts</span></div>
+      <div class="metric"><strong>10</strong><span>tracked experiments and safety decisions</span></div>
+      <div class="metric"><strong>7</strong><span>completed evidence cohorts used in the register</span></div>
       <div class="metric"><strong>0</strong><span>savings transforms promoted to safe_stack_v1</span></div>
-      <div class="metric"><strong>1</strong><span>accepted safety layer: shielding plus rollback</span></div>
+      <div class="metric"><strong>2</strong><span>permanent safety defaults: shielding and rollback</span></div>
     </section>
 
     <section class="section" id="program">
@@ -430,9 +430,9 @@ EXPERIMENTS_HTML = """
         <p class="section-note">Small, attributable changes first. Cumulative behavior waits until each experiment earns promotion independently.</p>
       </div>
       <div class="phase-grid">
-        <article class="phase"><span class="phase-number">0</span><h3>Measurement &amp; integrity</h3><p>Allowlisted profiles, provenance, stage accounting, critical-clause shielding, and final rollback.</p><span class="status accepted">Safety accepted</span></article>
-        <article class="phase"><span class="phase-number">1</span><h3>Existing safe features</h3><p>Strict whitespace, safe JSON minification fallback, and repeated literal aliases.</p><span class="status revise">Evaluated · revise</span></article>
-        <article class="phase"><span class="phase-number">2</span><h3>Threshold expansion</h3><p>Tokenizer-backed matrices for JSON-to-TOON and HTML-to-Markdown.</p><span class="status revise">Evaluated · revise</span></article>
+        <article class="phase"><span class="phase-number">0</span><h3>Measurement &amp; integrity</h3><p>Final rollback remains unconditional. Critical-clause shielding is now the default, with an explicit benchmark-only off ablation.</p><span class="status accepted">Promoted defaults</span></article>
+        <article class="phase"><span class="phase-number">1</span><h3>Existing safe features</h3><p>Strict whitespace, safe JSON minification fallback, and repeated literal aliases.</p><span class="status pending">Evaluated · parked</span></article>
+        <article class="phase"><span class="phase-number">2</span><h3>Threshold expansion</h3><p>Tokenizer-backed matrices for JSON-to-TOON and HTML-to-Markdown.</p><span class="status pending">Evaluated · parked</span></article>
         <article class="phase"><span class="phase-number">3</span><h3>Tenant-specific structure</h3><p>Exact approved boilerplate and aliases for classified generated wrappers only.</p><span class="status pending">Needs eligible data</span></article>
         <article class="phase"><span class="phase-number">4</span><h3>Safe stack</h3><p>Combine only experiments with positive held-out savings and zero accepted hard failures.</p><span class="status pending">Intentionally empty</span></article>
       </div>
@@ -503,6 +503,21 @@ EXPERIMENTS_HTML = """
             <li>The run used one repeat and crossed an application deployment boundary, so it cannot support promotion.</li>
           </ul>
         </article>
+
+        <article class="run-card">
+          <div class="run-head"><div><span class="run-kicker">Focused release matrix · July 15</span><h3>Safety default and final transform decisions</h3></div><span class="status accepted">Safety confirmed</span></div>
+          <p>Three fixed-corpus matrices, four conditions and three repeats each: 360 records on deployment <strong>2026.07.14.131419</strong>. A pre-fix run exposed the missing <code>Never imply</code> clause; the corrected v2 run is the decision source.</p>
+          <div class="run-stats">
+            <div class="run-stat"><strong>0</strong><span>errors or accepted hard failures</span></div>
+            <div class="run-stat"><strong>9</strong><span>fewer rollbacks with shielding on</span></div>
+            <div class="run-stat"><strong>138</strong><span>more accepted tokens saved with shielding on</span></div>
+          </div>
+          <ul class="run-list">
+            <li>Shielding on: 624 accepted tokens saved, 6 rollbacks, 682 ms p50. Shielding off: 486 tokens, 15 rollbacks, 741 ms p50.</li>
+            <li>All categorized relationship, negation, permission, and required-format checks passed after the detector repair.</li>
+            <li>TOON and JSON experiment deterministic arms matched baseline at 381 tokens saved; neither added an application or token.</li>
+          </ul>
+        </article>
       </div>
 
       <aside class="finding" aria-label="Additional cohort quality note">
@@ -514,27 +529,29 @@ EXPERIMENTS_HTML = """
     <section class="section" id="experiments">
       <div class="section-heading">
         <div><p class="eyebrow">Decision register</p><h2>Experiment results</h2></div>
-        <p class="section-note"><span class="status accepted">Accepted</span> safety control · <span class="status revise">Revise</span> clean but insufficient evidence · <span class="status pending">Pending</span> missing eligible held-out data</p>
+        <p class="section-note"><span class="status accepted">Promoted</span> permanent safety default · <span class="status revise">Run next</span> actionable evidence candidate · <span class="status pending">Parked</span> insufficient demand or eligible data</p>
       </div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Experiment</th><th>Status</th><th>What the evidence says</th><th>Next proof</th></tr></thead>
           <tbody>
-            <tr><td>Integrity rollback &amp; critical-clause shielding</td><td><span class="status accepted">Accepted safety</span></td><td>Rejected model output never counts as savings. The two new cohorts rejected 47 unsafe candidates—35 inline-code and 12 identifier changes—while all 273 completed accepted outputs passed hard-integrity checks.</td><td>Keep unconditional. Expand semantic and entity-relationship evaluation coverage.</td></tr>
-            <tr><td>Strict prose whitespace</td><td><span class="status revise">Revise</span></td><td>The two new profile arms reported eight candidate rewrites, but they produced zero tokenizer savings and no incremental deterministic output change.</td><td>Test prose with actual tokenizer-costly spacing while retaining Markdown and aligned-text exclusions.</td></tr>
-            <tr><td>Safe JSON minification</td><td><span class="status revise">Revise</span></td><td>No minification applied in either new cohort despite detected structured-data candidates. The Delivery Tower skipped-candidate model-input interaction also remains open.</td><td>Make skipped candidates model-input neutral, then rerun the causal matrix.</td></tr>
-            <tr><td>Repeated literal aliases</td><td><span class="status revise">Revise</span></td><td>No eligible repeated long URL or identifier appeared in the fixed corpus or any of the three tenant slices.</td><td>Use held-out prompts with naturally repeated literals and verify exact expansion.</td></tr>
-            <tr><td>Expanded JSON-to-TOON</td><td><span class="status revise">Revise</span></td><td>Tenant 1 produced one incremental application and 39 deterministic tokens. Tenant 2 produced zero incremental tokens because baseline had already made the same two TOON conversions and saved 1,428 tokens.</td><td>Rerun the fixed four-arm matrix with three repeats and downstream constraints before considering promotion.</td></tr>
-            <tr><td>Expanded HTML-to-Markdown</td><td><span class="status revise">Revise</span></td><td>No new cohort applied the transform. Tenant 2 candidates remained below threshold; Tenant 1 had no eligible region.</td><td>Evaluate real article/main HTML with exact link and visible-text preservation.</td></tr>
-            <tr><td>Tenant-approved exact boilerplate</td><td><span class="status pending">Pending</span></td><td>Discovery remains diagnostics-only. All tenant experiment cohorts used the default profile without an approved, versioned phrase set.</td><td>Approve a versioned exact phrase set from at least 50 records, then evaluate held-out tenant data.</td></tr>
-            <tr><td>Classified duplicate-wrapper aliases</td><td><span class="status revise">Revise</span></td><td>No classified generated-support wrapper appeared in either new cohort. Generic duplicate removal stayed diagnostics-only as intended.</td><td>Build a held-out corpus of explicitly classified generated wrappers with exact expansion tests.</td></tr>
+            <tr><td>Final integrity validation &amp; rollback</td><td><span class="status accepted">Permanent default</span></td><td>Rejected model output never counts as savings. The two new cohorts rejected 47 unsafe candidates—35 inline-code and 12 identifier changes—while all 273 completed accepted outputs passed hard-integrity checks.</td><td>Keep unconditional on every model path and continue reporting rollback reasons separately from accepted output.</td></tr>
+            <tr><td>Critical-clause shielding</td><td><span class="status accepted">Permanent default</span></td><td>The corrected ablation favored shielding on every operational measure: 624 versus 486 accepted tokens saved, 6 versus 15 rollbacks, and 682 versus 741 ms p50. All categorized downstream checks passed.</td><td>Keep on by default. Retain the off profile only as a benchmark/diagnostic control; rollback remains unconditional.</td></tr>
+            <tr><td>Shielding on/off guardrail ablation</td><td><span class="status accepted">Completed</span></td><td>Three repeats of 10 fixed cases produced 120 records with zero errors and zero accepted integrity or downstream failures. The run also exposed and verified the repaired <code>Never imply</code> clause classification.</td><td>No further ablation required before release; extend the clause corpus when new policy verbs appear.</td></tr>
+            <tr><td>Expanded JSON-to-TOON</td><td><span class="status pending">Parked</span></td><td>The fixed rerun did not reproduce incremental savings: baseline and experiment deterministic arms both saved 381 tokens with identical applications. The earlier 39-token tenant observation remains directional only.</td><td>Reopen only with a separate natural held-out corpus containing eligible records; do not populate <code>safe_stack_v1</code>.</td></tr>
+            <tr><td>Safe JSON minification<br><code>json_minify_safe</code></td><td><span class="status pending">Parked</span></td><td>The repair is verified: zero skipped-record model-input hash mismatches. However, the experiment again applied zero minifications and added zero deterministic tokens over baseline.</td><td>Reopen only when natural traffic contains tokenizer-positive eligible JSON; the hidden model-input experiment is closed.</td></tr>
+            <tr><td>Strict prose whitespace</td><td><span class="status pending">Parked</span></td><td>Eight candidate rewrites produced zero tokenizer savings and no incremental deterministic output change.</td><td>Reopen only when telemetry supplies naturally tokenizer-costly prose spacing.</td></tr>
+            <tr><td>Repeated literal aliases</td><td><span class="status pending">Parked</span></td><td>No eligible repeated long URL or identifier appeared in the fixed corpus or any of the three tenant slices.</td><td>Reopen only with naturally occurring held-out examples and exact expansion checks.</td></tr>
+            <tr><td>Expanded HTML-to-Markdown</td><td><span class="status pending">Parked</span></td><td>No cohort applied the transform; candidates were absent or below threshold.</td><td>Reopen only when real article/main HTML is common enough to justify a dedicated held-out corpus.</td></tr>
+            <tr><td>Tenant-approved exact boilerplate</td><td><span class="status pending">Deferred</span></td><td>Discovery remains diagnostics-only. No tenant supplied an approved, versioned phrase set.</td><td>Collect at least 50 discovery records, approve a versioned exact phrase set, then evaluate separate held-out tenant data.</td></tr>
+            <tr><td>Classified duplicate-wrapper aliases</td><td><span class="status pending">Parked</span></td><td>No classified generated-support wrapper appeared in either new cohort. Generic duplicate removal stayed diagnostics-only as intended.</td><td>Reopen only if production telemetry shows this explicit wrapper class is common.</td></tr>
           </tbody>
         </table>
       </div>
 
-      <aside class="finding" aria-label="Open JSON finding">
+      <aside class="finding" aria-label="Resolved JSON implementation finding">
         <div class="finding-bar"></div>
-        <div class="finding-body"><h3>Open finding: a skipped transform must not become a hidden model experiment</h3><p>In the Delivery Tower slice, <code>json_minify_safe</code> applied zero deterministic changes, yet its model input differed on seven records because candidate detection altered placeholdering. Until skipped candidates are input-neutral—or explicitly measured as a separate intervention—we will not credit their downstream model savings to JSON minification.</p></div>
+        <div class="finding-body"><h3>Resolved and verified: skipped JSON is input-neutral</h3><p>A skipped small-JSON minification candidate now stays on the same prose path as baseline. The corrected matrix recorded zero baseline/experiment model-input hash mismatches, zero minification applications, and zero incremental savings. The historical seven-record interaction remains excluded from all savings claims.</p></div>
       </aside>
     </section>
 
@@ -568,10 +585,10 @@ EXPERIMENTS_HTML = """
           <h3>Close the current evidence gaps</h3>
           <ul class="next-list">
             <li>Pass the actual versioned tenant profile.</li>
-            <li>Populate required terms and task-specific constraints.</li>
-            <li>Add relationship, negation, permission, and required-format checks.</li>
-            <li>Repair skipped-JSON model-input neutrality.</li>
-            <li>Record harness/API error reasons separately from integrity results.</li>
+            <li><strong>Verified:</strong> categorized relationship, negation, permission, and required-format checks passed in the corrected focused run.</li>
+            <li><strong>Verified:</strong> skipped-JSON model-input neutrality had zero matched hash differences.</li>
+            <li><strong>Verified:</strong> the focused runner completed 360 records with zero harness/API errors.</li>
+            <li>Do not run another savings-transform matrix until a natural held-out sample contains eligible, tokenizer-positive records.</li>
             <li>Include deliberately eligible records plus a held-out natural sample.</li>
           </ul>
         </div>
@@ -579,7 +596,7 @@ EXPERIMENTS_HTML = """
     </section>
 
     <footer>
-      <span>Evidence now spans four cohorts through July 14, 2026 · LLMLingua-2 model revision 5f0c8279.</span>
+      <span>Decision evidence spans seven cohorts through July 15, 2026 · focused model revision recorded as local_or_unknown.</span>
       <span>This page is cumulative. Revisions add cohorts; they do not overwrite prior decisions.</span>
     </footer>
   </main>
