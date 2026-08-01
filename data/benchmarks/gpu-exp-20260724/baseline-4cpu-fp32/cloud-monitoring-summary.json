@@ -1,0 +1,76 @@
+{
+  "metadata": {
+    "project": "usagetap",
+    "region": "us-central1",
+    "service": "prompt-compression",
+    "revision": "prompt-compression-00009-jup",
+    "query_start": "2026-07-24T22:18:32.461308Z",
+    "query_end": "2026-07-24T22:20:46.283242Z",
+    "collected_at": "2026-07-24T22:40:51.382712Z"
+  },
+  "metrics": [
+    {
+      "metric": "cpu_utilization_pct",
+      "metric_type": "run.googleapis.com/container/cpu/utilizations",
+      "samples": 2,
+      "mean": 12.954568880577394,
+      "p50": 12.954568880577394,
+      "p95": 22.06847850098977,
+      "max": 23.081135125480035
+    },
+    {
+      "metric": "memory_utilization_pct",
+      "metric_type": "run.googleapis.com/container/memory/utilizations",
+      "samples": 2,
+      "mean": 4.794418811798096,
+      "p50": 4.794418811798096,
+      "p95": 4.811724424362163,
+      "max": 4.8136472702026145
+    },
+    {
+      "metric": "gpu_utilization_pct",
+      "metric_type": "run.googleapis.com/container/gpu/utilizations",
+      "samples": 2,
+      "mean": 22.499999999999993,
+      "p50": 22.499999999999993,
+      "p95": 42.74999999999999,
+      "max": 44.99999999999999
+    },
+    {
+      "metric": "gpu_memory_utilization_pct",
+      "metric_type": "run.googleapis.com/container/gpu/memory_utilizations",
+      "samples": 2,
+      "mean": 4.580185812277502,
+      "p50": 4.580185812277502,
+      "p95": 4.584093079795085,
+      "max": 4.584527220630372
+    },
+    {
+      "metric": "gpu_memory_usage_gib",
+      "metric_type": "run.googleapis.com/container/gpu/memory_usages",
+      "samples": 2,
+      "mean": 1.0302734375,
+      "p50": 1.0302734375,
+      "p95": 1.03115234375,
+      "max": 1.03125
+    },
+    {
+      "metric": "max_request_concurrency",
+      "metric_type": "run.googleapis.com/container/max_request_concurrencies",
+      "samples": 2,
+      "mean": 1.0,
+      "p50": 1.0,
+      "p95": 1.0,
+      "max": 1.0
+    },
+    {
+      "metric": "instance_count",
+      "metric_type": "run.googleapis.com/container/instance_count",
+      "samples": 4,
+      "mean": 0.5,
+      "p50": 0.5,
+      "p95": 1.0,
+      "max": 1.0
+    }
+  ]
+}

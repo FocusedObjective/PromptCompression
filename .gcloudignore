@@ -33,3 +33,4 @@ edge/dist
 edge/.dev.vars
 outputs
 reports
+data/benchmarks

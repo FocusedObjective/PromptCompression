@@ -237,6 +237,16 @@ def parse_args() -> argparse.Namespace:
         help="Request section/word-label output. Leave off for production latency.",
     )
     parser.add_argument(
+        "--diagnostics",
+        choices=("off", "basic", "detailed"),
+        default="detailed",
+        help=(
+            "Diagnostics level: off measures the production path, basic records "
+            "phase timings without detailed counterfactual analytics, and detailed "
+            "preserves the historical benchmark behavior."
+        ),
+    )
+    parser.add_argument(
         "--shuffle",
         action="store_true",
         help="Shuffle measured request order after prompt generation.",
@@ -294,6 +304,7 @@ def main() -> int:
         "conditions": [condition.condition_id for condition in conditions],
         "latency_budget_ms": args.latency_budget_ms,
         "include_sections": args.include_sections,
+        "diagnostics": args.diagnostics,
         "seed": args.seed,
         "labels": labels,
     }
@@ -726,8 +737,9 @@ def run_one_http(
             "apply_deterministic_transforms"
         ],
         "include_sections": args.include_sections,
-        "include_diagnostics": True,
-        "evaluate_disabled_transforms": True,
+        "include_diagnostics": args.diagnostics != "off",
+        "include_detailed_analytics": args.diagnostics == "detailed",
+        "evaluate_disabled_transforms": args.diagnostics == "detailed",
     }
     if args.latency_budget_ms is not None:
         payload["latency_budget_ms"] = args.latency_budget_ms
@@ -785,8 +797,9 @@ def run_one_in_process(
             include_sections=args.include_sections,
             mode=base_row["requested_compression_mode"],
             latency_budget_ms=args.latency_budget_ms,
-            collect_diagnostics=True,
-            evaluate_disabled_transforms=True,
+            collect_diagnostics=args.diagnostics != "off",
+            collect_detailed_analytics=args.diagnostics == "detailed",
+            evaluate_disabled_transforms=args.diagnostics == "detailed",
             apply_deterministic_transforms=base_row[
                 "apply_deterministic_transforms"
             ],

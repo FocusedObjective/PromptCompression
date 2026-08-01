@@ -3,6 +3,8 @@ from app.compressor import (
     COMPRESSION_MODE_MODEL_AUTO,
     PromptCompressionService,
     _parse_adapter_slots,
+    _parse_model_dtype,
+    _parse_model_runtime,
     build_token_savings,
 )
 from app.experiment_profiles import ExperimentProfile, resolve_experiment_profile
@@ -1350,6 +1352,38 @@ def test_adapter_slot_config_parser_accepts_multiple_entries():
         "tenant_a": "models/tenant_a",
         "tenant_b": "models/tenant_b",
     }
+
+
+def test_model_dtype_config_accepts_explicit_precision_aliases():
+    assert _parse_model_dtype("auto") == "auto"
+    assert _parse_model_dtype("fp16") == "float16"
+    assert _parse_model_dtype("float32") == "float32"
+    assert _parse_model_dtype("bf16") == "bfloat16"
+
+
+def test_model_dtype_config_rejects_unknown_precision():
+    try:
+        _parse_model_dtype("int8")
+    except ValueError as exc:
+        assert "COMPRESSOR_MODEL_DTYPE" in str(exc)
+    else:
+        raise AssertionError("unknown dtype should be rejected")
+
+
+def test_model_runtime_config_accepts_torch_and_onnx_aliases():
+    assert _parse_model_runtime("torch") == "torch"
+    assert _parse_model_runtime("pytorch") == "torch"
+    assert _parse_model_runtime("onnx") == "onnx"
+    assert _parse_model_runtime("onnx-cuda") == "onnx"
+
+
+def test_model_runtime_config_rejects_unknown_runtime():
+    try:
+        _parse_model_runtime("tensorrt")
+    except ValueError as exc:
+        assert "COMPRESSOR_MODEL_RUNTIME" in str(exc)
+    else:
+        raise AssertionError("unknown runtime should be rejected")
 
 
 def test_configured_adapter_tenant_uses_isolated_compressor_slot():

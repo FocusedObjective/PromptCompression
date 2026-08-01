@@ -1,0 +1,38 @@
+{
+  "aggressiveness": 0.25,
+  "benchmark_schema_version": "benchmark.v3",
+  "cohort_id": "cohort-17773501615194d6",
+  "compression_mode": "model_force",
+  "concurrency": 1,
+  "conditions": [
+    "model_force"
+  ],
+  "diagnostics": "off",
+  "error_count": 0,
+  "finished_at": "2026-07-24T23:07:01.476533+00:00",
+  "html_ratios": [
+    0.0
+  ],
+  "include_sections": false,
+  "json_ratios": [
+    0.0
+  ],
+  "labels": {
+    "revision": "prompt-compression-perf-onnx-fp16-4",
+    "variant": "onnx-fp16-4cpu-smoke"
+  },
+  "latency_budget_ms": null,
+  "mode": "http",
+  "repeats": 5,
+  "seed": 1729,
+  "started_at": "2026-07-24T23:06:26.739140+00:00",
+  "success_count": 15,
+  "target_token_median": 16000,
+  "target_tokens": [
+    4000,
+    16000,
+    64000
+  ],
+  "url": "https://perf-onnx-fp16-4---prompt-compression-3sayt2t5na-uc.a.run.app/compress",
+  "warmup": 3
+}

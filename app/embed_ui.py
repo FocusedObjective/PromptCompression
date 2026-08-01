@@ -37,6 +37,8 @@ EMBED_HTML = """
     button { min-height:38px; padding:0 15px; border:0; border-radius:7px; background:var(--accent); color:#fff; font-weight:680; cursor:pointer; }
     button:hover { background:var(--accent-dark); } button:disabled { cursor:wait; opacity:.65; }
     .copy-button { min-height:32px; padding:0 12px; font-size:13px; } .error { color:#a62b2b; }
+    .demo-button { min-height:32px; padding:0 12px; border:1px solid var(--border); background:#eef3f8; color:var(--accent); font-size:12px; }
+    .demo-button:hover { background:#e2ebf4; }
     @media (max-width:860px) { main { width:min(100% - 24px,1180px); padding:16px 0; } header { align-items:stretch; flex-direction:column; } .stat { flex:1 1 100px; } .workspace { grid-template-columns:1fr; } textarea,.output { min-height:300px; } }
   </style>
 </head>
@@ -70,7 +72,10 @@ EMBED_HTML = """
       <section>
         <div class="panel-head"><h2>Dropped Words Highlighted</h2><button class="copy-button" id="copyButton" type="button" disabled>Copy Compressed</button></div>
         <div class="output" id="diff" aria-live="polite"></div>
-        <div class="controls"><span class="status" id="resultStatus">Paste a prompt to begin</span></div>
+        <div class="controls">
+          <span class="status" id="resultStatus">Start a demo session to compress</span>
+          <button class="demo-button" id="startDemoButton" type="button">Start 10-minute demo</button>
+        </div>
       </section>
     </div>
   </main>
@@ -82,12 +87,16 @@ EMBED_HTML = """
     const loadHtmlExampleButton = document.getElementById("loadHtmlExampleButton");
     const loadTranscriptExampleButton = document.getElementById("loadTranscriptExampleButton");
     const compressButton = document.getElementById("compressButton");
+    const startDemoButton = document.getElementById("startDemoButton");
     const copyButton = document.getElementById("copyButton");
     const diff = document.getElementById("diff");
     const resultStatus = document.getElementById("resultStatus");
     const reduction = document.getElementById("reduction");
     const tokens = document.getElementById("tokens");
     let latestCompressedText = "";
+    let demoAuthorization = "";
+    let demoExpiresAt = 0;
+    let demoExpiryTimer = null;
     const JSON_EXAMPLE = `You are a support operations analyst preparing a concise escalation brief.
 Keep customer IDs, incident dates, URLs, and exact retry limits unchanged.
 
@@ -165,7 +174,7 @@ Output:
 - Next three actions`;
 
     promptInput.value = JSON_EXAMPLE;
-    resultStatus.textContent = "Text + JSON example loaded";
+    resultStatus.textContent = "Start a demo session to compress";
 
     function setStatus(message, isError = false) { resultStatus.textContent = message; resultStatus.className = isError ? "status error" : "status"; }
     function loadExample(text, name) { promptInput.value = text; latestCompressedText = ""; copyButton.disabled = true; diff.textContent = ""; reduction.textContent = "-"; tokens.textContent = "-"; setStatus(`${name} example loaded`); promptInput.focus(); }
@@ -189,12 +198,41 @@ Output:
     loadHtmlExampleButton.addEventListener("click", () => loadExample(HTML_PAGE_EXAMPLE, "HTML page"));
     loadTranscriptExampleButton.addEventListener("click", () => loadExample(MEETING_TRANSCRIPT_EXAMPLE, "Meeting transcript"));
     copyButton.addEventListener("click", async () => { if (!latestCompressedText) return; try { await navigator.clipboard.writeText(latestCompressedText); setStatus("Copied compressed prompt"); } catch { setStatus("Unable to copy automatically", true); } });
+    startDemoButton.addEventListener("click", async () => {
+      startDemoButton.disabled = true;
+      setStatus("Starting a bounded demo session...");
+      try {
+        const response = await fetch("/demo/session", { method:"POST", headers:{"Accept":"application/json"}, cache:"no-store" });
+        const data = await response.json();
+        if (!response.ok || typeof data.token !== "string") throw new Error(data.detail || "Demo access is unavailable");
+        demoAuthorization = `Bearer ${data.token}`;
+        demoExpiresAt = Number(data.expiresAt) * 1000;
+        startDemoButton.textContent = "Demo active";
+        const expiresAt = new Date(demoExpiresAt);
+        setStatus(`Demo ready: ${data.maxOperations} compressions until ${expiresAt.toLocaleTimeString()}`);
+        if (demoExpiryTimer !== null) clearTimeout(demoExpiryTimer);
+        demoExpiryTimer = setTimeout(() => {
+          demoAuthorization = "";
+          demoExpiresAt = 0;
+          startDemoButton.disabled = false;
+          startDemoButton.textContent = "Start 10-minute demo";
+          setStatus("Demo expired. Start another session to continue.", true);
+        }, Math.max(0, demoExpiresAt - Date.now()));
+      } catch (error) {
+        demoAuthorization = "";
+        demoExpiresAt = 0;
+        startDemoButton.disabled = false;
+        startDemoButton.textContent = "Start 10-minute demo";
+        setStatus(error.message || "Demo access is unavailable", true);
+      }
+    });
     compressButton.addEventListener("click", async () => {
       const text = promptInput.value.trim();
       if (!text) { setStatus("Paste a prompt first", true); return; }
+      if (!demoAuthorization || demoExpiresAt <= Date.now()) { setStatus("Start a demo session first", true); return; }
       compressButton.disabled = true; copyButton.disabled = true; latestCompressedText = ""; diff.textContent = ""; setStatus("Compressing...");
       try {
-        const response = await fetch("/compress", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ text, aggressiveness:Number(aggressivenessInput.value), include_sections:true, include_diagnostics:false }) });
+        const response = await fetch("/compress", { method:"POST", headers:{"Content-Type":"application/json", "Authorization":demoAuthorization}, body:JSON.stringify({ text, aggressiveness:Number(aggressivenessInput.value), include_sections:true, include_diagnostics:false, include_detailed_analytics:false }) });
         const data = await response.json(); if (!response.ok) throw new Error(data.detail || "Compression failed");
         latestCompressedText = data.compressed_text; copyButton.disabled = !latestCompressedText; renderResult(data.output_sections, data.labeled_tokens);
         reduction.textContent = `${Math.round(data.reduction * 100)}%`; tokens.textContent = `${data.original_tokens} → ${data.compressed_tokens}`; tokens.title = data.token_estimator || ""; setStatus("Compression complete");

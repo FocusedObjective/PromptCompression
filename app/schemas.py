@@ -491,6 +491,7 @@ class HealthResponse(BaseModel):
     deployment_timestamp: str
     model: str
     model_loaded: bool
+    runtime: dict[str, Any] = Field(default_factory=dict)
 
 
 class TokenEstimateRequest(BaseModel):

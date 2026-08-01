@@ -15,6 +15,11 @@ RUN python -m pip install --upgrade pip \
     && grep -vE '^torch([=<>!~]|$)' requirements.txt > /tmp/requirements-no-torch.txt \
     && python -m pip install -r /tmp/requirements-no-torch.txt
 
+ARG ENABLE_ONNX_RUNTIME=false
+RUN if [ "${ENABLE_ONNX_RUNTIME}" = "true" ]; then \
+      python -m pip install onnx==1.17.0 onnxruntime-gpu==1.20.1; \
+    fi
+
 ARG COMPRESSOR_MODEL=microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
 ENV COMPRESSOR_MODEL=${COMPRESSOR_MODEL}
 RUN mkdir -p /cache/huggingface/hub \

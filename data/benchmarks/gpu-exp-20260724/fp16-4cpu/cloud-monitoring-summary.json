@@ -1,0 +1,76 @@
+{
+  "metadata": {
+    "project": "usagetap",
+    "region": "us-central1",
+    "service": "prompt-compression",
+    "revision": "prompt-compression-perf-fp16-4",
+    "query_start": "2026-07-24T22:46:56.478386Z",
+    "query_end": "2026-07-24T22:51:00.765583Z",
+    "collected_at": "2026-07-24T22:57:07.885867Z"
+  },
+  "metrics": [
+    {
+      "metric": "cpu_utilization_pct",
+      "metric_type": "run.googleapis.com/container/cpu/utilizations",
+      "samples": 5,
+      "mean": 14.153938536575222,
+      "p50": 20.46295360142637,
+      "p95": 22.533645468108723,
+      "max": 22.598667065677798
+    },
+    {
+      "metric": "memory_utilization_pct",
+      "metric_type": "run.googleapis.com/container/memory/utilizations",
+      "samples": 5,
+      "mean": 5.514111518859863,
+      "p50": 5.991935729980469,
+      "p95": 6.095337867736816,
+      "max": 6.1211347579956055
+    },
+    {
+      "metric": "gpu_utilization_pct",
+      "metric_type": "run.googleapis.com/container/gpu/utilizations",
+      "samples": 2,
+      "mean": 13.0,
+      "p50": 13.0,
+      "p95": 15.7,
+      "max": 16.0
+    },
+    {
+      "metric": "gpu_memory_utilization_pct",
+      "metric_type": "run.googleapis.com/container/gpu/memory_utilizations",
+      "samples": 5,
+      "mean": 2.7785013458365895,
+      "p50": 2.874012329599722,
+      "p95": 2.874012329599722,
+      "max": 2.874012329599722
+    },
+    {
+      "metric": "gpu_memory_usage_gib",
+      "metric_type": "run.googleapis.com/container/gpu/memory_usages",
+      "samples": 5,
+      "mean": 0.625,
+      "p50": 0.646484375,
+      "p95": 0.646484375,
+      "max": 0.646484375
+    },
+    {
+      "metric": "max_request_concurrency",
+      "metric_type": "run.googleapis.com/container/max_request_concurrencies",
+      "samples": 4,
+      "mean": 1.0,
+      "p50": 1.0,
+      "p95": 1.0,
+      "max": 1.0
+    },
+    {
+      "metric": "instance_count",
+      "metric_type": "run.googleapis.com/container/instance_count",
+      "samples": 10,
+      "mean": 0.5,
+      "p50": 0.5,
+      "p95": 1.0,
+      "max": 1.0
+    }
+  ]
+}

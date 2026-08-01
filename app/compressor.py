@@ -1,6 +1,7 @@
 import os
 import time
 from collections import Counter
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 import logging
 import math
@@ -149,6 +150,9 @@ BASE_SLOT_ID = "base"
 ADAPTER_SLOT_ENV = "COMPRESSOR_ADAPTER_SLOTS"
 ADAPTER_ROOT_ENV = "COMPRESSOR_ADAPTER_ROOT"
 PRELOAD_SLOT_ENV = "COMPRESSOR_PRELOAD_SLOTS"
+MODEL_DTYPE_ENV = "COMPRESSOR_MODEL_DTYPE"
+MODEL_RUNTIME_ENV = "COMPRESSOR_MODEL_RUNTIME"
+TORCH_INFERENCE_MODE_ENV = "COMPRESSOR_TORCH_INFERENCE_MODE"
 ADAPTER_MODEL_FILENAMES = ("adapter_model.safetensors", "adapter_model.bin")
 ADAPTER_SLOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 TIMED_PHASES = (
@@ -494,6 +498,14 @@ class PromptCompressionService:
     def __init__(self) -> None:
         self.model_name = os.getenv("COMPRESSOR_MODEL", DEFAULT_MODEL)
         self.device = os.getenv("COMPRESSOR_DEVICE", "cpu")
+        self.model_dtype = _parse_model_dtype(os.getenv(MODEL_DTYPE_ENV, "auto"))
+        self.model_runtime = _parse_model_runtime(
+            os.getenv(MODEL_RUNTIME_ENV, "torch")
+        )
+        self.torch_inference_mode = os.getenv(
+            TORCH_INFERENCE_MODE_ENV,
+            "false",
+        ).lower() in {"1", "true", "yes", "on"}
         self.min_rate = float(os.getenv("COMPRESSOR_MIN_RATE", "0.45"))
         self.min_segment_chars = max(0, MIN_SEGMENT_CHARS)
         self.min_segment_tokens = max(0, MIN_SEGMENT_TOKENS)
@@ -584,6 +596,54 @@ class PromptCompressionService:
     def is_loaded(self) -> bool:
         return self._compressor is not None or bool(self._adapter_compressors)
 
+    def runtime_info(self) -> dict[str, Any]:
+        info: dict[str, Any] = {
+            "device": self.device,
+            "configured_model_dtype": self.model_dtype,
+            "configured_model_runtime": self.model_runtime,
+            "torch_inference_mode": self.torch_inference_mode,
+        }
+        try:
+            import torch
+        except ImportError:
+            return info
+
+        info.update(
+            {
+                "torch_version": torch.__version__,
+                "cuda_runtime_version": torch.version.cuda,
+                "cuda_available": torch.cuda.is_available(),
+            }
+        )
+        if torch.cuda.is_available():
+            info["gpu_name"] = torch.cuda.get_device_name(0)
+            properties = torch.cuda.get_device_properties(0)
+            info["gpu_total_memory_bytes"] = properties.total_memory
+            info["gpu_memory_allocated_bytes"] = torch.cuda.memory_allocated(0)
+            info["gpu_memory_reserved_bytes"] = torch.cuda.memory_reserved(0)
+
+        compressor = self._compressor
+        model = getattr(compressor, "model", None)
+        if model is not None:
+            parameters = getattr(model, "parameters", None)
+            try:
+                if not callable(parameters):
+                    raise TypeError
+                parameter = next(model.parameters())
+                info["loaded_model_dtype"] = str(parameter.dtype).removeprefix("torch.")
+                info["loaded_model_device"] = str(parameter.device)
+            except (StopIteration, TypeError):
+                dtype = getattr(model, "dtype", None)
+                device = getattr(model, "device", None)
+                runtime = getattr(model, "runtime", None)
+                if dtype is not None:
+                    info["loaded_model_dtype"] = str(dtype).removeprefix("torch.")
+                if device is not None:
+                    info["loaded_model_device"] = str(device)
+                if runtime is not None:
+                    info["loaded_model_runtime"] = str(runtime)
+        return info
+
     def preload_configured_slots(self) -> None:
         if not self._preload_slots:
             return
@@ -610,17 +670,143 @@ class PromptCompressionService:
             ) from exc
 
         try:
-            return PromptCompressor(
+            model_config: dict[str, Any] = {}
+            if self.model_dtype != "auto":
+                import torch
+
+                model_config["torch_dtype"] = {
+                    "float16": torch.float16,
+                    "float32": torch.float32,
+                    "bfloat16": torch.bfloat16,
+                }[self.model_dtype]
+            compressor = PromptCompressor(
                 model_name=self.model_name,
                 device_map=self.device,
                 use_llmlingua2=True,
+                model_config=model_config,
             )
+            if self.model_runtime == "onnx":
+                compressor.model = self._build_onnx_cuda_model(compressor.model)
+                import gc
+                import torch
+
+                gc.collect()
+                torch.cuda.empty_cache()
+            return compressor
         except Exception as exc:  # pragma: no cover - depends on network/model cache
             LOGGER.exception("Failed to load compression model %s", self.model_name)
             raise CompressionRuntimeError(
                 "Failed to load the compression model. The first run needs network "
                 "access to download the Hugging Face checkpoint."
             ) from exc
+
+    def _build_onnx_cuda_model(self, model: Any) -> Any:
+        if "cuda" not in self.device.lower():
+            raise CompressionRuntimeError("ONNX runtime requires a CUDA device")
+        try:
+            import gc
+            from types import SimpleNamespace
+
+            import numpy as np
+            import onnxruntime as ort
+            import torch
+        except ImportError as exc:
+            raise CompressionRuntimeError(
+                "ONNX runtime is unavailable; build the GPU image with "
+                "ENABLE_ONNX_RUNTIME=true"
+            ) from exc
+
+        class LogitsOnly(torch.nn.Module):
+            def __init__(self, source_model: Any) -> None:
+                super().__init__()
+                self.source_model = source_model
+
+            def forward(self, input_ids: Any, attention_mask: Any) -> Any:
+                return self.source_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                ).logits
+
+        model.eval()
+        parameter = next(model.parameters())
+        output_dtype = parameter.dtype
+        num_labels = int(model.config.num_labels)
+        export_path = Path("/tmp") / (
+            f"llmlingua-token-classifier-{self.model_dtype}.onnx"
+        )
+        dummy_ids = torch.zeros((1, 8), dtype=torch.long, device=parameter.device)
+        dummy_mask = torch.ones((1, 8), dtype=torch.bool, device=parameter.device)
+        torch.onnx.export(
+            LogitsOnly(model),
+            (dummy_ids, dummy_mask),
+            export_path,
+            input_names=("input_ids", "attention_mask"),
+            output_names=("logits",),
+            dynamic_axes={
+                "input_ids": {0: "batch", 1: "sequence"},
+                "attention_mask": {0: "batch", 1: "sequence"},
+                "logits": {0: "batch", 1: "sequence"},
+            },
+            opset_version=17,
+        )
+        session_options = ort.SessionOptions()
+        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        session = ort.InferenceSession(
+            str(export_path),
+            sess_options=session_options,
+            providers=("CUDAExecutionProvider",),
+        )
+        if "CUDAExecutionProvider" not in session.get_providers():
+            raise CompressionRuntimeError(
+                "ONNX Runtime did not activate CUDAExecutionProvider"
+            )
+
+        class OnnxCudaTokenClassifier:
+            runtime = "onnx-cuda"
+            device = parameter.device
+            dtype = output_dtype
+
+            def __call__(self, *, input_ids: Any, attention_mask: Any) -> Any:
+                ids = input_ids.contiguous()
+                mask = attention_mask.contiguous()
+                logits = torch.empty(
+                    (ids.shape[0], ids.shape[1], num_labels),
+                    dtype=output_dtype,
+                    device=ids.device,
+                )
+                binding = session.io_binding()
+                binding.bind_input(
+                    "input_ids",
+                    "cuda",
+                    ids.device.index or 0,
+                    np.int64,
+                    tuple(ids.shape),
+                    ids.data_ptr(),
+                )
+                binding.bind_input(
+                    "attention_mask",
+                    "cuda",
+                    mask.device.index or 0,
+                    np.bool_,
+                    tuple(mask.shape),
+                    mask.data_ptr(),
+                )
+                binding.bind_output(
+                    "logits",
+                    "cuda",
+                    logits.device.index or 0,
+                    np.float16 if output_dtype == torch.float16 else np.float32,
+                    tuple(logits.shape),
+                    logits.data_ptr(),
+                )
+                session.run_with_iobinding(binding)
+                return SimpleNamespace(loss=None, logits=logits)
+
+        adapter = OnnxCudaTokenClassifier()
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+        return adapter
 
     def _load(self) -> Any:
         if self._compressor is not None:
@@ -1553,12 +1739,18 @@ class PromptCompressionService:
 
         try:
             llmlingua_start = time.perf_counter()
-            raw_result = compressor.compress_prompt_llmlingua2(
-                chunk.text,
-                rate=target_rate,
-                force_tokens=force_tokens,
-                return_word_label=include_sections,
-            )
+            inference_context = nullcontext()
+            if self.torch_inference_mode:
+                import torch
+
+                inference_context = torch.inference_mode()
+            with inference_context:
+                raw_result = compressor.compress_prompt_llmlingua2(
+                    chunk.text,
+                    rate=target_rate,
+                    force_tokens=force_tokens,
+                    return_word_label=include_sections,
+                )
             if timings is not None:
                 _add_timing(timings, "llmlingua_ms", _elapsed_ms(llmlingua_start))
         except Exception as exc:  # pragma: no cover - model-specific runtime path
@@ -3286,6 +3478,41 @@ def _parse_optional_float(raw_value: str | None) -> float | None:
     except ValueError:
         LOGGER.warning("Ignoring invalid numeric compressor config %r", raw_value)
         return None
+
+
+def _parse_model_dtype(raw_value: str) -> str:
+    normalized = raw_value.strip().lower()
+    aliases = {
+        "": "auto",
+        "auto": "auto",
+        "fp16": "float16",
+        "float16": "float16",
+        "fp32": "float32",
+        "float32": "float32",
+        "bf16": "bfloat16",
+        "bfloat16": "bfloat16",
+    }
+    try:
+        return aliases[normalized]
+    except KeyError as exc:
+        raise ValueError(
+            f"{MODEL_DTYPE_ENV} must be auto, float16, float32, or bfloat16"
+        ) from exc
+
+
+def _parse_model_runtime(raw_value: str) -> str:
+    normalized = raw_value.strip().lower()
+    aliases = {
+        "": "torch",
+        "torch": "torch",
+        "pytorch": "torch",
+        "onnx": "onnx",
+        "onnx-cuda": "onnx",
+    }
+    try:
+        return aliases[normalized]
+    except KeyError as exc:
+        raise ValueError(f"{MODEL_RUNTIME_ENV} must be torch or onnx") from exc
 
 
 def _is_safe_adapter_slot_id(slot_id: str) -> bool:

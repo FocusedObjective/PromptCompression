@@ -115,6 +115,41 @@ conflating savings with correctness.
 
 ### `POST /compress`
 
+All real-time compression endpoints (`/compress`, `/v1/compress`, and
+`/v1/messages/compress`) require a UsageTap compression credential:
+
+```http
+Authorization: Bearer cmp-...
+```
+
+The service rejects malformed credentials locally, then checks the credential
+and current PAYG credit concurrently with compression. Missing credentials,
+non-`cmp-` credentials, keys outside the configured length bounds, and keys
+containing characters other than letters, numbers, `_`, or `-` return `401`
+before GPU work starts. For locally sane keys, compression may run while the
+remote check is pending, but its result is discarded unless UsageTap authorizes
+the operation. Invalid credentials return `401`, unavailable credit returns
+`402`, insufficient key permissions return `403`, and UsageTap or network
+availability failures return `503`.
+
+Definitive `401`, `402`, and `403` results are retained for five seconds in a
+bounded process-local negative cache so recently rejected keys cannot
+immediately consume more inference. Cache entries use a per-process salted HMAC,
+never the raw key. Successful authorization is never cached: every compression
+operation still performs a UsageTap credit check.
+
+After compression, positive token savings are recorded in UsageTap `CUSTOM2`
+using the verified authorization response's `customerId`. The metered amount is
+`max(0, inputTokens - outputTokens)`. Zero savings do not produce a metering
+request. Transient metering failures are retried once with the same stable
+idempotency key; the compression response is released only after UsageTap
+confirms `CUSTOM_METER_SUCCESS` or the matching
+`CUSTOM_METER_ALREADY_RECORDED` replay. Prompt text is never included in meter
+metadata.
+
+Only the `Authorization` header is accepted as the credential source. Do not
+put a key, `customerId`, or `organizationId` in the request body.
+
 Request:
 
 ```json
@@ -419,8 +454,8 @@ Response:
 }
 ```
 
-Use `http://127.0.0.1:8000/v1/compress` for the local compatible endpoint.
-Bearer auth headers are ignored and not required by the local MVP.
+Use `http://127.0.0.1:8000/v1/compress` for the local compatible endpoint. The
+local service enforces the same UsageTap bearer authorization as Cloud Run.
 Clients that cannot add `tenant_id` to the JSON body may send `X-Tenant-ID`.
 
 ### `POST /v1/messages/compress`
@@ -533,6 +568,13 @@ aggressiveness = 1.0 -> keep at least COMPRESSOR_MIN_RATE of tokens
 
 The output is deterministic for the same model and input. This is intentional: production prompt compression should be predictable and cache-friendly.
 
+Real-time compression routes also use a bounded, process-local TTL/LRU response
+cache for identical recent requests. It runs inside each Cloud Run container,
+keeps authorization and UsageTap metering per request, and separates every
+validated compression setting in its key. See
+[Local Compression Response Cache](docs/local-response-cache.md) for behavior,
+configuration, analytics bypass rules, and the future edge migration plan.
+
 By default, very small compressible segments skip the model to avoid expensive
 LLMLingua calls with little expected token savings. Tune
 `COMPRESSOR_MIN_SEGMENT_CHARS` and `COMPRESSOR_MIN_SEGMENT_TOKENS` if you prefer
@@ -634,6 +676,37 @@ Production is the single GPU-backed Cloud Run service named
 `prompt-compression`. Its Artifact Registry image is named
 `prompt-compression-gpu`; the image name is not a deployable service name.
 
+Compression authorization configuration:
+
+- `USAGETAP_API_BASE_URL` defaults to `https://api.usagetap.com`.
+- `USAGETAP_AUTHORIZATION_TIMEOUT_SECONDS` defaults to `3`.
+- `USAGETAP_COMPRESSION_KEY_MIN_SUFFIX_LENGTH` defaults to `43`.
+- `USAGETAP_COMPRESSION_KEY_MAX_SUFFIX_LENGTH` defaults to `43`.
+- `USAGETAP_AUTHORIZATION_FAILURE_CACHE_SECONDS` defaults to `5`; set it to
+  `0` to disable negative caching.
+- `USAGETAP_METERING_TIMEOUT_SECONDS` defaults to `3`.
+- `USAGETAP_METERING_API_KEY` must be supplied through the Cloud Run Secret
+  Manager reference for positive-savings operations. Startup accepts only
+  `ck-` or `cmp-` followed by exactly 43 Base64URL characters.
+
+The main and benchmark UIs also support an explicitly enabled demo mode. A
+`POST /demo/session` call returns a signed, in-memory `demo-v1` credential with
+a short TTL and bounded operation/input allowances. Configure
+`USAGETAP_DEMO_MODE_ENABLED`, `USAGETAP_DEMO_MODE_EXPIRES_AT`, and the
+`USAGETAP_DEMO_*` allowance settings shown in `.env.example`; inject
+`USAGETAP_DEMO_SIGNING_KEY` from Secret Manager. Demo requests never receive a
+customer identity and skip customer metering. Run exactly one Cloud Run
+instance while demo mode is enabled, because active sessions and counters are
+intentionally process-local. Turning the mode off or passing its fixed expiry
+immediately prevents new sessions and use of existing sessions.
+
+These settings are not credentials. Authorization forwards each request's
+incoming `Bearer cmp-...` value directly to UsageTap. The platform-owned
+metering key is mounted separately by the production deploy command as the
+Secret Manager-backed `USAGETAP_METERING_API_KEY` environment variable. It is
+reserved for the platform-owned `/custom_meter` integration and is never used
+to authorize customer compression requests.
+
 Use [`DEPLOYMENT_GPU.md`](DEPLOYMENT_GPU.md) for every production build,
 deployment, rollback, and verification. `Dockerfile` and `cloudbuild.yaml` are
 retained only for local CPU development and must not be deployed to the
@@ -676,14 +749,19 @@ python scripts\benchmark_performance.py `
   --label "memory=4Gi"
 ```
 
-For IAM-protected Cloud Run, pass an identity token as a header:
+Pass a UsageTap compression key to the benchmark script:
 
 ```powershell
-$token = gcloud auth print-identity-token
+$env:COMPRESSION_KEY="cmp-..."
 python scripts\benchmark_performance.py `
   --url "$env:SERVICE_URL/compress" `
-  --header "Authorization: Bearer $token"
+  --header "Authorization: Bearer $env:COMPRESSION_KEY"
 ```
+
+Production currently allows unauthenticated Cloud Run ingress and performs
+application authorization with the UsageTap key. If Google IAM is also enabled,
+send its identity token as `X-Serverless-Authorization` so the `Authorization`
+header remains available for the required UsageTap credential.
 
 The script writes `raw.jsonl`, `raw.csv`, `summary.csv`, `summary.json`,
 `metadata.json`, and `cases.json` under `data/benchmarks/<timestamp>`. Use

@@ -1,4 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+
 from fastapi.testclient import TestClient
+import pytest
 
 from app import main
 from app.compressor import (
@@ -9,6 +13,7 @@ from app.compressor import (
     CompressionToken,
     build_token_savings,
 )
+from app.demo_access import DemoSessionManager
 from app.eval_suite import EvalCase
 from app.schemas import (
     CompressRequest,
@@ -22,6 +27,44 @@ from app.schemas import (
 )
 from app.tenant_profiles import TenantCompressionProfile
 from app.token_estimator import TokenEstimate
+from app.usagetap_authorization import UsageTapAuthorization
+from app.usagetap_metering import UsageTapMeteringError
+
+
+class FakeUsageTapAuthorizationClient:
+    def validate_incoming_credential(self, authorization_header: str | None) -> str:
+        assert authorization_header == "Bearer cmp-test-key"
+        return authorization_header
+
+    def authorize(self, authorization_header: str | None) -> UsageTapAuthorization:
+        assert authorization_header == "Bearer cmp-test-key"
+        return UsageTapAuthorization(
+            organization_id="org_test",
+            customer_id="customer_test",
+        )
+
+
+class FakeUsageTapMeteringClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def record_compression_savings(self, **kwargs):
+        self.calls.append(kwargs)
+        return None
+
+
+@pytest.fixture(autouse=True)
+def use_fake_usagetap_authorization(monkeypatch):
+    main.compression_response_cache.clear()
+    metering_client = FakeUsageTapMeteringClient()
+    monkeypatch.setattr(
+        main,
+        "usage_tap_authorization_client",
+        FakeUsageTapAuthorizationClient(),
+    )
+    monkeypatch.setattr(main, "usage_tap_metering_client", metering_client)
+    yield metering_client
+    main.compression_response_cache.clear()
 
 
 class FakeCompressionService:
@@ -166,6 +209,17 @@ def test_index_returns_prompt_compression_ui():
     assert "Tenant Profile" in body
     assert 'id="tenantTestPreset"' in body
     assert 'id="compressionMode"' in body
+    assert 'id="compressionApiKey"' in body
+    assert 'type="password"' in body
+    assert 'autocomplete="new-password"' in body
+    assert "const COMPRESSION_CREDENTIAL_PATTERN" in body
+    assert "demo-v1\\." in body
+    assert '"Authorization": `Bearer ${compressionApiKey}`' in body
+    assert 'id="startDemoButton"' in body
+    assert 'fetch("/demo/session"' in body
+    assert "Credentials stay in page memory only" in body
+    assert "localStorage" not in body
+    assert "sessionStorage" not in body
     assert 'id="loadTextJsonExampleButton"' in body
     assert 'id="loadHtmlExampleButton"' in body
     assert 'id="loadTranscriptExampleButton"' in body
@@ -179,6 +233,7 @@ def test_index_returns_prompt_compression_ui():
     assert '<option value="model_force" selected>Model force</option>' in body
     assert 'id="latencyBudgetMs"' in body
     assert 'id="allowCpuModelAuto" type="checkbox">' in body
+    assert 'id="includeDetailedAnalytics" type="checkbox" checked>' in body
     assert "tenant_rick_probe" in body
     assert 'id="tenantId"' in body
     assert 'id="tenantProfileId"' in body
@@ -190,6 +245,10 @@ def test_index_returns_prompt_compression_ui():
     assert "markdown fences are protected from compression" in body
     assert "requestPayload.include_sections = true" in body
     assert "requestPayload.include_diagnostics = true" in body
+    assert (
+        "requestPayload.include_detailed_analytics = "
+        "includeDetailedAnalyticsInput.checked" in body
+    )
     assert "requestPayload.allow_inline_json_compression_paths = true" in body
     assert "requestPayload.mode = compressionModeInput.value" in body
     assert "requestPayload.latency_budget_ms = latencyBudgetMs" in body
@@ -205,9 +264,76 @@ def test_index_returns_prompt_compression_ui():
     assert settings_index < tenant_index < docs_index
 
 
+def test_demo_session_authorizes_compression_without_customer_metering(
+    monkeypatch,
+    use_fake_usagetap_authorization,
+):
+    manager = DemoSessionManager(
+        enabled=True,
+        signing_key="demo-signing-key-with-at-least-thirty-two-bytes",
+        mode_expires_at=2_000,
+        session_ttl_seconds=600,
+        max_operations=2,
+        max_input_chars=100,
+        max_input_chars_per_operation=80,
+        max_active_sessions=2,
+        clock=lambda: 1_000,
+    )
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "demo_session_manager", manager)
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+
+    session_response = client.post("/demo/session")
+
+    assert session_response.status_code == 200
+    assert session_response.headers["cache-control"] == "no-store, max-age=0"
+    session_payload = session_response.json()
+    assert session_payload["maxOperations"] == 2
+    assert session_payload["maxInputCharsPerOperation"] == 80
+    token = session_payload["token"]
+
+    compression_response = client.post(
+        "/compress",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"text": "Prompts are code."},
+    )
+
+    assert compression_response.status_code == 200
+    assert service.calls == [("Prompts are code.", main.DEFAULT_AGGRESSIVENESS, False)]
+    assert use_fake_usagetap_authorization.calls == []
+
+
+def test_demo_input_limit_is_enforced_before_compression(monkeypatch):
+    manager = DemoSessionManager(
+        enabled=True,
+        signing_key="demo-signing-key-with-at-least-thirty-two-bytes",
+        mode_expires_at=2_000,
+        max_input_chars=10,
+        max_input_chars_per_operation=5,
+        clock=lambda: 1_000,
+    )
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "demo_session_manager", manager)
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+    token = client.post("/demo/session").json()["token"]
+
+    response = client.post(
+        "/compress",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"text": "123456"},
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "Demo input is too large for one operation."}
+    assert service.calls == []
+
+
 def test_compress_request_rejects_unknown_experiment_profile():
     response = TestClient(main.app).post(
         "/compress",
+        headers={"Authorization": "Bearer cmp-test-key"},
         json={"text": "hello", "experiment_profile": "not-allowlisted"},
     )
 
@@ -238,6 +364,13 @@ def test_embed_returns_streamlined_iframe_ui():
     assert 'id="aggressiveness" type="range" min="0" max="1" step="0.05" value="0.30"' in body
     assert 'id="compressButton"' in body
     assert 'id="copyButton"' in body
+    assert 'id="startDemoButton"' in body
+    assert "Start 10-minute demo" in body
+    assert 'fetch("/demo/session"' in body
+    assert '"Authorization":demoAuthorization' in body
+    assert "Start a demo session first" in body
+    assert "localStorage" not in body
+    assert "sessionStorage" not in body
     assert 'id="elapsed"' not in body
     assert ">Elapsed<" not in body
     assert "Eval Suite" not in body
@@ -252,6 +385,7 @@ def test_embed_returns_streamlined_iframe_ui():
     assert "Text + JSON" in body
     assert "promptInput.value = JSON_EXAMPLE" in body
     assert "include_diagnostics:false" in body
+    assert "include_detailed_analytics:false" in body
     assert "tenant_profile" not in body
 
 
@@ -304,21 +438,36 @@ def test_benchmark_index_returns_benchmark_page():
     assert "HTML ratios" in body
     assert "html_markdown" in body
     assert 'id="compressionModeInput"' in body
+    assert 'id="compressionApiKey"' in body
+    assert 'type="password"' in body
+    assert 'autocomplete="new-password"' in body
+    assert "const COMPRESSION_CREDENTIAL_PATTERN" in body
+    assert "demo-v1\\." in body
+    assert '"Authorization": `Bearer ${compressionApiKey}`' in body
+    assert 'id="startDemoButton"' in body
+    assert 'fetch("/demo/session"' in body
+    assert "Credentials stay in page memory and out of downloads" in body
+    assert "localStorage" not in body
+    assert "sessionStorage" not in body
     assert '<option value="model_auto" selected>Model auto</option>' in body
     assert 'id="latencyBudgetInput"' in body
     assert 'id="allowCpuModelAutoInput" type="checkbox" checked' in body
     assert 'id="minModelCandidateTokensInput" type="range"' in body
     assert 'id="modelChunkCharsInput" type="range"' in body
     assert 'id="protectedProseRatioInput" type="range"' in body
-    assert 'id="evaluateDisabledTransformsInput" type="checkbox"' in body
+    assert 'id="diagnosticsModeInput"' in body
+    assert '<option value="off" selected>Production latency</option>' in body
+    assert '<option value="basic">Phase profile</option>' in body
+    assert '<option value="detailed">Deep analytics</option>' in body
     assert "mode: compressionModeInput.value" in body
     assert "payload.latency_budget_ms" in body
     assert "payload.allow_cpu_model_auto = true" in body
     assert "min_model_candidate_tokens: selectedModelCandidateFloor()" in body
     assert "model_chunk_chars: selectedModelChunkChars()" in body
     assert 'placeholder="blank = service max"' in body
-    assert "evaluate_disabled_transforms: evaluateDisabledTransformsInput.checked" in body
-    assert "include_detailed_analytics: evaluateDisabledTransformsInput.checked" in body
+    assert 'include_diagnostics: diagnosticsModeInput.value !== "off"' in body
+    assert 'evaluate_disabled_transforms: diagnosticsModeInput.value === "detailed"' in body
+    assert 'include_detailed_analytics: diagnosticsModeInput.value === "detailed"' in body
     assert "Diagnostics p50" in body
     assert "_protected${formatRatio(protectedProseRatio)}" in body
     assert "DIAGNOSTICS" in body
@@ -731,7 +880,7 @@ def test_v1_compress_http_accepts_compatible_request(monkeypatch):
 
     response = client.post(
         "/v1/compress",
-        headers={"Authorization": "Bearer test-key"},
+        headers={"Authorization": "Bearer cmp-test-key"},
         json={
             "model": "bear-2",
             "input": "Prompts are code.",
@@ -759,6 +908,241 @@ def test_v1_compress_http_accepts_compatible_request(monkeypatch):
         "warnings": [],
     }
     assert service.last_aggressiveness == 0.4
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/compress",
+            {
+                "text": "Prompts are code.",
+                "customerId": "customer_attacker",
+            },
+        ),
+        (
+            "/v1/compress",
+            {
+                "input": "Prompts are code.",
+                "customerId": "customer_attacker",
+            },
+        ),
+        (
+            "/v1/messages/compress",
+            {
+                "messages": [{"role": "user", "content": "Prompts are code."}],
+                "customerId": "customer_attacker",
+            },
+        ),
+    ],
+)
+def test_http_compression_routes_meter_only_verified_customer(
+    monkeypatch,
+    use_fake_usagetap_authorization,
+    path,
+    payload,
+):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = TestClient(main.app).post(
+        path,
+        headers={"Authorization": "Bearer cmp-test-key"},
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert len(use_fake_usagetap_authorization.calls) == 1
+    metering_call = use_fake_usagetap_authorization.calls[0]
+    assert metering_call["customer_id"] == "customer_test"
+    assert metering_call["customer_id"] != "customer_attacker"
+    assert len(metering_call["operation_id"]) == 32
+    assert metering_call["input_tokens"] >= metering_call["output_tokens"]
+
+
+def test_remote_authorization_runs_concurrently_with_compression(monkeypatch):
+    compression_started = Event()
+    authorization_release = Event()
+
+    class BlockingAuthorizationClient(FakeUsageTapAuthorizationClient):
+        def authorize(
+            self,
+            authorization_header: str | None,
+        ) -> UsageTapAuthorization:
+            assert compression_started.wait(timeout=2)
+            assert authorization_release.wait(timeout=2)
+            return super().authorize(authorization_header)
+
+    class SignalingCompressionService(FakeCompressionService):
+        def compress(self, *args, **kwargs):
+            compression_started.set()
+            return super().compress(*args, **kwargs)
+
+    monkeypatch.setattr(main, "compression_service", SignalingCompressionService())
+    monkeypatch.setattr(
+        main,
+        "usage_tap_authorization_client",
+        BlockingAuthorizationClient(),
+    )
+
+    def send_request():
+        return TestClient(main.app).post(
+            "/compress",
+            headers={"Authorization": "Bearer cmp-test-key"},
+            json={"text": "Prompts are code."},
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        response_future = executor.submit(send_request)
+        assert compression_started.wait(timeout=2)
+        assert response_future.done() is False
+        authorization_release.set()
+        response = response_future.result(timeout=2)
+
+    assert response.status_code == 200
+
+
+def test_metering_failure_withholds_compression_response(monkeypatch):
+    class FailingMeteringClient:
+        def record_compression_savings(self, **kwargs):
+            raise UsageTapMeteringError()
+
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    monkeypatch.setattr(main, "usage_tap_metering_client", FailingMeteringClient())
+
+    response = TestClient(main.app).post(
+        "/compress",
+        headers={"Authorization": "Bearer cmp-test-key"},
+        json={"text": "Prompts are code."},
+    )
+
+    assert response.status_code == 503
+    assert service.calls == [("Prompts are code.", main.DEFAULT_AGGRESSIVENESS, False)]
+    assert "meter-platform-secret" not in response.text
+
+
+def test_local_response_cache_reuses_identical_http_request_and_meters_each_hit(
+    monkeypatch,
+    use_fake_usagetap_authorization,
+):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+    payload = {
+        "text": "Prompts are code.",
+        "aggressiveness": 0.3,
+        "mode": "model_force",
+        "include_sections": True,
+        "include_diagnostics": False,
+        "include_detailed_analytics": False,
+    }
+
+    first = client.post(
+        "/compress",
+        headers={
+            "Authorization": "Bearer cmp-test-key",
+            "X-Request-ID": "first-request",
+        },
+        json=payload,
+    )
+    second = client.post(
+        "/compress",
+        headers={
+            "Authorization": "Bearer cmp-test-key",
+            "X-Request-ID": "second-request",
+        },
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.headers["x-compression-cache"] == "store"
+    assert second.headers["x-compression-cache"] == "hit"
+    assert service.calls == [("Prompts are code.", 0.3, True)]
+    assert len(use_fake_usagetap_authorization.calls) == 2
+
+
+def test_local_response_cache_separates_output_affecting_settings(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+    headers = {"Authorization": "Bearer cmp-test-key"}
+    variants = [
+        {"aggressiveness": 0.2, "mode": "model_force"},
+        {"aggressiveness": 0.3, "mode": "model_force"},
+        {
+            "aggressiveness": 0.3,
+            "mode": "model_auto",
+            "latency_budget_ms": 500,
+        },
+        {
+            "aggressiveness": 0.3,
+            "mode": "model_auto",
+            "latency_budget_ms": 750,
+        },
+    ]
+
+    for variant in variants:
+        response = client.post(
+            "/compress",
+            headers=headers,
+            json={"text": "Prompts are code.", **variant},
+        )
+        assert response.status_code == 200
+        assert response.headers["x-compression-cache"] == "store"
+
+    assert len(service.calls) == len(variants)
+
+
+def test_local_response_cache_bypasses_diagnostics(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+    payload = {
+        "text": "Prompts are code.",
+        "include_diagnostics": True,
+        "include_detailed_analytics": False,
+    }
+
+    first = client.post(
+        "/compress",
+        headers={"Authorization": "Bearer cmp-test-key"},
+        json=payload,
+    )
+    second = client.post(
+        "/compress",
+        headers={"Authorization": "Bearer cmp-test-key"},
+        json=payload,
+    )
+
+    assert first.headers["x-compression-cache"] == "bypass"
+    assert second.headers["x-compression-cache"] == "bypass"
+    assert len(service.calls) == 2
+
+
+def test_metering_failure_does_not_commit_cache_entry(monkeypatch):
+    class FailingMeteringClient:
+        def record_compression_savings(self, **kwargs):
+            raise UsageTapMeteringError()
+
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    monkeypatch.setattr(main, "usage_tap_metering_client", FailingMeteringClient())
+    client = TestClient(main.app)
+    request_args = {
+        "headers": {"Authorization": "Bearer cmp-test-key"},
+        "json": {"text": "Prompts are code."},
+    }
+
+    first = client.post("/compress", **request_args)
+    monkeypatch.setattr(main, "usage_tap_metering_client", FakeUsageTapMeteringClient())
+    second = client.post("/compress", **request_args)
+
+    assert first.status_code == 503
+    assert second.status_code == 200
+    assert second.headers["x-compression-cache"] == "store"
+    assert len(service.calls) == 2
 
 
 def test_token_estimate_endpoint_uses_compression_service_estimator(monkeypatch):
@@ -791,7 +1175,7 @@ def test_v1_compress_accepts_tenant_id_header_and_profile_body(monkeypatch):
     response = client.post(
         "/v1/compress",
         headers={
-            "Authorization": "Bearer test-key",
+            "Authorization": "Bearer cmp-test-key",
             "X-Tenant-ID": "tenant_from_header",
         },
         json={
@@ -929,7 +1313,7 @@ def test_v1_messages_compress_http_rejects_invalid_role_aggressiveness(monkeypat
 
     response = client.post(
         "/v1/messages/compress",
-        headers={"Authorization": "Bearer test-key"},
+        headers={"Authorization": "Bearer cmp-test-key"},
         json={
             "model": "gpt-test",
             "messages": [{"role": "user", "content": "Prompts are code."}],
@@ -1102,7 +1486,7 @@ def test_v1_messages_compress_http_accepts_vendor_style_request(monkeypatch):
 
     response = client.post(
         "/v1/messages/compress",
-        headers={"Authorization": "Bearer test-key"},
+        headers={"Authorization": "Bearer cmp-test-key"},
         json={
             "model": "gpt-test",
             "messages": [

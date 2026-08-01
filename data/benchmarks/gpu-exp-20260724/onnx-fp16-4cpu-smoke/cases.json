@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "case_id": "tok4000_json0p0_html0p0",
+      "html_chars": 0,
+      "html_ratio_target": 0.0,
+      "input_chars": 20115,
+      "json_chars": 0,
+      "json_ratio_target": 0.0,
+      "prompt_sha256": "a87e0190b7e92a4959b80bee59bd221c5489eb1cce92020280d108f079797316",
+      "synthetic_html_tokens": 0,
+      "synthetic_input_tokens": 4079,
+      "synthetic_json_tokens": 0,
+      "target_tokens": 4000
+    },
+    {
+      "case_id": "tok16000_json0p0_html0p0",
+      "html_chars": 0,
+      "html_ratio_target": 0.0,
+      "input_chars": 79101,
+      "json_chars": 0,
+      "json_ratio_target": 0.0,
+      "prompt_sha256": "31eb2f36cdb5d55da0e0f9d75e7ab90e41cf7ad049cb774bb519b2ca82205f8f",
+      "synthetic_html_tokens": 0,
+      "synthetic_input_tokens": 16057,
+      "synthetic_json_tokens": 0,
+      "target_tokens": 16000
+    },
+    {
+      "case_id": "tok64000_json0p0_html0p0",
+      "html_chars": 0,
+      "html_ratio_target": 0.0,
+      "input_chars": 315567,
+      "json_chars": 0,
+      "json_ratio_target": 0.0,
+      "prompt_sha256": "9c65b7cea664193240725efecbbaec9fed51badbb88c5f331d99c1f713954ab7",
+      "synthetic_html_tokens": 0,
+      "synthetic_input_tokens": 64075,
+      "synthetic_json_tokens": 0,
+      "target_tokens": 64000
+    }
+  ],
+  "metadata": {
+    "aggressiveness": 0.25,
+    "benchmark_schema_version": "benchmark.v3",
+    "cohort_id": "cohort-17773501615194d6",
+    "compression_mode": "model_force",
+    "concurrency": 1,
+    "conditions": [
+      "model_force"
+    ],
+    "diagnostics": "off",
+    "html_ratios": [
+      0.0
+    ],
+    "include_sections": false,
+    "json_ratios": [
+      0.0
+    ],
+    "labels": {
+      "revision": "prompt-compression-perf-onnx-fp16-4",
+      "variant": "onnx-fp16-4cpu-smoke"
+    },
+    "latency_budget_ms": null,
+    "mode": "http",
+    "repeats": 5,
+    "seed": 1729,
+    "started_at": "2026-07-24T23:06:26.739140+00:00",
+    "target_token_median": 16000,
+    "target_tokens": [
+      4000,
+      16000,
+      64000
+    ],
+    "url": "https://perf-onnx-fp16-4---prompt-compression-3sayt2t5na-uc.a.run.app/compress",
+    "warmup": 3
+  }
+}

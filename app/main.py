@@ -1,9 +1,15 @@
-from dataclasses import asdict
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import asdict, dataclass
 from typing import Annotated, Any, Callable
+import hashlib
+import json
+import os
+import time
+import uuid
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.benchmark_ui import BENCHMARK_HTML
 from app.compressor import (
@@ -22,6 +28,7 @@ from app.message_compression import (
     estimate_content_token_details,
 )
 from app.research_ui import RESEARCH_HTML
+from app.response_cache import LocalResponseCache
 from app.schemas import (
     CompressRequest,
     CompressResponse,
@@ -50,6 +57,21 @@ from app.token_estimator import (
     merge_token_estimator_names,
 )
 from app.version import DEPLOYMENT_TIMESTAMP, DEPLOYMENT_VERSION
+from app.usagetap_authorization import (
+    UsageTapAuthorization,
+    UsageTapAuthorizationClient,
+    UsageTapAuthorizationError,
+    UsageTapAuthorizationFailureCache,
+)
+from app.demo_access import (
+    DemoAccessError,
+    DemoAuthorization,
+    DemoSessionManager,
+)
+from app.usagetap_metering import (
+    UsageTapMeteringClient,
+    UsageTapMeteringError,
+)
 
 DASHBOARD_EMBED_HEADERS = {
     "Content-Security-Policy": "frame-ancestors *",
@@ -286,6 +308,28 @@ APP_HTML = """
       min-height: 64px;
       max-height: 160px;
       resize: vertical;
+    }
+
+    .field-help {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .auth-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .auth-row input {
+      flex: 1 1 280px;
+    }
+
+    .auth-row button {
+      flex: 0 0 auto;
+      min-height: 34px;
     }
 
     .tenant-inline {
@@ -639,6 +683,23 @@ Output:
         </div>
         <div class="tenant-controls">
           <h3>Compression Settings</h3>
+          <div class="tenant-field full">
+            <label for="compressionApiKey">Compression API Key</label>
+            <div class="auth-row">
+              <input
+                id="compressionApiKey"
+                type="password"
+                autocomplete="new-password"
+                autocapitalize="none"
+                spellcheck="false"
+                data-1p-ignore="true"
+                data-lpignore="true"
+                placeholder="cmp-..."
+              >
+              <button class="example-button" id="startDemoButton" type="button">Start 10-minute demo</button>
+            </div>
+            <span class="field-help" id="demoAccessStatus">Enter a cmp- key or start a bounded demo session. Credentials stay in page memory only.</span>
+          </div>
           <label class="tenant-field">
             Mode
             <select id="compressionMode">
@@ -654,6 +715,10 @@ Output:
           <label class="tenant-inline">
             <input id="allowCpuModelAuto" type="checkbox">
             Allow CPU model auto
+          </label>
+          <label class="tenant-inline">
+            <input id="includeDetailedAnalytics" type="checkbox" checked>
+            Detailed analytics
           </label>
           <div class="tenant-field full">
             <span>Aggressiveness</span>
@@ -741,9 +806,13 @@ Output:
 
   <script>
     const promptInput = document.getElementById("prompt");
+    const compressionApiKeyInput = document.getElementById("compressionApiKey");
+    const startDemoButton = document.getElementById("startDemoButton");
+    const demoAccessStatus = document.getElementById("demoAccessStatus");
     const compressionModeInput = document.getElementById("compressionMode");
     const latencyBudgetMsInput = document.getElementById("latencyBudgetMs");
     const allowCpuModelAutoInput = document.getElementById("allowCpuModelAuto");
+    const includeDetailedAnalyticsInput = document.getElementById("includeDetailedAnalytics");
     const aggressivenessInput = document.getElementById("aggressiveness");
     const aggressivenessValue = document.getElementById("aggressivenessValue");
     const useTenantDefault = document.getElementById("useTenantDefault");
@@ -769,6 +838,7 @@ Output:
     const reduction = document.getElementById("reduction");
     const tokens = document.getElementById("tokens");
     const elapsed = document.getElementById("elapsed");
+    const COMPRESSION_CREDENTIAL_PATTERN = /^(?:cmp-[A-Za-z0-9_-]{43}|demo-v1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)$/;
     let latestCompressedText = "";
     const TEXT_AND_JSON_EXAMPLE = promptInput.value;
     const TENANT_TEST_PRESETS = {
@@ -1213,10 +1283,42 @@ Output:
       }
     });
 
+    startDemoButton.addEventListener("click", async () => {
+      startDemoButton.disabled = true;
+      demoAccessStatus.textContent = "Starting a bounded demo session...";
+      try {
+        const response = await fetch("/demo/session", {
+          method: "POST",
+          headers: { "Accept": "application/json" },
+          cache: "no-store",
+        });
+        const data = await response.json();
+        if (!response.ok || typeof data.token !== "string") {
+          throw new Error(data.detail || "Demo access is unavailable");
+        }
+        compressionApiKeyInput.value = data.token;
+        const expiresAt = new Date(Number(data.expiresAt) * 1000);
+        demoAccessStatus.textContent =
+          `Demo active until ${expiresAt.toLocaleTimeString()} - ` +
+          `${data.maxOperations} operations, ${data.maxInputCharsPerOperation.toLocaleString()} chars each.`;
+        setStatus("Demo session ready");
+      } catch (error) {
+        demoAccessStatus.textContent = error.message;
+        setStatus(error.message, true);
+      } finally {
+        startDemoButton.disabled = false;
+      }
+    });
+
     compressButton.addEventListener("click", async () => {
       const text = promptInput.value.trim();
       if (!text) {
         setStatus("Paste a prompt first", true);
+        return;
+      }
+      const compressionApiKey = compressionApiKeyInput.value.trim();
+      if (!COMPRESSION_CREDENTIAL_PATTERN.test(compressionApiKey)) {
+        setStatus("Enter a valid cmp- key or start a demo session", true);
         return;
       }
 
@@ -1233,6 +1335,7 @@ Output:
         requestPayload.mode = compressionModeInput.value;
         requestPayload.include_sections = true;
         requestPayload.include_diagnostics = true;
+        requestPayload.include_detailed_analytics = includeDetailedAnalyticsInput.checked;
         requestPayload.allow_inline_json_compression_paths = true;
         const latencyBudgetMs = boundedNumberInput(latencyBudgetMsInput, 0, 600000);
         if (latencyBudgetMs !== null) {
@@ -1247,7 +1350,10 @@ Output:
 
         const response = await fetch("/compress", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${compressionApiKey}`,
+          },
           body: JSON.stringify(requestPayload),
         });
 
@@ -1291,12 +1397,243 @@ app.add_middleware(
 )
 
 compression_service = PromptCompressionService()
+usage_tap_authorization_client = UsageTapAuthorizationClient.from_environment()
+usage_tap_authorization_failure_cache = (
+    UsageTapAuthorizationFailureCache.from_environment()
+)
+usage_tap_authorization_executor = ThreadPoolExecutor(
+    max_workers=8,
+    thread_name_prefix="usagetap-authorization",
+)
+usage_tap_metering_client = UsageTapMeteringClient.from_environment()
+demo_session_manager = DemoSessionManager.from_environment()
+compression_response_cache = LocalResponseCache.from_environment()
 eval_cases = load_eval_cases()
+
+_RESPONSE_CACHE_SCHEMA_VERSION = "compression-response-v1"
+_TRANSIENT_CACHE_WARNING_FRAGMENTS = (
+    "cold_model",
+    "fallback",
+    "missing_latency_baseline",
+    "origin_unavailable",
+    "output_rejected",
+    "timeout",
+)
+
+
+class _UnserializableCacheResponse(Exception):
+    def __init__(self, response: Any) -> None:
+        super().__init__("Compression response does not support cache serialization.")
+        self.response = response
+
+
+@dataclass(frozen=True, slots=True)
+class PendingUsageTapAuthorization:
+    future: Future[UsageTapAuthorization] | None = None
+    demo_authorization: DemoAuthorization | None = None
+
+
+def require_usage_tap_compression_authorization(
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> UsageTapAuthorization:
+    """Authorize one operation and retain only its verified UsageTap identity."""
+    try:
+        verified = usage_tap_authorization_client.authorize(authorization)
+    except UsageTapAuthorizationError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.public_message,
+        ) from None
+
+    request.state.usagetap_authorization = verified
+    request.state.usagetap_customer_id = verified.customer_id
+    return verified
+
+
+def start_usage_tap_compression_authorization(
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> PendingUsageTapAuthorization:
+    """Reject obvious abuse, then start the remote check without blocking inference."""
+    if _looks_like_demo_authorization(authorization):
+        try:
+            demo_authorization = demo_session_manager.validate_authorization_header(
+                authorization
+            )
+        except DemoAccessError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=exc.public_message,
+            ) from None
+        return PendingUsageTapAuthorization(
+            demo_authorization=demo_authorization,
+        )
+
+    try:
+        validated_header = usage_tap_authorization_client.validate_incoming_credential(
+            authorization
+        )
+    except UsageTapAuthorizationError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.public_message,
+        ) from None
+
+    cached_failure = usage_tap_authorization_failure_cache.get(validated_header)
+    if cached_failure is not None:
+        raise HTTPException(
+            status_code=cached_failure.status_code,
+            detail=cached_failure.public_message,
+        )
+
+    request.state.compression_operation_id = uuid.uuid4().hex
+    future = usage_tap_authorization_executor.submit(
+        _authorize_and_cache_failure,
+        validated_header,
+    )
+    return PendingUsageTapAuthorization(future=future)
+
+
+def _looks_like_demo_authorization(authorization_header: str | None) -> bool:
+    return bool(
+        isinstance(authorization_header, str)
+        and authorization_header.casefold().startswith("bearer demo-v1.")
+    )
+
+
+def reserve_demo_compression_operation(
+    request: Request,
+    pending: PendingUsageTapAuthorization,
+    *,
+    input_chars: int,
+) -> None:
+    demo_authorization = pending.demo_authorization
+    if demo_authorization is None:
+        return
+    try:
+        demo_session_manager.reserve_operation(
+            demo_authorization,
+            input_chars=input_chars,
+        )
+    except DemoAccessError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.public_message,
+        ) from None
+    request.state.demo_authorization = demo_authorization
+
+
+def _authorize_and_cache_failure(
+    authorization_header: str,
+) -> UsageTapAuthorization:
+    try:
+        return usage_tap_authorization_client.authorize(authorization_header)
+    except UsageTapAuthorizationError as exc:
+        usage_tap_authorization_failure_cache.record(authorization_header, exc)
+        raise
+
+
+def complete_usage_tap_compression_authorization(
+    request: Request,
+    pending: PendingUsageTapAuthorization,
+) -> UsageTapAuthorization | DemoAuthorization:
+    if pending.demo_authorization is not None:
+        request.state.demo_authorization = pending.demo_authorization
+        return pending.demo_authorization
+    if pending.future is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Compression authorization is temporarily unavailable.",
+        )
+    try:
+        verified = pending.future.result()
+    except UsageTapAuthorizationError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.public_message,
+        ) from None
+
+    request.state.usagetap_authorization = verified
+    request.state.usagetap_customer_id = verified.customer_id
+    return verified
+
+
+def record_usage_tap_compression_metering(
+    request: Request,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+) -> None:
+    """Record verified savings before releasing a compression response."""
+    if isinstance(
+        getattr(request.state, "demo_authorization", None),
+        DemoAuthorization,
+    ):
+        return
+    verified = getattr(request.state, "usagetap_authorization", None)
+    if not isinstance(verified, UsageTapAuthorization):
+        raise HTTPException(
+            status_code=503,
+            detail="Compression metering is temporarily unavailable.",
+        )
+
+    operation_id = getattr(request.state, "compression_operation_id", None)
+    if not isinstance(operation_id, str) or not operation_id:
+        raise HTTPException(
+            status_code=503,
+            detail="Compression metering is temporarily unavailable.",
+        )
+    try:
+        metering = usage_tap_metering_client.record_compression_savings(
+            customer_id=verified.customer_id,
+            operation_id=operation_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    except UsageTapMeteringError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=exc.public_message,
+        ) from None
+
+    request.state.compression_operation_id = operation_id
+    request.state.usagetap_metering = metering
 
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(content=APP_HTML, headers=DASHBOARD_EMBED_HEADERS)
+
+
+@app.post("/demo/session", response_class=JSONResponse)
+def create_demo_session() -> JSONResponse:
+    try:
+        session = demo_session_manager.issue_session()
+    except DemoAccessError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.public_message,
+        ) from None
+    return JSONResponse(
+        content={
+            "token": session.token,
+            "expiresAt": session.expires_at,
+            "maxOperations": session.max_operations,
+            "maxInputChars": session.max_input_chars,
+            "maxInputCharsPerOperation": session.max_input_chars_per_operation,
+        },
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.get("/embed", response_class=HTMLResponse)
@@ -1418,12 +1755,16 @@ def run_eval(request: EvalRunRequest) -> EvalRunResponse:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    runtime_info = getattr(compression_service, "runtime_info", None)
+    runtime = runtime_info() if callable(runtime_info) else {}
+    runtime["response_cache"] = compression_response_cache.stats()
     return HealthResponse(
         status="ok",
         deployment_version=DEPLOYMENT_VERSION,
         deployment_timestamp=DEPLOYMENT_TIMESTAMP,
         model=compression_service.model_name,
         model_loaded=compression_service.is_loaded,
+        runtime=runtime,
     )
 
 
@@ -1444,7 +1785,6 @@ def estimate_tokens(request: TokenEstimateRequest) -> TokenEstimateResponse:
     )
 
 
-@app.post("/compress", response_model=CompressResponse, response_model_exclude_none=True)
 def compress(
     request: CompressRequest,
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
@@ -1527,7 +1867,194 @@ def compress(
     )
 
 
-@app.post("/v1/compress", response_model=V1CompressResponse)
+def _response_cache_key(
+    *,
+    route: str,
+    request_payload: dict[str, Any],
+    tenant_profile: TenantCompressionProfile,
+    effective_settings: dict[str, Any],
+) -> str:
+    """Hash the complete, resolved compression behavior without credentials."""
+    identity = {
+        "schema": _RESPONSE_CACHE_SCHEMA_VERSION,
+        "route": route,
+        "request": request_payload,
+        "tenant_profile": asdict(tenant_profile),
+        "effective_settings": effective_settings,
+        "runtime": {
+            "deployment_version": DEPLOYMENT_VERSION,
+            "model": compression_service.model_name,
+            "source_sha256": os.getenv("COMPRESSOR_SOURCE_SHA256", "unknown"),
+        },
+    }
+    canonical = json.dumps(
+        identity,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _request_allows_response_cache(request: CompressRequest) -> bool:
+    return not (
+        request.include_diagnostics
+        or request.evaluate_disabled_transforms
+        or request.evaluation_constraints is not None
+        or request.experiment_profile is not None
+    )
+
+
+def _warnings_are_cache_stable(warnings: list[str]) -> bool:
+    return not any(
+        fragment in warning.casefold()
+        for warning in warnings
+        for fragment in _TRANSIENT_CACHE_WARNING_FRAGMENTS
+    )
+
+
+def _compress_response_is_cacheable(response: CompressResponse) -> bool:
+    return (
+        not response.training_sample_recorded
+        and response.compressed_tokens < response.original_tokens
+        and not response.token_savings.fallback_used
+        and _warnings_are_cache_stable(response.warnings)
+    )
+
+
+def _v1_response_is_cacheable(
+    response: V1CompressResponse | V1MessagesCompressResponse,
+) -> bool:
+    return (
+        not response.training_sample_recorded
+        and response.tokens_saved > 0
+        and _warnings_are_cache_stable(response.warnings)
+    )
+
+
+def _run_cached_response(
+    *,
+    key: str,
+    response_type: type,
+    compute: Callable[[], Any],
+    cacheable: Callable[[Any], bool],
+    request_cacheable: bool = True,
+) -> tuple[Any, str, bytes | None, bool]:
+    if not request_cacheable:
+        return compute(), "bypass", None, False
+
+    started = time.perf_counter()
+
+    def serialized_compute() -> tuple[bytes, bool]:
+        computed = compute()
+        if not callable(getattr(computed, "model_dump_json", None)):
+            raise _UnserializableCacheResponse(computed)
+        payload = computed.model_dump_json(exclude_none=True).encode("utf-8")
+        return payload, cacheable(computed)
+
+    try:
+        lookup = compression_response_cache.get_or_compute(
+            key,
+            serialized_compute,
+            store_result=False,
+        )
+    except _UnserializableCacheResponse as exc:
+        return exc.response, "bypass", None, False
+    parsed = response_type.model_validate_json(lookup.payload)
+    if lookup.status in {"hit", "shared"}:
+        lookup_elapsed_ms = (time.perf_counter() - started) * 1000.0
+        if isinstance(parsed, CompressResponse):
+            parsed.elapsed_ms = lookup_elapsed_ms
+        else:
+            parsed.compression_time = lookup_elapsed_ms
+    return parsed, lookup.status, lookup.payload, lookup.cacheable
+
+
+def _commit_response_cache(
+    *,
+    key: str,
+    payload: bytes | None,
+    status: str,
+    cacheable: bool,
+) -> str:
+    """Store only after authorization and metering have succeeded."""
+    if status not in {"miss", "shared"} or not cacheable or payload is None:
+        return status
+    stored = compression_response_cache.put(key, payload)
+    if status == "shared":
+        return "shared"
+    return "store" if stored else "bypass"
+
+
+@app.post(
+    "/compress",
+    response_model=CompressResponse,
+    response_model_exclude_none=True,
+)
+def compress_http(
+    http_request: Request,
+    http_response: Response,
+    request: CompressRequest,
+    pending_authorization: Annotated[
+        PendingUsageTapAuthorization,
+        Depends(start_usage_tap_compression_authorization),
+    ],
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    x_request_id: Annotated[str | None, Header(alias="X-Request-ID")] = None,
+) -> CompressResponse:
+    reserve_demo_compression_operation(
+        http_request,
+        pending_authorization,
+        input_chars=len(request.text),
+    )
+    tenant_profile = _tenant_profile_from_request(
+        body_tenant_id=request.tenant_id,
+        header_tenant_id=x_tenant_id,
+        settings=request.tenant_profile,
+    )
+    cache_key = _response_cache_key(
+        route="/compress",
+        request_payload=request.model_dump(mode="json"),
+        tenant_profile=tenant_profile,
+        effective_settings={
+            "aggressiveness": _resolve_compress_aggressiveness(
+                request,
+                tenant_profile,
+            ),
+            "mode": _resolve_compress_mode(request),
+        },
+    )
+    response, cache_status, cache_payload, cacheable = _run_cached_response(
+        key=cache_key,
+        response_type=CompressResponse,
+        compute=lambda: compress(
+            request,
+            x_tenant_id=x_tenant_id,
+            x_request_id=x_request_id,
+        ),
+        cacheable=_compress_response_is_cacheable,
+        request_cacheable=_request_allows_response_cache(request),
+    )
+    complete_usage_tap_compression_authorization(
+        http_request,
+        pending_authorization,
+    )
+    record_usage_tap_compression_metering(
+        http_request,
+        input_tokens=response.original_tokens,
+        output_tokens=response.compressed_tokens,
+    )
+    cache_status = _commit_response_cache(
+        key=cache_key,
+        payload=cache_payload,
+        status=cache_status,
+        cacheable=cacheable,
+    )
+    http_response.headers["X-Compression-Cache"] = cache_status
+    return response
+
+
 def compress_v1(
     request: V1CompressRequest,
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
@@ -1591,7 +2118,70 @@ def compress_v1(
     )
 
 
-@app.post("/v1/messages/compress", response_model=V1MessagesCompressResponse)
+@app.post(
+    "/v1/compress",
+    response_model=V1CompressResponse,
+)
+def compress_v1_http(
+    http_request: Request,
+    http_response: Response,
+    request: V1CompressRequest,
+    pending_authorization: Annotated[
+        PendingUsageTapAuthorization,
+        Depends(start_usage_tap_compression_authorization),
+    ],
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+) -> V1CompressResponse:
+    reserve_demo_compression_operation(
+        http_request,
+        pending_authorization,
+        input_chars=len(request.input),
+    )
+    tenant_profile = _tenant_profile_from_request(
+        body_tenant_id=request.tenant_id,
+        header_tenant_id=x_tenant_id,
+        settings=request.tenant_profile,
+    )
+    cache_key = _response_cache_key(
+        route="/v1/compress",
+        request_payload=request.model_dump(mode="json"),
+        tenant_profile=tenant_profile,
+        effective_settings={
+            "aggressiveness": _resolve_v1_aggressiveness(
+                request.compression_settings,
+                tenant_profile,
+            ),
+            "mode": _resolve_v1_mode(request.compression_settings),
+            "latency_budget_ms": _resolve_v1_latency_budget_ms(
+                request.compression_settings
+            ),
+        },
+    )
+    response, cache_status, cache_payload, cacheable = _run_cached_response(
+        key=cache_key,
+        response_type=V1CompressResponse,
+        compute=lambda: compress_v1(request, x_tenant_id=x_tenant_id),
+        cacheable=_v1_response_is_cacheable,
+    )
+    complete_usage_tap_compression_authorization(
+        http_request,
+        pending_authorization,
+    )
+    record_usage_tap_compression_metering(
+        http_request,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+    )
+    cache_status = _commit_response_cache(
+        key=cache_key,
+        payload=cache_payload,
+        status=cache_status,
+        cacheable=cacheable,
+    )
+    http_response.headers["X-Compression-Cache"] = cache_status
+    return response
+
+
 def compress_v1_messages(
     request: V1MessagesCompressRequest,
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
@@ -1687,6 +2277,97 @@ def compress_v1_messages(
         training_sample_recorded=False,
         message_stats=[asdict(stat) for stat in result.stats],
         warnings=result.warnings,
+    )
+
+
+@app.post(
+    "/v1/messages/compress",
+    response_model=V1MessagesCompressResponse,
+)
+def compress_v1_messages_http(
+    http_request: Request,
+    http_response: Response,
+    request: V1MessagesCompressRequest,
+    pending_authorization: Annotated[
+        PendingUsageTapAuthorization,
+        Depends(start_usage_tap_compression_authorization),
+    ],
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+) -> V1MessagesCompressResponse:
+    reserve_demo_compression_operation(
+        http_request,
+        pending_authorization,
+        input_chars=_messages_input_chars(request),
+    )
+    tenant_profile = _tenant_profile_from_request(
+        body_tenant_id=request.tenant_id,
+        header_tenant_id=x_tenant_id,
+        settings=request.tenant_profile,
+    )
+    cache_key = _response_cache_key(
+        route="/v1/messages/compress",
+        request_payload=request.model_dump(mode="json"),
+        tenant_profile=tenant_profile,
+        effective_settings={
+            "aggressiveness": _resolve_v1_aggressiveness(
+                request.compression_settings,
+                tenant_profile,
+            ),
+            "role_aggressiveness": _resolve_v1_role_aggressiveness(
+                request.compression_settings
+            ),
+            "mode": _resolve_v1_mode(request.compression_settings),
+            "latency_budget_ms": _resolve_v1_latency_budget_ms(
+                request.compression_settings
+            ),
+            "compact_empty_user_messages": (
+                _resolve_v1_compact_empty_user_messages(
+                    request.compression_settings
+                )
+            ),
+            "compact_duplicate_user_text_parts": (
+                _resolve_v1_compact_duplicate_user_text_parts(
+                    request.compression_settings
+                )
+            ),
+        },
+    )
+    response, cache_status, cache_payload, cacheable = _run_cached_response(
+        key=cache_key,
+        response_type=V1MessagesCompressResponse,
+        compute=lambda: compress_v1_messages(request, x_tenant_id=x_tenant_id),
+        cacheable=_v1_response_is_cacheable,
+    )
+    complete_usage_tap_compression_authorization(
+        http_request,
+        pending_authorization,
+    )
+    record_usage_tap_compression_metering(
+        http_request,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+    )
+    cache_status = _commit_response_cache(
+        key=cache_key,
+        payload=cache_payload,
+        status=cache_status,
+        cacheable=cacheable,
+    )
+    http_response.headers["X-Compression-Cache"] = cache_status
+    return response
+
+
+def _messages_input_chars(request: V1MessagesCompressRequest) -> int:
+    return sum(
+        len(
+            json.dumps(
+                message.content,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            )
+        )
+        for message in request.messages
     )
 
 

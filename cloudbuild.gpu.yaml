@@ -8,6 +8,8 @@ steps:
       - GPU_BASE_IMAGE=${_GPU_BASE_IMAGE}
       - --build-arg
       - COMPRESSOR_MODEL=${_COMPRESSOR_MODEL}
+      - --build-arg
+      - ENABLE_ONNX_RUNTIME=${_ENABLE_ONNX_RUNTIME}
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:${_IMAGE_TAG}
       - .
@@ -22,6 +24,7 @@ substitutions:
   _IMAGE_TAG: latest
   _GPU_BASE_IMAGE: us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-cu124.2-4.py310
   _COMPRESSOR_MODEL: microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
+  _ENABLE_ONNX_RUNTIME: "false"
 
 options:
   machineType: E2_HIGHCPU_32

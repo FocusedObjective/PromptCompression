@@ -144,7 +144,12 @@ BENCHMARK_HTML = """
       grid-column: span 2;
     }
 
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
     .field input[type="text"],
+    .field input[type="password"],
     .field select,
     .field input[type="number"] {
       width: 100%;
@@ -161,6 +166,23 @@ BENCHMARK_HTML = """
     .field input[type="range"] {
       width: 100%;
       accent-color: var(--accent);
+    }
+
+    .field-help {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .auth-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .auth-row input {
+      flex: 1 1 280px;
     }
 
     .inline {
@@ -369,6 +391,23 @@ BENCHMARK_HTML = """
     </header>
 
     <section class="toolbar" aria-label="Benchmark controls">
+      <div class="field full">
+        <label for="compressionApiKey">Compression API Key</label>
+        <div class="auth-row">
+          <input
+            id="compressionApiKey"
+            type="password"
+            autocomplete="new-password"
+            autocapitalize="none"
+            spellcheck="false"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            placeholder="cmp-..."
+          >
+          <button class="secondary-button" id="startDemoButton" type="button">Start 10-minute demo</button>
+        </div>
+        <span class="field-help" id="demoAccessStatus">Enter a cmp- key or start a bounded demo session. Credentials stay in page memory and out of downloads.</span>
+      </div>
       <label class="field wide">
         Target tokens
         <input id="sizesInput" type="text" spellcheck="false" value="256,512,1000,1500,2000,2500,3000,6000,12000,24000,50000,100000,200000">
@@ -415,6 +454,14 @@ BENCHMARK_HTML = """
           <option value="safe_stack_v1">safe_stack_v1</option>
         </select>
       </label>
+      <label class="field">
+        Measurement
+        <select id="diagnosticsModeInput">
+          <option value="off" selected>Production latency</option>
+          <option value="basic">Phase profile</option>
+          <option value="detailed">Deep analytics</option>
+        </select>
+      </label>
       <label class="inline">
         <input id="applyDeterministicInput" type="checkbox" checked>
         Apply deterministic transforms
@@ -446,10 +493,6 @@ BENCHMARK_HTML = """
       <label class="inline">
         <input id="includeSectionsInput" type="checkbox">
         Include sections
-      </label>
-      <label class="inline">
-        <input id="evaluateDisabledTransformsInput" type="checkbox">
-        Deep counterfactual analytics
       </label>
       <div class="actions">
         <button id="runButton" type="button">Run</button>
@@ -561,6 +604,9 @@ BENCHMARK_HTML = """
     let completedRuns = 0;
     let currentCohortId = "";
 
+    const compressionApiKeyInput = document.getElementById("compressionApiKey");
+    const startDemoButton = document.getElementById("startDemoButton");
+    const demoAccessStatus = document.getElementById("demoAccessStatus");
     const sizesInput = document.getElementById("sizesInput");
     const jsonRatiosInput = document.getElementById("jsonRatiosInput");
     const htmlRatiosInput = document.getElementById("htmlRatiosInput");
@@ -569,6 +615,7 @@ BENCHMARK_HTML = """
     const concurrencyInput = document.getElementById("concurrencyInput");
     const compressionModeInput = document.getElementById("compressionModeInput");
     const experimentProfileInput = document.getElementById("experimentProfileInput");
+    const diagnosticsModeInput = document.getElementById("diagnosticsModeInput");
     const applyDeterministicInput = document.getElementById("applyDeterministicInput");
     const latencyBudgetInput = document.getElementById("latencyBudgetInput");
     const allowCpuModelAutoInput = document.getElementById("allowCpuModelAutoInput");
@@ -581,7 +628,6 @@ BENCHMARK_HTML = """
     const aggressivenessInput = document.getElementById("aggressivenessInput");
     const aggressivenessValue = document.getElementById("aggressivenessValue");
     const includeSectionsInput = document.getElementById("includeSectionsInput");
-    const evaluateDisabledTransformsInput = document.getElementById("evaluateDisabledTransformsInput");
     const runButton = document.getElementById("runButton");
     const stopButton = document.getElementById("stopButton");
     const downloadRawButton = document.getElementById("downloadRawButton");
@@ -599,6 +645,7 @@ BENCHMARK_HTML = """
     const summaryBody = document.getElementById("summaryBody");
     const rawBody = document.getElementById("rawBody");
     const logNode = document.getElementById("logNode");
+    const COMPRESSION_CREDENTIAL_PATTERN = /^(?:cmp-[A-Za-z0-9_-]{43}|demo-v1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)$/;
 
     function setStatus(message, state = "") {
       statusNode.textContent = message;
@@ -966,7 +1013,7 @@ BENCHMARK_HTML = """
       return fallbackClass;
     }
 
-    async function runOne(task) {
+    async function runOne(task, compressionApiKey) {
       const testCase = buildCase(
         task.targetTokens,
         task.jsonRatio,
@@ -980,8 +1027,9 @@ BENCHMARK_HTML = """
       row.allow_cpu_model_auto_override = allowCpuModelAutoInput.checked;
       row.min_model_candidate_tokens_override = selectedModelCandidateFloor();
       row.model_chunk_chars_override = selectedModelChunkChars();
-      row.evaluate_disabled_transforms = evaluateDisabledTransformsInput.checked;
-      row.include_detailed_analytics = evaluateDisabledTransformsInput.checked;
+      row.diagnostics_mode = diagnosticsModeInput.value;
+      row.evaluate_disabled_transforms = diagnosticsModeInput.value === "detailed";
+      row.include_detailed_analytics = diagnosticsModeInput.value === "detailed";
       row.latency_budget_ms = latencyBudgetInput.value.trim() || "";
       const controller = new AbortController();
       activeControllers.add(controller);
@@ -994,9 +1042,9 @@ BENCHMARK_HTML = """
           experiment_profile: experimentProfileInput.value,
           apply_deterministic_transforms: applyDeterministicInput.checked,
           include_sections: includeSectionsInput.checked,
-          include_diagnostics: true,
-          include_detailed_analytics: evaluateDisabledTransformsInput.checked,
-          evaluate_disabled_transforms: evaluateDisabledTransformsInput.checked,
+          include_diagnostics: diagnosticsModeInput.value !== "off",
+          include_detailed_analytics: diagnosticsModeInput.value === "detailed",
+          evaluate_disabled_transforms: diagnosticsModeInput.value === "detailed",
           min_model_candidate_tokens: selectedModelCandidateFloor(),
           model_chunk_chars: selectedModelChunkChars(),
         };
@@ -1010,7 +1058,10 @@ BENCHMARK_HTML = """
 
         const response = await fetch("/compress", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${compressionApiKey}`,
+          },
           signal: controller.signal,
           body: JSON.stringify(payload),
         });
@@ -1130,13 +1181,13 @@ BENCHMARK_HTML = """
       return row;
     }
 
-    async function runTasks(tasks, concurrency) {
+    async function runTasks(tasks, concurrency, compressionApiKey) {
       let nextIndex = 0;
       async function worker() {
         while (!cancelled && nextIndex < tasks.length) {
           const task = tasks[nextIndex];
           nextIndex += 1;
-          const row = await runOne(task);
+          const row = await runOne(task, compressionApiKey);
           rows.push(row);
           if (task.measured) {
             completedRuns += 1;
@@ -1145,7 +1196,7 @@ BENCHMARK_HTML = """
           renderSummary();
           updateTopStats();
           log(`${row.status.toUpperCase()} ${row.case_id} repeat=${row.repeat}`);
-          if (row.status === "ok") {
+          if (row.status === "ok" && row.diagnostics_present === true) {
             log(`DIAGNOSTICS ${row.case_id} repeat=${row.repeat}\\n${row.diagnostic_log}`);
           }
         }
@@ -1229,6 +1280,7 @@ BENCHMARK_HTML = """
         .map(([key, groupRows]) => {
           const [targetTokens, jsonRatio, htmlRatio, protectedRatio] = key.split("|");
           const okRows = groupRows.filter((row) => row.status === "ok");
+          const telemetryRows = okRows.filter((row) => row.diagnostics_present === true);
           const modelRows = okRows.filter((row) => row.llmlingua_called === true);
           const modelRequestCount = modelRows.length;
           const modelCallCount = sum(numericValues(okRows, "llmlingua_call_count"));
@@ -1260,6 +1312,7 @@ BENCHMARK_HTML = """
             count: groupRows.length,
             success_count: okRows.length,
             error_count: groupRows.length - okRows.length,
+            telemetry_count: telemetryRows.length,
             model_request_count: modelRequestCount,
             model_call_count: modelCallCount,
             model_gate_skip_count: modelGateSkipCount,
@@ -1289,9 +1342,15 @@ BENCHMARK_HTML = """
         appendCell(row, formatMs(item.server_elapsed_ms_p50));
         appendCell(row, formatMs(item.timing_preprocessing_ms_p50));
         appendCell(row, formatMs(item.timing_segment_selection_ms_p50));
-        appendCell(row, `${item.model_request_count}/${item.success_count}`);
-        appendCell(row, item.model_call_count);
-        appendCell(row, `${item.model_gate_skip_count}/${item.success_count}`);
+        appendCell(
+          row,
+          item.telemetry_count ? `${item.model_request_count}/${item.telemetry_count}` : "-",
+        );
+        appendCell(row, item.telemetry_count ? item.model_call_count : "-");
+        appendCell(
+          row,
+          item.telemetry_count ? `${item.model_gate_skip_count}/${item.telemetry_count}` : "-",
+        );
         appendCell(
           row,
           item.model_gate_reason_top === "-"
@@ -1338,14 +1397,19 @@ BENCHMARK_HTML = """
     function updateTopStats() {
       const measuredRows = rows.filter((row) => row.measured);
       const okRows = measuredRows.filter((row) => row.status === "ok");
+      const telemetryRows = okRows.filter((row) => row.diagnostics_present === true);
       const modelRows = okRows.filter((row) => row.llmlingua_called === true);
       const modelCallCount = sum(numericValues(okRows, "llmlingua_call_count"));
       const errorRows = measuredRows.filter((row) => row.status !== "ok");
       progressStat.textContent = plannedRuns ? `${completedRuns}/${plannedRuns}` : "-";
       clientP50Stat.textContent = formatMs(percentile(numericValues(okRows, "client_wall_ms"), 0.5));
       llmlinguaP50Stat.textContent = formatMs(percentile(numericValues(modelRows, "timing_llmlingua_ms"), 0.5));
-      modelRequestStat.textContent = okRows.length ? `${modelRows.length}/${okRows.length}` : "-";
-      modelChunkStat.textContent = `${modelCallCount} LLMLingua chunks`;
+      modelRequestStat.textContent = telemetryRows.length
+        ? `${modelRows.length}/${telemetryRows.length}`
+        : "-";
+      modelChunkStat.textContent = telemetryRows.length
+        ? `${modelCallCount} LLMLingua chunks`
+        : "telemetry off";
       errorStat.textContent = String(errorRows.length);
     }
 
@@ -1391,6 +1455,8 @@ BENCHMARK_HTML = """
     function setRunning(running) {
       runButton.disabled = running;
       stopButton.disabled = !running;
+      compressionApiKeyInput.disabled = running;
+      startDemoButton.disabled = running;
       sizesInput.disabled = running;
       jsonRatiosInput.disabled = running;
       htmlRatiosInput.disabled = running;
@@ -1399,6 +1465,7 @@ BENCHMARK_HTML = """
       concurrencyInput.disabled = running;
       compressionModeInput.disabled = running;
       experimentProfileInput.disabled = running;
+      diagnosticsModeInput.disabled = running;
       applyDeterministicInput.disabled = running;
       latencyBudgetInput.disabled = running;
       allowCpuModelAutoInput.disabled = running;
@@ -1406,7 +1473,6 @@ BENCHMARK_HTML = """
       modelChunkCharsInput.disabled = running;
       protectedProseRatioInput.disabled = running;
       includeSectionsInput.disabled = running;
-      evaluateDisabledTransformsInput.disabled = running;
     }
 
     function selectedModelCandidateFloor() {
@@ -1472,7 +1538,45 @@ BENCHMARK_HTML = """
       download("prompt-compression-benchmark-summary.csv", toCsv(summaryRows()), "text/csv");
     });
 
+    startDemoButton.addEventListener("click", async () => {
+      startDemoButton.disabled = true;
+      demoAccessStatus.textContent = "Starting a bounded demo session...";
+      try {
+        const response = await fetch("/demo/session", {
+          method: "POST",
+          headers: { "Accept": "application/json" },
+          cache: "no-store",
+        });
+        const data = await response.json();
+        if (!response.ok || typeof data.token !== "string") {
+          throw new Error(data.detail || "Demo access is unavailable");
+        }
+        compressionApiKeyInput.value = data.token;
+        sizesInput.value = "256";
+        jsonRatiosInput.value = "0";
+        htmlRatiosInput.value = "0";
+        repeatsInput.value = "1";
+        warmupInput.value = "0";
+        concurrencyInput.value = "1";
+        compressionModeInput.value = "model_auto";
+        const expiresAt = new Date(Number(data.expiresAt) * 1000);
+        demoAccessStatus.textContent =
+          `Demo active until ${expiresAt.toLocaleTimeString()} - controls set to one safe run.`;
+        setStatus("Demo session ready", "ok");
+      } catch (error) {
+        demoAccessStatus.textContent = error.message;
+        setStatus(error.message, "error");
+      } finally {
+        startDemoButton.disabled = false;
+      }
+    });
+
     runButton.addEventListener("click", async () => {
+      const compressionApiKey = compressionApiKeyInput.value.trim();
+      if (!COMPRESSION_CREDENTIAL_PATTERN.test(compressionApiKey)) {
+        setStatus("Enter a valid cmp- key or start a demo session", "error");
+        return;
+      }
       currentCohortId = `cohort-${Date.now().toString(36)}`;
       const sizes = parseNumberList(sizesInput.value, Number.parseInt);
       const jsonRatios = parseNumberList(jsonRatiosInput.value, Number.parseFloat);
@@ -1531,11 +1635,11 @@ BENCHMARK_HTML = """
         }));
         if (warmupTasks.length) {
           log(`Warmup requests: ${warmupTasks.length}`);
-          await runTasks(warmupTasks, 1);
+          await runTasks(warmupTasks, 1, compressionApiKey);
         }
 
         log(`Measured requests: ${measuredTasks.length}`);
-        await runTasks(measuredTasks, concurrency);
+        await runTasks(measuredTasks, concurrency, compressionApiKey);
         setStatus(cancelled ? "Cancelled" : "Complete", cancelled ? "error" : "ok");
       } catch (error) {
         setStatus(error.message, "error");

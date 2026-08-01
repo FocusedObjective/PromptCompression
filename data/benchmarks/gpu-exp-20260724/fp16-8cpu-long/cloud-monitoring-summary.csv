@@ -1,0 +1,8 @@
+metric,metric_type,samples,mean,p50,p95,max
+cpu_utilization_pct,run.googleapis.com/container/cpu/utilizations,6,8.10719319448756,11.21605260838739,11.498123729386165,11.549348528552395
+memory_utilization_pct,run.googleapis.com/container/memory/utilizations,6,3.0835231145222983,3.0846238136291504,3.1194478273391724,3.1194567680358887
+gpu_utilization_pct,run.googleapis.com/container/gpu/utilizations,2,12.5,12.5,16.549999999999997,17.0
+gpu_memory_utilization_pct,run.googleapis.com/container/gpu/memory_utilizations,6,2.874012329599722,2.874012329599722,2.874012329599722,2.874012329599722
+gpu_memory_usage_gib,run.googleapis.com/container/gpu/memory_usages,6,0.646484375,0.646484375,0.646484375,0.646484375
+max_request_concurrency,run.googleapis.com/container/max_request_concurrencies,5,1.0,1.0,1.0,1.0
+instance_count,run.googleapis.com/container/instance_count,12,0.5,0.5,1.0,1.0
