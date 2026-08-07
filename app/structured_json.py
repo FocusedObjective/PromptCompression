@@ -17,12 +17,15 @@ ATTRIBUTE_PATTERN = re.compile(
 )
 POLICY_ID_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 PATH_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+EMBEDDED_JSON_MARKER = "$embeddedJson"
+MAX_EMBEDDED_JSON_CHARS = 2_000_000
 
 
 @dataclass(frozen=True)
 class TaggedJsonTransformResult:
     text: str
     compressed_value_count: int = 0
+    embedded_json_count: int = 0
     warnings: tuple[str, ...] = ()
 
 
@@ -33,19 +36,22 @@ def transform_tagged_json(
     value_paths: tuple[str, ...],
     max_values: int,
     compress_value: Callable[[str, str], str | None],
+    accept_embedded_json: Callable[[str, str, object], bool] | None = None,
     allow_inline_paths: bool = False,
 ) -> TaggedJsonTransformResult:
-    """Compress selected string leaves while preserving JSON structure.
+    """Authorize deterministic JSON transforms and selected value compression.
 
-    Tenant paths authorize policy-based tags. Inline ``paths`` are accepted
-    only when the caller explicitly enables them. If a tag supplies both, its
-    requested paths are intersected with the tenant-authorized paths.
+    A bare tag grants structural rewrite authority without granting model
+    access to any value. Tenant paths authorize policy-based model compression;
+    inline ``paths`` require an explicit caller opt-in. ``embedded-paths``
+    authorizes deterministic decoding of complete JSON strings.
     """
     if "<compress-json" not in text.lower():
         return TaggedJsonTransformResult(text=text)
 
     configured_patterns, warnings = _parse_paths(value_paths)
     compressed_value_count = 0
+    embedded_json_count = 0
     output_parts: list[str] = []
     cursor = 0
     while True:
@@ -99,7 +105,9 @@ def transform_tagged_json(
             cursor = closing.end()
             continue
 
-        if attrs is None or any(name not in {"policy", "paths"} for name in attrs):
+        if attrs is None or any(
+            name not in {"policy", "paths", "embedded-paths"} for name in attrs
+        ):
             warnings.append("json_tag_attributes_invalid")
             output_parts.append(_protect_json(body))
             cursor = closing.end()
@@ -118,6 +126,12 @@ def transform_tagged_json(
             inline_patterns, inline_warnings = _parse_paths(inline_paths)
             warnings.extend(inline_warnings)
 
+        embedded_paths = _split_inline_paths(attrs.get("embedded-paths"))
+        embedded_patterns: list[tuple[str | int, ...]] = []
+        if embedded_paths is not None:
+            embedded_patterns, embedded_warnings = _parse_paths(embedded_paths)
+            warnings.extend(embedded_warnings)
+
         patterns = _authorized_patterns(
             tag_policy=tag_policy,
             configured_policy=policy_id,
@@ -131,9 +145,31 @@ def transform_tagged_json(
             cursor = closing.end()
             continue
 
+        conflicts = [pattern for pattern in embedded_patterns if pattern in patterns]
+        if conflicts:
+            for pattern in conflicts:
+                warnings.append(
+                    f"json_tag_path_mode_conflict:{_format_pattern(pattern)}"
+                )
+            patterns = [pattern for pattern in patterns if pattern not in conflicts]
+            embedded_patterns = [
+                pattern for pattern in embedded_patterns if pattern not in conflicts
+            ]
+
+        remaining_embedded = max(0, max_values - embedded_json_count)
+        updated, embedded_count, embedded_warnings = _transform_embedded_json_tree(
+            parsed,
+            path=(),
+            patterns=embedded_patterns,
+            remaining=remaining_embedded,
+            accept_embedded_json=accept_embedded_json,
+        )
+        embedded_json_count += embedded_count
+        warnings.extend(embedded_warnings)
+
         remaining = max(0, max_values - compressed_value_count)
         updated, count = _transform_value_tree(
-            parsed,
+            updated,
             path=(),
             patterns=patterns,
             remaining=remaining,
@@ -147,6 +183,7 @@ def transform_tagged_json(
     return TaggedJsonTransformResult(
         text="".join(output_parts),
         compressed_value_count=compressed_value_count,
+        embedded_json_count=embedded_json_count,
         warnings=tuple(dict.fromkeys(warnings)),
     )
 
@@ -240,12 +277,115 @@ def _authorized_patterns(
         return [path for path in inline_patterns if path in configured_patterns]
 
     if inline_patterns is None:
-        warnings.append("json_tag_authorization_missing")
-        return None
+        # The tag itself authorizes deterministic structural transforms. Only
+        # explicit or tenant-policy paths authorize model compression of
+        # string values.
+        return []
     if not allow_inline_paths:
         warnings.append("json_tag_inline_paths_not_authorized")
-        return None
+        return []
     return inline_patterns
+
+
+def _transform_embedded_json_tree(
+    value: Any,
+    *,
+    path: tuple[str | int, ...],
+    patterns: list[tuple[str | int, ...]],
+    remaining: int,
+    accept_embedded_json: Callable[[str, str, object], bool] | None,
+) -> tuple[Any, int, list[str]]:
+    if remaining <= 0 or not patterns:
+        return value, 0, []
+
+    if isinstance(value, str):
+        if not any(_path_matches(pattern, path) for pattern in patterns):
+            return value, 0, []
+        parsed, warning = _decode_embedded_json(value)
+        if parsed is None:
+            detail = warning or "invalid"
+            return value, 0, [
+                f"json_embedded_value_{detail}:{_format_path(path)}"
+            ]
+        replacement = {EMBEDDED_JSON_MARKER: parsed}
+        formatted_path = _format_path(path)
+        accepted = (
+            accept_embedded_json(formatted_path, value, replacement)
+            if accept_embedded_json is not None
+            else len(
+                json.dumps(replacement, ensure_ascii=False, separators=(",", ":"))
+            )
+            < len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+        )
+        if not accepted:
+            return value, 0, [f"json_embedded_value_no_savings:{formatted_path}"]
+        return replacement, 1, []
+
+    count = 0
+    warnings: list[str] = []
+    if isinstance(value, list):
+        updated_list: list[Any] = []
+        for index, item in enumerate(value):
+            updated, item_count, item_warnings = _transform_embedded_json_tree(
+                item,
+                path=(*path, index),
+                patterns=patterns,
+                remaining=remaining - count,
+                accept_embedded_json=accept_embedded_json,
+            )
+            updated_list.append(updated)
+            count += item_count
+            warnings.extend(item_warnings)
+        return updated_list, count, warnings
+
+    if isinstance(value, dict):
+        updated_dict: dict[str, Any] = {}
+        for key, item in value.items():
+            updated, item_count, item_warnings = _transform_embedded_json_tree(
+                item,
+                path=(*path, key),
+                patterns=patterns,
+                remaining=remaining - count,
+                accept_embedded_json=accept_embedded_json,
+            )
+            updated_dict[key] = updated
+            count += item_count
+            warnings.extend(item_warnings)
+        return updated_dict, count, warnings
+
+    return value, 0, []
+
+
+def _decode_embedded_json(value: str) -> tuple[Any | None, str | None]:
+    candidate = value.strip()
+    if len(candidate) > MAX_EMBEDDED_JSON_CHARS:
+        return None, "too_large"
+    if not candidate or not (
+        (candidate.startswith("{") and candidate.endswith("}"))
+        or (candidate.startswith("[") and candidate.endswith("]"))
+    ):
+        return None, "not_json"
+
+    duplicate_keys = False
+
+    def collect_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        nonlocal duplicate_keys
+        result: dict[str, Any] = {}
+        for key, child in pairs:
+            if key in result:
+                duplicate_keys = True
+            result[key] = child
+        return result
+
+    try:
+        parsed = json.loads(candidate, object_pairs_hook=collect_pairs)
+    except (json.JSONDecodeError, RecursionError):
+        return None, "invalid"
+    if duplicate_keys:
+        return None, "duplicate_keys"
+    if not isinstance(parsed, (dict, list)):
+        return None, "root_not_structured"
+    return parsed, None
 
 
 def _transform_value_tree(
@@ -315,6 +455,18 @@ def _format_path(path: tuple[str | int, ...]) -> str:
     result = "$"
     for token in path:
         result += f"[{token}]" if isinstance(token, int) else f".{token}"
+    return result
+
+
+def _format_pattern(path: tuple[str | int, ...]) -> str:
+    result = "$"
+    for token in path:
+        if token == "*":
+            result += "[*]"
+        elif isinstance(token, int):
+            result += f"[{token}]"
+        else:
+            result += f".{token}"
     return result
 
 

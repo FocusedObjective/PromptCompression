@@ -209,7 +209,10 @@ Output:
         demoExpiresAt = Number(data.expiresAt) * 1000;
         startDemoButton.textContent = "Demo active";
         const expiresAt = new Date(demoExpiresAt);
-        setStatus(`Demo ready: ${data.maxOperations} compressions until ${expiresAt.toLocaleTimeString()}`);
+        setStatus(
+          `Demo ready: ${data.maxOperations} compressions until ${expiresAt.toLocaleTimeString()}; ` +
+          `${data.dailyOperationsRemaining} remain today for this network.`
+        );
         if (demoExpiryTimer !== null) clearTimeout(demoExpiryTimer);
         demoExpiryTimer = setTimeout(() => {
           demoAuthorization = "";

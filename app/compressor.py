@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from collections import Counter
@@ -2699,12 +2700,28 @@ class PromptCompressionService:
                 return None
             return result.compressed_text
 
+        def accept_embedded_json(
+            _path: str,
+            original: str,
+            replacement: object,
+        ) -> bool:
+            source = json.dumps(original, ensure_ascii=False, separators=(",", ":"))
+            candidate = json.dumps(
+                replacement,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            source_estimate = self.estimate_compression_tokens(source, profile)
+            candidate_estimate = self.estimate_compression_tokens(candidate, profile)
+            return candidate_estimate.count < source_estimate.count
+
         return transform_tagged_json(
             text,
             policy_id=profile.json_compression_policy_id,
             value_paths=profile.json_value_compression_paths,
             max_values=profile.json_value_max_values,
             compress_value=compress_value,
+            accept_embedded_json=accept_embedded_json,
             allow_inline_paths=allow_inline_paths,
         )
 

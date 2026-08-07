@@ -466,6 +466,75 @@ def test_policy_tag_with_paths_uses_tenant_authorized_intersection():
     )
 
 
+def test_bare_tag_authorizes_toon_without_model_paths():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "Return exactly one JSON response matching the schema below.\n"
+        "<compress-json>"
+        '{"users":['
+        '{"id":1,"name":"Alice","role":"admin"},'
+        '{"id":2,"name":"Bob","role":"user"},'
+        '{"id":3,"name":"Cora","role":"user"}'
+        "]}"
+        "</compress-json>"
+    )
+
+    result = service.compress(text, aggressiveness=0.25, mode="deterministic")
+
+    assert "users[3]{id,name,role}" in result.compressed_text
+    assert "<compress-json" not in result.compressed_text
+    assert compressor.inputs == []
+    assert "json_tag_authorization_missing" not in result.warnings
+
+
+def test_embedded_paths_are_deterministic_and_paths_alone_reach_model():
+    def unavailable_toon_encoder(_value: Any) -> str:
+        raise ToonEncodingError("not suitable for TOON")
+
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.preprocessor = PromptPreprocessor(
+        toon_encoder=unavailable_toon_encoder,
+        min_json_chars=1,
+        min_json_lines=1,
+        min_toon_savings=0.0,
+    )
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    profile = build_tenant_profile(
+        json_value_min_tokens=1,
+        json_value_max_reduction=0.9,
+    )
+    text = (
+        '<compress-json embedded-paths="$.rawEntry" paths="$.summary">'
+        '{"summary":"Please review this detailed candidate narrative.",'
+        '"rawEntry":"{\\"full_name\\":\\"Ada Lovelace\\",'
+        '\\"skills\\":[\\"mathematics\\",\\"programming\\"]}"}'
+        "</compress-json>"
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        tenant_profile=profile,
+        mode="model_force",
+        allow_inline_json_compression_paths=True,
+    )
+
+    parsed = json.loads(result.compressed_text)
+    assert parsed["summary"] == "Review this detailed candidate narrative."
+    assert parsed["rawEntry"] == {
+        "$embeddedJson": {
+            "full_name": "Ada Lovelace",
+            "skills": ["mathematics", "programming"],
+        }
+    }
+    assert compressor.inputs == ["Please review this detailed candidate narrative."]
+    assert all("Ada Lovelace" not in value for value in compressor.inputs)
+
+
 def test_llm_tool_call_json_is_not_toonified():
     compressor = RecordingCompressor()
     service = build_service_with_pipeline(compressor)

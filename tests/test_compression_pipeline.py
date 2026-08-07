@@ -113,6 +113,26 @@ def test_full_html_document_converts_to_protected_markdown():
     assert result.diagnostics.html_markdown_tokens_saved > 0
 
 
+def test_body_root_fragment_converts_to_protected_markdown():
+    compressor, service = build_service_with_html_markdown()
+    html = """<body class="copied-page">
+  <main>
+    <h1>Incident Page</h1>
+    <p>Customer ID acct_2048 has deadline 2026-08-15.</p>
+  </main>
+  <script>window.tracking = "must not be returned";</script>
+</body>"""
+
+    result = service.compress(html, aggressiveness=0.25)
+
+    assert compressor.inputs == []
+    assert result.output_sections[0].kind == "html_markdown"
+    assert result.output_sections[0].protected is True
+    assert "# Incident Page" in result.compressed_text
+    assert "Customer ID acct_2048" in result.compressed_text
+    assert "window.tracking" not in result.compressed_text
+
+
 def test_exact_html_context_preserves_document_verbatim():
     compressor, service = build_service_with_html_markdown()
     html = """Preserve this HTML markup exactly for a selector audit:

@@ -1561,7 +1561,8 @@ BENCHMARK_HTML = """
         compressionModeInput.value = "model_auto";
         const expiresAt = new Date(Number(data.expiresAt) * 1000);
         demoAccessStatus.textContent =
-          `Demo active until ${expiresAt.toLocaleTimeString()} - controls set to one safe run.`;
+          `Demo active until ${expiresAt.toLocaleTimeString()} - controls set to one safe run; ` +
+          `${data.dailyOperationsRemaining} operations remain today for this network.`;
         setStatus("Demo session ready", "ok");
       } catch (error) {
         demoAccessStatus.textContent = error.message;

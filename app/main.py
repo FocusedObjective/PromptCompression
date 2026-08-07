@@ -67,6 +67,7 @@ from app.demo_access import (
     DemoAccessError,
     DemoAuthorization,
     DemoSessionManager,
+    demo_client_identifier,
 )
 from app.usagetap_metering import (
     UsageTapMeteringClient,
@@ -1300,7 +1301,8 @@ Output:
         const expiresAt = new Date(Number(data.expiresAt) * 1000);
         demoAccessStatus.textContent =
           `Demo active until ${expiresAt.toLocaleTimeString()} - ` +
-          `${data.maxOperations} operations, ${data.maxInputCharsPerOperation.toLocaleString()} chars each.`;
+          `${data.maxOperations} operations, ${data.maxInputCharsPerOperation.toLocaleString()} chars each; ` +
+          `${data.dailyOperationsRemaining} operations remain today for this network.`;
         setStatus("Demo session ready");
       } catch (error) {
         demoAccessStatus.textContent = error.message;
@@ -1471,6 +1473,7 @@ def start_usage_tap_compression_authorization(
             raise HTTPException(
                 status_code=exc.status_code,
                 detail=exc.public_message,
+                headers=_demo_error_headers(exc),
             ) from None
         return PendingUsageTapAuthorization(
             demo_authorization=demo_authorization,
@@ -1526,6 +1529,7 @@ def reserve_demo_compression_operation(
         raise HTTPException(
             status_code=exc.status_code,
             detail=exc.public_message,
+            headers=_demo_error_headers(exc),
         ) from None
     request.state.demo_authorization = demo_authorization
 
@@ -1538,6 +1542,12 @@ def _authorize_and_cache_failure(
     except UsageTapAuthorizationError as exc:
         usage_tap_authorization_failure_cache.record(authorization_header, exc)
         raise
+
+
+def _demo_error_headers(exc: DemoAccessError) -> dict[str, str] | None:
+    if exc.retry_after_seconds is None:
+        return None
+    return {"Retry-After": str(exc.retry_after_seconds)}
 
 
 def complete_usage_tap_compression_authorization(
@@ -1613,13 +1623,20 @@ def index() -> HTMLResponse:
 
 
 @app.post("/demo/session", response_class=JSONResponse)
-def create_demo_session() -> JSONResponse:
+def create_demo_session(request: Request) -> JSONResponse:
+    direct_host = request.client.host if request.client is not None else None
+    client_identifier = demo_client_identifier(
+        request.headers.get("x-forwarded-for"),
+        direct_host,
+        trust_forwarded_for=bool(os.getenv("K_SERVICE")),
+    )
     try:
-        session = demo_session_manager.issue_session()
+        session = demo_session_manager.issue_session(client_identifier)
     except DemoAccessError as exc:
         raise HTTPException(
             status_code=exc.status_code,
             detail=exc.public_message,
+            headers=_demo_error_headers(exc),
         ) from None
     return JSONResponse(
         content={
@@ -1628,6 +1645,9 @@ def create_demo_session() -> JSONResponse:
             "maxOperations": session.max_operations,
             "maxInputChars": session.max_input_chars,
             "maxInputCharsPerOperation": session.max_input_chars_per_operation,
+            "dailySessionsRemaining": session.daily_sessions_remaining,
+            "dailyOperationsRemaining": session.daily_operations_remaining,
+            "dailyInputCharsRemaining": session.daily_input_chars_remaining,
         },
         headers={
             "Cache-Control": "no-store, max-age=0",

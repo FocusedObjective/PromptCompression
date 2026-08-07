@@ -271,12 +271,10 @@ def test_demo_session_authorizes_compression_without_customer_metering(
     manager = DemoSessionManager(
         enabled=True,
         signing_key="demo-signing-key-with-at-least-thirty-two-bytes",
-        mode_expires_at=2_000,
         session_ttl_seconds=600,
         max_operations=2,
         max_input_chars=100,
         max_input_chars_per_operation=80,
-        max_active_sessions=2,
         clock=lambda: 1_000,
     )
     service = FakeCompressionService()
@@ -291,6 +289,8 @@ def test_demo_session_authorizes_compression_without_customer_metering(
     session_payload = session_response.json()
     assert session_payload["maxOperations"] == 2
     assert session_payload["maxInputCharsPerOperation"] == 80
+    assert session_payload["dailySessionsRemaining"] == 4
+    assert session_payload["dailyOperationsRemaining"] == 25
     token = session_payload["token"]
 
     compression_response = client.post(
@@ -304,11 +304,36 @@ def test_demo_session_authorizes_compression_without_customer_metering(
     assert use_fake_usagetap_authorization.calls == []
 
 
+def test_demo_session_endpoint_rate_limits_trusted_cloud_run_client(
+    monkeypatch,
+):
+    manager = DemoSessionManager(
+        enabled=True,
+        signing_key="demo-signing-key-with-at-least-thirty-two-bytes",
+        rate_limit_sessions=1,
+        rate_limit_window_seconds=60,
+        clock=lambda: 1_000,
+    )
+    monkeypatch.setattr(main, "demo_session_manager", manager)
+    monkeypatch.setenv("K_SERVICE", "prompt-compression")
+    client = TestClient(main.app)
+    first_headers = {"X-Forwarded-For": "198.51.100.8, 192.0.2.10"}
+
+    assert client.post("/demo/session", headers=first_headers).status_code == 200
+    limited = client.post("/demo/session", headers=first_headers)
+
+    assert limited.status_code == 429
+    assert limited.headers["retry-after"] == "20"
+    assert client.post(
+        "/demo/session",
+        headers={"X-Forwarded-For": "198.51.100.9, 192.0.2.10"},
+    ).status_code == 200
+
+
 def test_demo_input_limit_is_enforced_before_compression(monkeypatch):
     manager = DemoSessionManager(
         enabled=True,
         signing_key="demo-signing-key-with-at-least-thirty-two-bytes",
-        mode_expires_at=2_000,
         max_input_chars=10,
         max_input_chars_per_operation=5,
         clock=lambda: 1_000,

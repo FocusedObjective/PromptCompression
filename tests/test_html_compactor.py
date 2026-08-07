@@ -1,6 +1,8 @@
 from app.html_compactor import (
+    compact_html_to_markdown,
     fallback_html_to_markdown,
     html_to_markdown_is_equivalent,
+    looks_like_html_document,
 )
 
 
@@ -39,6 +41,38 @@ def test_fallback_html_to_markdown_keeps_structure_and_drops_page_noise():
     assert "> Preserve hard constraints." in markdown
     assert ".ad" not in markdown
     assert "tracking.js" not in markdown
+
+
+def test_compact_html_keeps_visible_profile_text_outside_main_content():
+    html = """<!doctype html>
+<html>
+<head><title>Tony Grout | Profile</title></head>
+<body>
+  <div class="profile-header">
+    Enterprise technology leader with experience at Skype, Microsoft and IBM
+  </div>
+  <main>
+    <h1>Experience</h1>
+    <h2>Head of Product Transformation - Skype for Business</h2>
+    <p>Built what is now Microsoft Teams.</p>
+  </main>
+  <script>window.profile = "must not be returned";</script>
+</body>
+</html>"""
+
+    markdown = compact_html_to_markdown(html)
+
+    assert markdown is not None
+    assert "Skype, Microsoft and IBM" in markdown
+    assert "Built what is now Microsoft Teams." in markdown
+    assert "must not be returned" not in markdown
+
+
+def test_body_root_fragment_is_recognized_as_html_document():
+    html = '<body class="copied-page"><h1>Incident</h1><p>Queue is delayed.</p></body>'
+
+    assert looks_like_html_document(html) is True
+    assert looks_like_html_document("<div>ordinary HTML snippet</div>") is False
 
 
 def test_html_preservation_signature_accepts_main_text_and_links_in_order():

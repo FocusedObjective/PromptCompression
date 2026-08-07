@@ -169,31 +169,51 @@ Application startup rejects the metering configuration unless the trimmed
 secret is `ck-` or `cmp-` followed by exactly 43 Base64URL characters; rejected
 values are never included in errors or logs.
 
-For controlled UI demonstrations, demo mode can issue signed `demo-v1`
-sessions from `POST /demo/session`. Enable it only with a fixed
-`USAGETAP_DEMO_MODE_EXPIRES_AT`, mount a separate 32-byte-or-longer
-`USAGETAP_DEMO_SIGNING_KEY` from Secret Manager, retain `--max-instances 1`,
-and keep the operation/input/session caps from `.env.example` small. Demo
-identity is deliberately separate from UsageTap customers: it cannot set a
-`customerId` and is not sent to `/custom_meter`. The UI keeps the returned
-credential only in page memory. Disable the flag after the demonstration.
+For the public UI demo, `POST /demo/session` issues signed `demo-v1` sessions.
+Each session lasts 10 minutes and has its own operation/input allowances.
+Firestore persists session state, per-network issuance rate limits, and UTC-day
+per-network/global quotas across restarts and scale-to-zero. Only an HMAC digest
+of the trusted Cloud Run client address is stored. Demo identity is deliberately
+separate from UsageTap customers: it cannot set a `customerId` and is not sent
+to `/custom_meter`. The UI keeps the returned credential only in page memory.
 
-Enable a bounded window on the existing service with an RFC 3339 UTC cutoff:
+Enable Firestore once in the same region as the service, create the default
+Native-mode database if it does not already exist, and grant the runtime service
+account data access:
+
+```powershell
+gcloud services enable firestore.googleapis.com --project $env:PROJECT_ID
+gcloud firestore databases create `
+  --project $env:PROJECT_ID `
+  --database="(default)" `
+  --location=$env:REGION `
+  --type=firestore-native
+gcloud projects add-iam-policy-binding $env:PROJECT_ID `
+  --member "serviceAccount:$env:RUNTIME_SERVICE_ACCOUNT" `
+  --role "roles/datastore.user"
+gcloud firestore fields ttls update expireAt `
+  --project $env:PROJECT_ID `
+  --database="(default)" `
+  --collection-group=prompt_compression_demo_v1 `
+  --enable-ttl
+```
+
+Enable the public demo with persistent rate limits and daily quotas:
 
 ```powershell
 $env:DEMO_SIGNING_SECRET="PromptCompression_Demo_Signing_Key"
 $env:DEMO_SIGNING_SECRET_VERSION="1"
-$env:DEMO_MODE_EXPIRES_AT="2026-08-02T02:00:00Z"
 
 gcloud run services update $env:SERVICE `
   --region $env:REGION `
   --max-instances 1 `
   --concurrency 1 `
   --update-secrets "USAGETAP_DEMO_SIGNING_KEY=$($env:DEMO_SIGNING_SECRET):$($env:DEMO_SIGNING_SECRET_VERSION)" `
-  --update-env-vars "USAGETAP_DEMO_MODE_ENABLED=true,USAGETAP_DEMO_MODE_EXPIRES_AT=$env:DEMO_MODE_EXPIRES_AT,USAGETAP_DEMO_SESSION_TTL_SECONDS=600,USAGETAP_DEMO_MAX_OPERATIONS_PER_SESSION=5,USAGETAP_DEMO_MAX_INPUT_CHARS_PER_SESSION=50000,USAGETAP_DEMO_MAX_INPUT_CHARS_PER_OPERATION=20000,USAGETAP_DEMO_MAX_ACTIVE_SESSIONS=10"
+  --remove-env-vars "USAGETAP_DEMO_MODE_EXPIRES_AT,USAGETAP_DEMO_MAX_ACTIVE_SESSIONS" `
+  --update-env-vars "USAGETAP_DEMO_MODE_ENABLED=true,USAGETAP_DEMO_SESSION_TTL_SECONDS=600,USAGETAP_DEMO_MAX_OPERATIONS_PER_SESSION=5,USAGETAP_DEMO_MAX_INPUT_CHARS_PER_SESSION=50000,USAGETAP_DEMO_MAX_INPUT_CHARS_PER_OPERATION=20000,USAGETAP_DEMO_RATE_LIMIT_SESSIONS=2,USAGETAP_DEMO_RATE_LIMIT_WINDOW_SECONDS=3600,USAGETAP_DEMO_MAX_SESSIONS_PER_CLIENT_PER_DAY=5,USAGETAP_DEMO_MAX_OPERATIONS_PER_CLIENT_PER_DAY=25,USAGETAP_DEMO_MAX_INPUT_CHARS_PER_CLIENT_PER_DAY=100000,USAGETAP_DEMO_MAX_SESSIONS_PER_DAY=100,USAGETAP_DEMO_MAX_OPERATIONS_PER_DAY=250,USAGETAP_DEMO_MAX_INPUT_CHARS_PER_DAY=2000000,USAGETAP_DEMO_STORAGE_BACKEND=firestore,USAGETAP_DEMO_FIRESTORE_PROJECT=$env:PROJECT_ID,USAGETAP_DEMO_FIRESTORE_DATABASE=(default),USAGETAP_DEMO_FIRESTORE_COLLECTION=prompt_compression_demo_v1"
 ```
 
-Turn issuance and validation off immediately when the demo is over:
+Turn issuance and validation off immediately if the demo must be suspended:
 
 ```powershell
 gcloud run services update $env:SERVICE `

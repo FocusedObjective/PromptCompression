@@ -4,7 +4,10 @@ from html.parser import HTMLParser
 
 
 HTML_DOCUMENT_PATTERN = re.compile(
-    r"(?is)^\s*(?:<!doctype\s+html\b[^>]*>\s*)?<html\b[^>]*>.*</html>\s*$"
+    r"(?is)^\s*(?:"
+    r"(?:<!doctype\s+html\b[^>]*>\s*)?<html\b[^>]*>.*</html>"
+    r"|<body\b[^>]*>.*</body>"
+    r")\s*$"
 )
 HTML_EXACTNESS_CONTEXT_PATTERN = re.compile(
     r"(?i)\b(audit|debug|exact|review|source|verbatim)\b"
@@ -23,11 +26,17 @@ def looks_like_html_document(text: str) -> bool:
 
 
 def compact_html_to_markdown(html: str) -> str | None:
-    extracted = _trafilatura_markdown(html)
-    if extracted is None:
-        extracted = fallback_html_to_markdown(html)
-
-    normalized = _normalize_markdown(extracted)
+    # This is a deterministic structural transform, so it must not perform
+    # semantic "main content" extraction.  Trafilatura can legitimately omit
+    # visible text that it considers page chrome.  On application pages that
+    # text can be important input (for example, a profile headline outside the
+    # experience section), and the omission is indistinguishable from
+    # truncation to an API caller.
+    #
+    # The fallback parser only removes non-content markup such as scripts,
+    # styles, templates, SVG, and tags.  It retains visible text in document
+    # order, which is the preservation guarantee this transform needs.
+    normalized = _normalize_markdown(fallback_html_to_markdown(html))
     return normalized or None
 
 

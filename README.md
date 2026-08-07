@@ -173,10 +173,26 @@ Tenant fields are optional. They are request scoped and are not loaded from a
 local database. If `aggressiveness` is omitted, `tenant_profile.default_aggressiveness`
 is used when provided.
 
-Tagged JSON can selectively compress long narrative string values while
-keeping the surrounding structure protected. Production callers authorize
-paths through `tenant_profile`; the `/compress` profiler can instead opt into a
-simple inline form:
+Tagged JSON authorizes deterministic structural transforms such as TOON while
+keeping the block protected from LLMLingua. A bare tag requires no path:
+
+```xml
+<compress-json>
+{"id":"ISSUE-73","description":"Long narrative..."}
+</compress-json>
+```
+
+Use `embedded-paths` to deterministically decode JSON-encoded string values:
+
+```xml
+<compress-json embedded-paths="$.items[*].rawEntry">
+{"items":[{"rawEntry":"{\"name\":\"Ada\"}"}]}
+</compress-json>
+```
+
+Only `paths` authorizes LLMLingua for selected long narrative strings.
+Production callers authorize those paths through `tenant_profile`; the
+`/compress` profiler can instead opt into a simple inline form:
 
 ```xml
 <compress-json paths="$.description,$.comments[*].body">
@@ -689,16 +705,21 @@ Compression authorization configuration:
   Manager reference for positive-savings operations. Startup accepts only
   `ck-` or `cmp-` followed by exactly 43 Base64URL characters.
 
-The main and benchmark UIs also support an explicitly enabled demo mode. A
-`POST /demo/session` call returns a signed, in-memory `demo-v1` credential with
-a short TTL and bounded operation/input allowances. Configure
-`USAGETAP_DEMO_MODE_ENABLED`, `USAGETAP_DEMO_MODE_EXPIRES_AT`, and the
-`USAGETAP_DEMO_*` allowance settings shown in `.env.example`; inject
-`USAGETAP_DEMO_SIGNING_KEY` from Secret Manager. Demo requests never receive a
-customer identity and skip customer metering. Run exactly one Cloud Run
-instance while demo mode is enabled, because active sessions and counters are
-intentionally process-local. Turning the mode off or passing its fixed expiry
-immediately prevents new sessions and use of existing sessions.
+The main and benchmark UIs also support an explicitly enabled public demo mode.
+A `POST /demo/session` call returns a signed `demo-v1` credential with a
+10-minute TTL and bounded per-session operation/input allowances. New sessions
+are rate limited by an HMAC-derived network identifier, and UTC-day quotas cap
+sessions, operations, and input characters both per network and globally. Raw
+client addresses are never stored. Configure `USAGETAP_DEMO_MODE_ENABLED` and
+the `USAGETAP_DEMO_*` quota settings shown in `.env.example`; inject
+`USAGETAP_DEMO_SIGNING_KEY` from Secret Manager.
+
+Production uses `USAGETAP_DEMO_STORAGE_BACKEND=firestore`, so sessions and
+quota counters survive revision changes, restarts, and scale-to-zero. Local
+development defaults to the process-local `memory` backend. Demo requests never
+receive a customer identity and skip customer metering. Setting
+`USAGETAP_DEMO_MODE_ENABLED=false` immediately prevents new sessions and use of
+existing sessions.
 
 These settings are not credentials. Authorization forwards each request's
 incoming `Bearer cmp-...` value directly to UsageTap. The platform-owned

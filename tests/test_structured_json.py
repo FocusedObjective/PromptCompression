@@ -1,7 +1,11 @@
 import base64
 import json
 
-from app.structured_json import parse_value_path, transform_tagged_json
+from app.structured_json import (
+    EMBEDDED_JSON_MARKER,
+    parse_value_path,
+    transform_tagged_json,
+)
 
 
 def _transform(source: str, **overrides: object):
@@ -10,6 +14,7 @@ def _transform(source: str, **overrides: object):
         "value_paths": (),
         "max_values": 8,
         "compress_value": lambda path, value: f"compressed:{path}:{value}",
+        "accept_embedded_json": lambda _path, _original, _replacement: True,
         "allow_inline_paths": False,
     }
     options.update(overrides)
@@ -34,6 +39,107 @@ def test_parse_value_path_supports_keys_and_array_wildcards():
     )
     assert parse_value_path("comments.body") is None
     assert parse_value_path("$.comments[0].body") is None
+
+
+def test_bare_tag_authorizes_deterministic_structural_transforms():
+    result = _transform(
+        '<compress-json>{\n  "id": "ISSUE-73",\n  "open": true\n}</compress-json>'
+    )
+
+    assert _unwrapped_json(result.text) == {"id": "ISSUE-73", "open": True}
+    assert result.compressed_value_count == 0
+    assert result.embedded_json_count == 0
+    assert result.warnings == ()
+
+
+def test_embedded_paths_decode_json_strings_without_model_compression():
+    compressed_paths: list[str] = []
+    source = (
+        '<compress-json embedded-paths="$.items[*].rawEntry">'
+        '{"items":['
+        '{"rawEntry":"{\\"name\\":\\"Ada\\",\\"skills\\":[\\"python\\"]}"},'
+        '{"rawEntry":"[1,2,3]"}'
+        "]}"
+        "</compress-json>"
+    )
+
+    result = _transform(
+        source,
+        compress_value=lambda path, value: compressed_paths.append(path) or value,
+    )
+
+    assert _unwrapped_json(result.text) == {
+        "items": [
+            {
+                "rawEntry": {
+                    EMBEDDED_JSON_MARKER: {"name": "Ada", "skills": ["python"]}
+                }
+            },
+            {"rawEntry": {EMBEDDED_JSON_MARKER: [1, 2, 3]}},
+        ]
+    }
+    assert result.embedded_json_count == 2
+    assert result.compressed_value_count == 0
+    assert compressed_paths == []
+    assert result.warnings == ()
+
+
+def test_invalid_embedded_value_is_unchanged_with_warning():
+    result = _transform(
+        '<compress-json embedded-paths="$.rawEntry">'
+        '{"rawEntry":"{not valid}"}'
+        "</compress-json>"
+    )
+
+    assert _unwrapped_json(result.text) == {"rawEntry": "{not valid}"}
+    assert result.embedded_json_count == 0
+    assert result.warnings == ("json_embedded_value_invalid:$.rawEntry",)
+
+
+def test_embedded_value_requires_positive_savings():
+    result = _transform(
+        '<compress-json embedded-paths="$.rawEntry">'
+        '{"rawEntry":"{\\"id\\":1}"}'
+        "</compress-json>",
+        accept_embedded_json=None,
+    )
+
+    assert _unwrapped_json(result.text) == {"rawEntry": '{"id":1}'}
+    assert result.embedded_json_count == 0
+    assert result.warnings == ("json_embedded_value_no_savings:$.rawEntry",)
+
+
+def test_unauthorized_model_paths_do_not_block_embedded_transforms():
+    result = _transform(
+        '<compress-json paths="$.summary" embedded-paths="$.rawEntry">'
+        '{"summary":"Narrative",'
+        '"rawEntry":"{\\"name\\":\\"Ada\\",\\"role\\":\\"engineer\\"}"}'
+        "</compress-json>"
+    )
+
+    assert _unwrapped_json(result.text) == {
+        "summary": "Narrative",
+        "rawEntry": {
+            EMBEDDED_JSON_MARKER: {"name": "Ada", "role": "engineer"}
+        },
+    }
+    assert result.compressed_value_count == 0
+    assert result.embedded_json_count == 1
+    assert result.warnings == ("json_tag_inline_paths_not_authorized",)
+
+
+def test_same_path_cannot_authorize_embedded_and_model_compression():
+    result = _transform(
+        '<compress-json paths="$.rawEntry" embedded-paths="$.rawEntry">'
+        '{"rawEntry":"{\\"name\\":\\"Ada\\"}"}'
+        "</compress-json>",
+        allow_inline_paths=True,
+    )
+
+    assert _unwrapped_json(result.text) == {"rawEntry": '{"name":"Ada"}'}
+    assert result.embedded_json_count == 0
+    assert result.compressed_value_count == 0
+    assert result.warnings == ("json_tag_path_mode_conflict:$.rawEntry",)
 
 
 def test_inline_paths_compress_only_selected_strings_when_explicitly_allowed():
