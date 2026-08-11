@@ -8,6 +8,8 @@ from app.token_estimator import REGEX_TOKEN_ESTIMATOR
 
 DEFAULT_AGGRESSIVENESS = 0.15
 CompressionMode = Literal["deterministic", "model_auto", "model_force"]
+InputFormat = Literal["auto", "html"]
+HtmlMode = Literal["visible_text", "verbatim"]
 AggressivenessValue = Annotated[float, Field(ge=0.0, le=1.0)]
 RoleAggressivenessSettings = dict[str, AggressivenessValue]
 
@@ -97,6 +99,20 @@ class CompressRequest(BaseModel):
         description="Tenant-specific compression rules supplied by the API caller.",
     )
     text: str = Field(..., min_length=1, description="Text to compress.")
+    input_format: InputFormat = Field(
+        default="auto",
+        description=(
+            "Input classification. Use html for fetched page source that should "
+            "bypass automatic document sniffing."
+        ),
+    )
+    html_mode: HtmlMode = Field(
+        default="visible_text",
+        description=(
+            "For input_format=html, visible_text removes markup and non-visible "
+            "page machinery before compression; verbatim protects the HTML source."
+        ),
+    )
     aggressiveness: float = Field(
         default=DEFAULT_AGGRESSIVENESS,
         ge=0.0,
@@ -365,6 +381,20 @@ class V1CompressionSettings(BaseModel):
         default=None,
         ge=0.0,
         description="Optional synchronous latency budget for model_auto gating.",
+    )
+    input_format: InputFormat = Field(
+        default="auto",
+        description=(
+            "Input classification. Use html for fetched page source that should "
+            "bypass automatic document sniffing."
+        ),
+    )
+    html_mode: HtmlMode = Field(
+        default="visible_text",
+        description=(
+            "For input_format=html, visible_text removes markup and non-visible "
+            "page machinery; verbatim protects the HTML source."
+        ),
     )
     compact_empty_user_messages: bool = Field(
         default=False,

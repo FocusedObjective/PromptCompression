@@ -2757,6 +2757,8 @@ class PromptCompressionService:
         request_id: str | None = None,
         experiment_profile: str | ExperimentProfile | None = None,
         allow_inline_json_compression_paths: bool = False,
+        input_format: str = "auto",
+        html_mode: str = "visible_text",
     ) -> CompressionResult:
         start = time.perf_counter()
         timings = dict.fromkeys(TIMED_PHASES, 0.0)
@@ -2797,7 +2799,11 @@ class PromptCompressionService:
             else TaggedJsonTransformResult(text=text)
         )
         prepared_segments = (
-            active_preprocessor.prepare(tagged_json.text)
+            active_preprocessor.prepare(
+                tagged_json.text,
+                input_format=input_format,
+                html_mode=html_mode,
+            )
             if apply_deterministic_transforms
             else [CompressionSegment(text=text, compressible=True, kind="prose", source_text=text)]
         )

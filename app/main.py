@@ -1830,6 +1830,8 @@ def compress(
             model_chunk_chars=request.model_chunk_chars,
             collect_diagnostics=request.include_diagnostics,
             collect_detailed_analytics=request.include_detailed_analytics,
+            input_format=request.input_format,
+            html_mode=request.html_mode,
         )
         if request.allow_inline_json_compression_paths:
             compression_kwargs["allow_inline_json_compression_paths"] = True
@@ -2100,6 +2102,16 @@ def compress_v1(
             mode=mode,
             latency_budget_ms=latency_budget_ms,
             collect_diagnostics=False,
+            input_format=(
+                request.compression_settings.input_format
+                if request.compression_settings is not None
+                else "auto"
+            ),
+            html_mode=(
+                request.compression_settings.html_mode
+                if request.compression_settings is not None
+                else "visible_text"
+            ),
         )
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

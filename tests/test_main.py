@@ -92,6 +92,8 @@ class FakeCompressionService:
         evaluation_constraints: dict[str, list[str]] | None = None,
         request_id: str | None = None,
         allow_inline_json_compression_paths: bool = False,
+        input_format: str = "auto",
+        html_mode: str = "visible_text",
     ) -> CompressionResult:
         self.calls.append((text, aggressiveness, include_sections))
         self.tenant_profiles.append(tenant_profile)
@@ -112,6 +114,8 @@ class FakeCompressionService:
         self.last_allow_inline_json_compression_paths = (
             allow_inline_json_compression_paths
         )
+        self.last_input_format = input_format
+        self.last_html_mode = html_mode
         labels = [
             CompressionToken(text="Prompts", kept=True),
             CompressionToken(text="are", kept=False),
@@ -626,6 +630,8 @@ def test_compress_response_omits_sections_by_default(monkeypatch):
     assert service.last_include_sections is False
     assert service.last_mode == "model_force"
     assert service.last_collect_diagnostics is False
+    assert service.last_input_format == "auto"
+    assert service.last_html_mode == "visible_text"
     assert response.tenant_id == "default"
     assert response.compression_profile == "default:base"
     assert response.compression_profile_source == "default"
@@ -651,6 +657,22 @@ def test_compress_response_omits_sections_by_default(monkeypatch):
     }
     assert "NaN" not in response.model_dump_json()
     assert "Infinity" not in response.model_dump_json()
+
+
+def test_compress_passes_explicit_html_structure(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    main.compress(
+        CompressRequest(
+            text="<!DOCTYPE html><html><body>Visible</body></html>",
+            input_format="html",
+            html_mode="visible_text",
+        )
+    )
+
+    assert service.last_input_format == "html"
+    assert service.last_html_mode == "visible_text"
 
 
 def test_compress_response_includes_diagnostics_when_requested(monkeypatch):
@@ -854,7 +876,9 @@ def test_v1_compress_returns_compatible_shape(monkeypatch):
             model="bear-2",
             input="Prompts are code.",
             compression_settings=V1CompressionSettings(
-                aggressiveness=0.6
+                aggressiveness=0.6,
+                input_format="html",
+                html_mode="visible_text",
             ),
         )
     )
@@ -863,6 +887,8 @@ def test_v1_compress_returns_compatible_shape(monkeypatch):
     assert service.last_aggressiveness == 0.6
     assert service.last_include_sections is False
     assert service.last_mode == "deterministic"
+    assert service.last_input_format == "html"
+    assert service.last_html_mode == "visible_text"
     assert response.model_dump() == {
         "output": "Prompts code.",
         "output_tokens": 2,

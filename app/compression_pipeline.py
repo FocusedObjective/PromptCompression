@@ -199,7 +199,16 @@ class PromptPreprocessor:
         reduction = 0.0 if source_estimate.count <= 0 else saved / source_estimate.count
         return saved >= minimum_tokens and saved > 0 and reduction >= minimum_reduction
 
-    def prepare(self, text: str) -> list[CompressionSegment]:
+    def prepare(
+        self,
+        text: str,
+        *,
+        input_format: str = "auto",
+        html_mode: str = "visible_text",
+    ) -> list[CompressionSegment]:
+        if input_format == "html":
+            return [self._explicit_html_segment(text, html_mode=html_mode)]
+
         html_markdown_segment = self._html_markdown_segment_for_candidate(text)
         if html_markdown_segment is not None:
             return [html_markdown_segment]
@@ -242,6 +251,55 @@ class PromptPreprocessor:
 
         segments.extend(self._prepare_compressible_text(text[cursor:]))
         return [segment for segment in segments if segment.text]
+
+    def _explicit_html_segment(
+        self,
+        text: str,
+        *,
+        html_mode: str,
+    ) -> CompressionSegment:
+        if html_mode == "verbatim" or not self.enable_html_markdown:
+            return CompressionSegment(
+                text=text,
+                compressible=False,
+                kind="html",
+                source_text=text,
+            )
+
+        markdown = self.html_markdown_converter(text)
+        if markdown is None or not markdown.strip():
+            return CompressionSegment(
+                text=text,
+                compressible=False,
+                kind="html",
+                source_text=text,
+            )
+
+        # Explicit visible-text mode intentionally bypasses conservative HTML
+        # document sniffing and structural-equivalence checks. The caller has
+        # declared that scripts, styles, forms, and markup are not the payload.
+        # It still fails open unless the deterministic transform saves tokens
+        # (or characters when no estimator is configured).
+        if self.token_estimator is None:
+            saves_input = len(markdown) < len(text)
+        else:
+            source_estimate = self.token_estimator(text)
+            output_estimate = self.token_estimator(markdown)
+            saves_input = output_estimate.count < source_estimate.count
+        if not saves_input:
+            return CompressionSegment(
+                text=text,
+                compressible=False,
+                kind="html",
+                source_text=text,
+            )
+
+        return CompressionSegment(
+            text=markdown,
+            compressible=False,
+            kind="html_markdown",
+            source_text=text,
+        )
 
     def _prepare_compressible_text(self, text: str) -> list[CompressionSegment]:
         html_markdown_segment = self._html_markdown_segment_for_candidate(text)

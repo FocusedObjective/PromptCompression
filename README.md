@@ -209,6 +209,24 @@ Set `include_sections` to `true` only for UI/debug views that need per-section
 labels and protected-block rendering. It defaults to `false` to keep responses
 small and skip word-label generation.
 
+Fetched HTML can bypass automatic document sniffing with structured request
+fields instead of prepending instructions or a source URL to `text`:
+
+```json
+{
+  "text": "<!DOCTYPE html><html><body><h1>Visible page</h1></body></html>",
+  "input_format": "html",
+  "html_mode": "visible_text",
+  "mode": "deterministic"
+}
+```
+
+`visible_text` deterministically removes scripts, styles, templates, SVG, and
+markup before compression while preserving visible page text. It fails open to
+the original input unless the transform saves tokens. Use `html_mode: "verbatim"`
+to protect the HTML source unchanged. The defaults remain `input_format: "auto"`
+and `html_mode: "visible_text"` for backward compatibility.
+
 Response:
 
 ```json
@@ -442,10 +460,15 @@ Request:
   "model": "bear-2",
   "input": "Prompts are production code. Manage them that way.",
   "compression_settings": {
-    "aggressiveness": 0.15
+    "aggressiveness": 0.15,
+    "input_format": "auto"
   }
 }
 ```
+
+For fetched pages, set `compression_settings.input_format` to `html` and
+`compression_settings.html_mode` to `visible_text`. Set `html_mode` to
+`verbatim` when the HTML source itself is the protected payload.
 
 Response:
 

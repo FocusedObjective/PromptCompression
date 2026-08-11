@@ -133,6 +133,49 @@ def test_body_root_fragment_converts_to_protected_markdown():
     assert "window.tracking" not in result.compressed_text
 
 
+def test_explicit_html_converts_nextjs_document_with_build_comment():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    html = """<!DOCTYPE html><!--next-build-marker--><html lang="en">
+<head><title>UsageTap</title><script>self.__next_f.push({"secret": true})</script></head>
+<body><main><h1>Customer usage control</h1><p>Keep what the task needs.</p></main></body>
+</html>"""
+
+    result = service.compress(
+        html,
+        aggressiveness=0.25,
+        mode="deterministic",
+        input_format="html",
+        html_mode="visible_text",
+    )
+
+    assert compressor.inputs == []
+    assert result.output_sections[0].kind == "html_markdown"
+    assert "# Customer usage control" in result.compressed_text
+    assert "Keep what the task needs." in result.compressed_text
+    assert "self.__next_f" not in result.compressed_text
+    assert result.compressed_tokens < result.original_tokens
+
+
+def test_explicit_html_verbatim_protects_source():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    html = "<!DOCTYPE html><html><body><h1>Keep markup</h1></body></html>"
+
+    result = service.compress(
+        html,
+        aggressiveness=0.25,
+        mode="deterministic",
+        input_format="html",
+        html_mode="verbatim",
+    )
+
+    assert compressor.inputs == []
+    assert result.compressed_text == html
+    assert result.output_sections[0].kind == "html"
+    assert result.output_sections[0].protected is True
+
+
 def test_exact_html_context_preserves_document_verbatim():
     compressor, service = build_service_with_html_markdown()
     html = """Preserve this HTML markup exactly for a selector audit:
