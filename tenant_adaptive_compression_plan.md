@@ -63,8 +63,12 @@ request with tenant_id and optional tenant_profile
   -> return compressed request, stats, and profile metadata
 ```
 
-No raw prompt text, counters, or training samples are stored by the service in
-this first pass.
+No raw training samples are persistently stored by the service in this first
+pass. Bounded transient caches can retain serialized response bytes and
+compressed message parts for their configured TTL; these values can contain
+prompt-derived content even though cache keys contain only hashes. Callers can
+disable both edge and origin caching with `Cache-Control: no-store` or the
+request-level cache control documented in `docs/privacy.md`.
 
 Current implementation snapshot as of 2026-06-28:
 

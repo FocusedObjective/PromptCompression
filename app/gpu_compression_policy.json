@@ -1,0 +1,14 @@
+{
+  "schema_version": "gpu-compression-policy-v1",
+  "min_model_segment_chars": 160,
+  "min_model_segment_tokens": 24,
+  "min_model_candidate_tokens": 2000,
+  "min_model_incremental_savings_tokens": 200,
+  "min_model_incremental_reduction": 0.05,
+  "max_model_projected_latency_ms": 2500,
+  "max_model_auto_placeholders": 400,
+  "cold_model_tight_latency_budget_ms": 1000,
+  "max_protected_density": 0.2,
+  "max_structured_density": 0.35,
+  "skip_model_if_deterministic_reduction_gte": 0.12
+}

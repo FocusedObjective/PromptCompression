@@ -595,6 +595,36 @@ Response:
 controls and are removed from `compressed_request` so they are not forwarded to a
 downstream model provider.
 
+Tool-result compression is a separate conservative opt-in. Start in shadow mode
+so candidates are measured while the original tool result is returned:
+
+```json
+{
+  "messages": [
+    {
+      "role": "tool",
+      "tool_call_id": "call_123",
+      "content": "A long plain-text retrieval or command result..."
+    }
+  ],
+  "compression_settings": {
+    "tool_result_policy": {
+      "mode": "deterministic",
+      "min_tokens": 8000,
+      "max_reduction": 0.15,
+      "rollout_mode": "shadow",
+      "rollout_percentage": 5,
+      "rollout_key": "stable-account-or-conversation-key"
+    }
+  }
+}
+```
+
+Only plain text is eligible. Structured JSON, code, schemas, tool protocols,
+exact-output content and non-text blocks are protected. Message metadata such as
+`tool_call_id`, tool name and arguments is preserved. See
+[Compression Rollout and Measurement](docs/rollout.md).
+
 ## How Aggressiveness Works
 
 This MVP maps `aggressiveness` to LLMLingua-2's retention `rate`.
@@ -614,21 +644,28 @@ validated compression setting in its key. See
 [Local Compression Response Cache](docs/local-response-cache.md) for behavior,
 configuration, analytics bypass rules, and the future edge migration plan.
 
+`/v1/messages/compress` also caches successful compressed text parts by exact
+content hash, role, tenant profile and behavior version. This lets growing agent
+histories reuse earlier message work even when the whole-request cache misses.
+Responses expose `X-Compression-Content-Cache` counts and `/health` exposes both
+cache summaries.
+
+Send `Cache-Control: no-store`, top-level `cache: false` on `/compress`, or
+`compression_settings.cache: false` on a v1 request to bypass both edge and
+origin caches. Cache values can contain prompt-derived content even though cache
+keys contain only hashes. See [Compression Privacy and Data Handling](docs/privacy.md).
+
 By default, very small compressible segments skip the model to avoid expensive
 LLMLingua calls with little expected token savings. Tune
 `COMPRESSOR_MIN_SEGMENT_CHARS` and `COMPRESSOR_MIN_SEGMENT_TOKENS` if you prefer
 more compression over latency.
 
-`model_auto` also uses device-aware request-level ROI floors. CPU defaults to
-20,000 model-candidate tokens and 2,000 expected saved tokens; GPU defaults to
-2,000 candidates and 200 expected saved tokens. Override them independently
-with `COMPRESSOR_CPU_MIN_MODEL_CANDIDATE_TOKENS`,
-`COMPRESSOR_GPU_MIN_MODEL_CANDIDATE_TOKENS`,
-`COMPRESSOR_CPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS`, and
-`COMPRESSOR_GPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS`. The legacy
-`COMPRESSOR_MIN_MODEL_CANDIDATE_TOKENS` and
-`COMPRESSOR_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS` still set both devices when a
-device-specific value is absent.
+Production `model_auto` uses the versioned GPU policy in
+`app/gpu_compression_policy.json`: 2,000 model-candidate tokens and 200 expected
+incremental saved tokens before the remaining safety and latency gates. Both the
+Python origin and Cloudflare Worker consume this file so edge decisions cannot
+drift from the GPU service. Development-only runtime behavior is outside this
+production contract.
 
 ## VS Code
 
@@ -753,8 +790,7 @@ to authorize customer compression requests.
 
 Use [`DEPLOYMENT_GPU.md`](DEPLOYMENT_GPU.md) for every production build,
 deployment, rollback, and verification. `Dockerfile` and `cloudbuild.yaml` are
-retained only for local CPU development and must not be deployed to the
-production service.
+local-development artifacts and must not be deployed to the production service.
 
 ## Performance Benchmark
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCacheKeyParts, stableJson } from "../src/cache";
+import { buildGpuPolicyCacheIdentity, GPU_POLICY } from "../src/gpuPolicy";
 
 describe("edge cache keys", () => {
   it("canonicalizes object keys before hashing", () => {
@@ -24,6 +25,18 @@ describe("edge cache keys", () => {
 
     expect(stableJson(first)).toBe(stableJson(second));
     expect(stableJson(first)).not.toContain("secret");
+    expect(first.compression_policy).toEqual(buildGpuPolicyCacheIdentity());
+  });
+
+  it("invalidates cache identity when a policy value changes without a schema rename", () => {
+    const current = buildGpuPolicyCacheIdentity();
+    const changed = buildGpuPolicyCacheIdentity({
+      ...GPU_POLICY,
+      minModelCandidateTokens: GPU_POLICY.minModelCandidateTokens + 1
+    });
+
+    expect(changed.schemaVersion).toBe(current.schemaVersion);
+    expect(stableJson(changed)).not.toBe(stableJson(current));
   });
 
   it("separates tenants in cache key parts", async () => {

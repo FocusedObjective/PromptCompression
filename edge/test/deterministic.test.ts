@@ -10,9 +10,14 @@ import {
   shouldUseOrigin,
   validateRequestBody
 } from "../src/deterministic";
+import { GPU_POLICY } from "../src/gpuPolicy";
 
 const LONG_MODEL_TEXT = Array.from({ length: 80 }, (_, index) => {
   return `This is reusable operational context sentence ${index} with enough ordinary prose for model compression decisions.`;
+}).join(" ");
+
+const GPU_MODEL_AUTO_TEXT = Array.from({ length: 350 }, (_, index) => {
+  return `Reusable operational narrative ${index} contains ordinary prose and enough context for GPU compression.`;
 }).join(" ");
 
 describe("deterministic edge compression", () => {
@@ -112,6 +117,12 @@ describe("deterministic edge compression", () => {
         { role: "user", content: [{ type: "text", text: "```json\n{}\n```" }] }
       ]
     }, "/v1/messages/compress")).toBe(true);
+    expect(needsOriginForDeterministic({
+      messages: [{ role: "tool", content: "plain tool output" }],
+      compression_settings: {
+        tool_result_policy: { min_tokens: 1, rollout_mode: "shadow" }
+      }
+    }, "/v1/messages/compress")).toBe(true);
   });
 
   it("skips model_auto origin calls for low-value edge candidates", () => {
@@ -122,6 +133,19 @@ describe("deterministic edge compression", () => {
 
     expect(decision.useOrigin).toBe(false);
     expect(decision.reason).toBe("edge_skipped_no_candidate_prose");
+  });
+
+  it("uses the shared GPU model-auto floors instead of the old edge threshold", () => {
+    expect(GPU_POLICY.minModelCandidateTokens).toBe(2_000);
+    expect(GPU_POLICY.minModelIncrementalSavingsTokens).toBe(200);
+
+    const decision = evaluateEdgeOriginGate({
+      input: GPU_MODEL_AUTO_TEXT,
+      compression_settings: { mode: "model_auto" }
+    }, "/v1/compress", null);
+
+    expect(decision.useOrigin).toBe(true);
+    expect(decision.reason).toBeNull();
   });
 
   it("keeps model_force available for candidate-sized prose", () => {

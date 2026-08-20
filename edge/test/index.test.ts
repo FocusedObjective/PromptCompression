@@ -22,6 +22,9 @@ describe("worker routes", () => {
     expect(body.model_loaded).toBe(true);
     expect(response.headers.get("x-edge-decision")).toBe("edge-deterministic");
     expect(response.headers.get("x-edge-ratelimit")).toBe("local");
+    expect(response.headers.get("x-compression-policy")).toBe(
+      "gpu-compression-policy-v1"
+    );
   });
 
   it("preserves caller request IDs in edge responses", async () => {
@@ -30,6 +33,24 @@ describe("worker routes", () => {
     }), { EDGE_ENV: "test" });
 
     expect(response.headers.get("x-request-id")).toBe("request_123");
+  });
+
+  it("emits structured edge telemetry without prompt content", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const secret = "never-log-this-prompt-value";
+
+    await worker.fetch(new Request("https://edge.test/compress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: secret, mode: "deterministic", cache: false })
+    }), {
+      RATE_LIMIT_ENABLED: "false",
+      STRUCTURED_LOGS_ENABLED: "true"
+    });
+
+    const output = log.mock.calls.flat().join("\n");
+    expect(output).toContain("prompt_compression_edge_request");
+    expect(output).not.toContain(secret);
   });
 
   it("rejects unsupported routes", async () => {
@@ -42,12 +63,30 @@ describe("worker routes", () => {
 
   it("allows CORS preflight for supported POST routes", async () => {
     const response = await worker.fetch(new Request("https://edge.test/compress", {
-      method: "OPTIONS"
+      method: "OPTIONS",
+      headers: {
+        origin: "https://app.example",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type, cache-control"
+      }
     }), {});
 
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("access-control-allow-methods")).toContain("POST");
+    expect(response.headers.get("access-control-allow-headers")).toContain("cache-control");
+  });
+
+  it("exposes edge and compression diagnostics to browser callers", async () => {
+    const response = await worker.fetch(new Request("https://edge.test/health"), {
+      EDGE_ENV: "test"
+    });
+    const exposed = response.headers.get("access-control-expose-headers") || "";
+
+    expect(exposed).toContain("x-request-id");
+    expect(exposed).toContain("x-edge-cache");
+    expect(exposed).toContain("x-compression-policy");
+    expect(exposed).toContain("x-compression-cache");
   });
 
   it("rejects unsupported methods", async () => {
@@ -452,6 +491,47 @@ describe("worker routes", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("does not cache no-store responses returned by the origin", async () => {
+    installMemoryCache();
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        messages: [{ role: "user", content: "original first" }],
+        fail_open_used: true
+      }), {
+        status: 200,
+        headers: { "cache-control": "no-store", "content-type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        messages: [{ role: "user", content: "original second" }],
+        fail_open_used: true
+      }), {
+        status: 200,
+        headers: { "cache-control": "no-store", "content-type": "application/json" }
+      }));
+    const rawBody = JSON.stringify({
+      messages: [{ role: "user", content: LONG_MODEL_TEXT }],
+      compression_settings: { mode: "model_force" }
+    });
+
+    const first = await worker.fetch(new Request("https://edge.test/v1/messages/compress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: rawBody
+    }), { ORIGIN_BASE_URL: "https://origin.test", CACHE_ENABLED: "true" });
+    const second = await worker.fetch(new Request("https://edge.test/v1/messages/compress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: rawBody
+    }), { ORIGIN_BASE_URL: "https://origin.test", CACHE_ENABLED: "true" });
+    const secondBody = await second.json() as Record<string, unknown>;
+
+    expect(first.headers.get("x-edge-cache")).toBe("bypass");
+    expect(second.headers.get("x-edge-cache")).toBe("bypass");
+    expect(second.headers.get("cache-control")).toBe("no-store");
+    expect(secondBody.fail_open_used).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("bypasses cache when Cache-Control no-store is present", async () => {
     installMemoryCache();
     const fetchMock = vi.spyOn(globalThis, "fetch")
@@ -481,6 +561,63 @@ describe("worker routes", () => {
     expect(second.headers.get("x-edge-cache")).toBe("bypass");
     expect(secondBody.compressed_text).toBe("second");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bypasses cache when the request body disables caching", async () => {
+    installMemoryCache();
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ compressed_text: "first" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ compressed_text: "second" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }));
+    const rawBody = JSON.stringify({
+      text: LONG_MODEL_TEXT,
+      mode: "model_force",
+      cache: false
+    });
+
+    const first = await worker.fetch(new Request("https://edge.test/compress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: rawBody
+    }), { ORIGIN_BASE_URL: "https://origin.test", CACHE_ENABLED: "true" });
+    const second = await worker.fetch(new Request("https://edge.test/compress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: rawBody
+    }), { ORIGIN_BASE_URL: "https://origin.test", CACHE_ENABLED: "true" });
+
+    expect(first.headers.get("x-edge-cache")).toBe("bypass");
+    expect(second.headers.get("x-edge-cache")).toBe("bypass");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("delegates tool-result policy evaluation to the GPU origin", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(
+      JSON.stringify({ messages: [{ role: "tool", content: "origin evaluated" }] }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    ));
+    const response = await worker.fetch(new Request("https://edge.test/v1/messages/compress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        messages: [{
+          role: "tool",
+          tool_call_id: "call_1",
+          content: "plain tool output"
+        }],
+        compression_settings: {
+          tool_result_policy: { min_tokens: 1, rollout_mode: "shadow" }
+        }
+      })
+    }), { ORIGIN_BASE_URL: "https://origin.test" });
+
+    expect(response.headers.get("x-edge-decision")).toBe("origin");
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("does not cache degraded fallback responses", async () => {

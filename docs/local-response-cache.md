@@ -1,8 +1,8 @@
-# Local Compression Response Cache
+# Local Compression Caches
 
 ## Purpose
 
-The first cache layer runs inside each Cloud Run container's FastAPI Python
+The origin cache layers run inside each Cloud Run container's FastAPI Python
 process. It is intended for the initial UsageTap.com compression example, where
 the same recent example and settings may be submitted repeatedly. It avoids
 repeating model work without adding a Redis dependency or consuming unbounded
@@ -15,12 +15,20 @@ cache per container with the current deployment command.
 
 ## Current behavior
 
+There are two independent bounded caches:
+
+- The exact-response cache reuses a complete recent request.
+- The message-content cache reuses individual text parts across growing agent
+  histories, even when the complete request changes each turn.
+
 - The default limit is 32 MiB per process, with a 1 MiB maximum entry, 4,096
   maximum entries, and a five-minute TTL.
 - LRU eviction is based on an estimated resident size containing the serialized
   response, hashed key, and fixed per-entry Python-object overhead.
-- Only serialized response bytes are retained. Raw prompt text is not stored in
-  cache keys.
+- Exact-response values contain serialized response bytes. Message-content
+  values contain compressed text parts. Because responses can include unchanged
+  or preserved content, cache values must be treated as prompt-derived data.
+  Raw prompt text is not stored in cache keys.
 - Concurrent identical misses are coalesced in-process so only one caller does
   compression work. Waiting requests still perform their own authorization,
   demo reservation, and UsageTap metering.
@@ -29,6 +37,10 @@ cache per container with the current deployment command.
 - Responses expose `X-Compression-Cache` with `store`, `hit`, `shared`,
   `bypass`, or `disabled`.
 - Cache statistics are exposed under `runtime.response_cache` on `/health`.
+  Message-content statistics are exposed under `runtime.content_cache`.
+- `Cache-Control: no-store`, top-level `cache: false` on `/compress`, or
+  `compression_settings.cache: false` on v1 requests bypasses both origin cache
+  layers. The same controls are honored by the edge.
 
 Authorization begins before compression, as it did before the cache was added.
 An entry is not committed until that request has completed authorization and
@@ -57,6 +69,13 @@ array ordering remain significant.
 
 Credentials, `X-Request-ID`, tracing headers, and timestamps are excluded.
 
+The edge key also includes every validated value from
+`app/gpu_compression_policy.json`, not only its human-readable schema version.
+Changing any policy threshold therefore creates a new edge cache identity
+automatically, even if the schema-version label is accidentally left unchanged.
+The `X-Compression-Policy` response header continues to expose the concise
+schema-version label for diagnostics.
+
 ## Admission and bypass rules
 
 A completed response is retained only when it has positive token savings, no
@@ -81,6 +100,19 @@ both `include_diagnostics: false` and `include_detailed_analytics: false`.
 | `RESPONSE_CACHE_MAX_ENTRIES` | `4096` | Hard entry-count backstop. |
 | `RESPONSE_CACHE_TTL_SECONDS` | `300` | Entry lifetime. |
 | `RESPONSE_CACHE_SINGLE_FLIGHT_TIMEOUT_SECONDS` | `30` | Maximum wait for identical in-flight work before independently continuing. |
+
+The message-content cache uses corresponding `CONTENT_CACHE_*` variables. Its
+defaults are 32 MiB, a 256 KiB maximum entry, 8,192 entries, a five-minute TTL
+and a 30-second single-flight timeout.
+
+| Variable | Default | Meaning |
+| --- | ---: | --- |
+| `CONTENT_CACHE_ENABLED` | `true` | Enables per-content message caching. |
+| `CONTENT_CACHE_MAX_BYTES` | `33554432` | Maximum estimated resident bytes. |
+| `CONTENT_CACHE_MAX_ENTRY_BYTES` | `262144` | Maximum bytes for one compressed text result. |
+| `CONTENT_CACHE_MAX_ENTRIES` | `8192` | Hard entry-count backstop. |
+| `CONTENT_CACHE_TTL_SECONDS` | `300` | Entry lifetime. |
+| `CONTENT_CACHE_SINGLE_FLIGHT_TIMEOUT_SECONDS` | `30` | Maximum wait for identical in-flight work. |
 
 Cloud Run memory planning must reserve the configured cache allowance in
 addition to the model, tokenizer, request working set, Python runtime, and

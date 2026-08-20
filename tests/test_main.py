@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from threading import Event
 
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from app.compressor import (
     CompressionResult,
     CompressionTiming,
     CompressionToken,
+    CompressionRuntimeError,
     build_token_savings,
 )
 from app.demo_access import DemoSessionManager
@@ -24,6 +26,7 @@ from app.schemas import (
     V1CompressRequest,
     V1CompressionSettings,
     V1MessagesCompressRequest,
+    V1ToolResultCompressionSettings,
 )
 from app.tenant_profiles import TenantCompressionProfile
 from app.token_estimator import TokenEstimate
@@ -56,6 +59,8 @@ class FakeUsageTapMeteringClient:
 @pytest.fixture(autouse=True)
 def use_fake_usagetap_authorization(monkeypatch):
     main.compression_response_cache.clear()
+    main.message_content_cache.clear()
+    main.compression_telemetry.clear()
     metering_client = FakeUsageTapMeteringClient()
     monkeypatch.setattr(
         main,
@@ -65,6 +70,8 @@ def use_fake_usagetap_authorization(monkeypatch):
     monkeypatch.setattr(main, "usage_tap_metering_client", metering_client)
     yield metering_client
     main.compression_response_cache.clear()
+    main.message_content_cache.clear()
+    main.compression_telemetry.clear()
 
 
 class FakeCompressionService:
@@ -1556,3 +1563,355 @@ def test_v1_messages_compress_http_accepts_vendor_style_request(monkeypatch):
     ]
     assert body["user_tokens_saved"] == 1
     assert service.calls == [("Prompts are code.", 0.4, False)]
+
+
+def test_v1_messages_content_cache_reuses_prior_parts_in_growing_history(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+    headers = {"Authorization": "Bearer cmp-test-key"}
+
+    first = client.post(
+        "/v1/messages/compress",
+        headers=headers,
+        json={
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "Prompts are code."}],
+        },
+    )
+    second = client.post(
+        "/v1/messages/compress",
+        headers=headers,
+        json={
+            "model": "gpt-test",
+            "messages": [
+                {"role": "user", "content": "Prompts are code."},
+                {"role": "user", "content": "A second context part."},
+            ],
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(service.calls) == 2
+    assert second.json()["message_stats"][0]["content_cache_hits"] == 1
+    assert second.json()["message_stats"][1]["content_cache_stores"] == 1
+    assert second.headers["x-compression-content-cache"] == (
+        "hits=1; misses=1; stores=1"
+    )
+
+
+def test_v1_messages_no_store_bypasses_response_and_content_caches(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+    headers = {
+        "Authorization": "Bearer cmp-test-key",
+        "Cache-Control": "no-store",
+    }
+    body = {
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "Prompts are code."}],
+    }
+
+    first = client.post("/v1/messages/compress", headers=headers, json=body)
+    second = client.post("/v1/messages/compress", headers=headers, json=body)
+
+    assert first.headers["x-compression-cache"] == "bypass"
+    assert second.headers["x-compression-cache"] == "bypass"
+    assert first.headers["x-compression-content-cache"] == (
+        "hits=0; misses=0; stores=0"
+    )
+    assert len(service.calls) == 2
+
+
+def test_v1_messages_cache_false_bypasses_response_and_content_caches(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+    headers = {"Authorization": "Bearer cmp-test-key"}
+    body = {
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "Prompts are code."}],
+        "compression_settings": {"cache": False},
+    }
+
+    first = client.post("/v1/messages/compress", headers=headers, json=body)
+    second = client.post("/v1/messages/compress", headers=headers, json=body)
+
+    assert first.headers["x-compression-cache"] == "bypass"
+    assert second.headers["x-compression-cache"] == "bypass"
+    assert first.headers["x-compression-content-cache"] == (
+        "hits=0; misses=0; stores=0"
+    )
+    assert len(service.calls) == 2
+
+
+def test_tool_result_policy_shadows_plain_text_and_preserves_metadata(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            model="gpt-test",
+            messages=[{
+                "role": "tool",
+                "tool_call_id": "call_123",
+                "name": "search",
+                "content": "Prompts are code.",
+            }],
+            compression_settings=V1CompressionSettings(
+                tool_result_policy=V1ToolResultCompressionSettings(
+                    min_tokens=1,
+                    max_reduction=0.5,
+                    rollout_mode="shadow",
+                )
+            ),
+        )
+    )
+
+    assert response.messages == [{
+        "role": "tool",
+        "tool_call_id": "call_123",
+        "name": "search",
+        "content": "Prompts are code.",
+    }]
+    assert response.message_stats[0].tool_result_action == "shadow"
+    assert response.message_stats[0].candidate_tokens_saved == 1
+    assert response.message_stats[0].tokens_saved == 0
+    assert "tool_result_shadow" in response.warnings
+
+
+def test_tool_result_policy_applies_bounded_plain_text_compression(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            model="gpt-test",
+            messages=[{
+                "role": "tool",
+                "tool_call_id": "call_123",
+                "content": "Prompts are code.",
+            }],
+            compression_settings=V1CompressionSettings(
+                tool_result_policy=V1ToolResultCompressionSettings(
+                    min_tokens=1,
+                    max_reduction=0.5,
+                    rollout_mode="apply",
+                )
+            ),
+        )
+    )
+
+    assert response.messages[0]["content"] == "Prompts code."
+    assert response.messages[0]["tool_call_id"] == "call_123"
+    assert response.message_stats[0].tool_result_action == "applied"
+    assert response.message_stats[0].tokens_saved == 1
+
+
+def test_tool_result_policy_protects_structured_payloads(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            messages=[{
+                "role": "tool",
+                "tool_call_id": "call_123",
+                "content": '{"ok":true,"records":[1,2]}',
+            }],
+            compression_settings=V1CompressionSettings(
+                tool_result_policy=V1ToolResultCompressionSettings(
+                    min_tokens=1,
+                    rollout_mode="apply",
+                )
+            ),
+        )
+    )
+
+    assert service.calls == []
+    assert response.messages[0]["content"] == '{"ok":true,"records":[1,2]}'
+    assert response.message_stats[0].skipped_reason == (
+        "tool_structured_content_protected"
+    )
+    assert response.message_stats[0].tool_result_action == "skipped"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "def transform(value):\n    return value + 1",
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: demo",
+        "<response><account_id>123</account_id></response>",
+        "id,name\n1,Alice\n2,Bob",
+        "SELECT account_id, status FROM accounts WHERE active = true",
+    ],
+)
+def test_tool_result_policy_protects_unfenced_code_and_structured_text(
+    monkeypatch,
+    content,
+):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            messages=[{"role": "tool", "content": content}],
+            compression_settings=V1CompressionSettings(
+                tool_result_policy=V1ToolResultCompressionSettings(
+                    min_tokens=1,
+                    rollout_mode="apply",
+                )
+            ),
+        )
+    )
+
+    assert service.calls == []
+    assert response.messages[0]["content"] == content
+    assert response.message_stats[0].skipped_reason == (
+        "tool_structured_content_protected"
+    )
+    assert response.message_stats[0].tool_result_action == "skipped"
+
+
+def test_tool_result_policy_rolls_back_candidate_without_positive_savings(monkeypatch):
+    class ExpandingCompressionService(FakeCompressionService):
+        def compress(self, *args, **kwargs):
+            result = super().compress(*args, **kwargs)
+            return replace(
+                result,
+                compressed_text=(
+                    f"{kwargs['text']} additional tokens that increase output size"
+                ),
+                compressed_tokens=result.original_tokens + 6,
+            )
+
+    service = ExpandingCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            messages=[{"role": "tool", "content": "plain result"}],
+            compression_settings=V1CompressionSettings(
+                tool_result_policy=V1ToolResultCompressionSettings(
+                    min_tokens=1,
+                    rollout_mode="apply",
+                )
+            ),
+        )
+    )
+
+    assert response.messages[0]["content"] == "plain result"
+    assert response.message_stats[0].tool_result_action == "rollback"
+    assert response.message_stats[0].skipped_reason == "tool_no_positive_savings"
+    assert "tool_result_no_savings_rollback" in response.warnings
+
+
+def test_tool_result_policy_rolls_back_excessive_reduction(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            messages=[{"role": "tool", "content": "Prompts are code."}],
+            compression_settings=V1CompressionSettings(
+                tool_result_policy=V1ToolResultCompressionSettings(
+                    min_tokens=1,
+                    max_reduction=0.1,
+                    rollout_mode="apply",
+                )
+            ),
+        )
+    )
+
+    assert response.messages[0]["content"] == "Prompts are code."
+    assert response.message_stats[0].tool_result_action == "rollback"
+    assert response.message_stats[0].skipped_reason == (
+        "tool_reduction_limit_exceeded"
+    )
+    assert "tool_result_reduction_rollback" in response.warnings
+
+
+def test_v1_messages_fail_open_preserves_original_request(monkeypatch):
+    class FailingCompressionService(FakeCompressionService):
+        def compress(self, *args, **kwargs):
+            raise CompressionRuntimeError("compressor unavailable")
+
+    monkeypatch.setattr(main, "compression_service", FailingCompressionService())
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            messages=[{"role": "user", "content": "Prompts are code."}],
+        )
+    )
+
+    assert response.messages == [{"role": "user", "content": "Prompts are code."}]
+    assert response.fail_open_used is True
+    assert response.user_input_tokens == response.user_output_tokens
+    assert "compression_fail_open_original_preserved" in response.warnings
+
+
+def test_v1_messages_fail_open_false_propagates_runtime_failure(monkeypatch):
+    class FailingCompressionService(FakeCompressionService):
+        def compress(self, *args, **kwargs):
+            raise CompressionRuntimeError("compressor unavailable")
+
+    monkeypatch.setattr(main, "compression_service", FailingCompressionService())
+
+    with pytest.raises(main.HTTPException) as exc_info:
+        main.compress_v1_messages(
+            V1MessagesCompressRequest(
+                messages=[{"role": "user", "content": "Prompts are code."}],
+                compression_settings=V1CompressionSettings(fail_open=False),
+            )
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "compressor unavailable"
+
+
+def test_v1_messages_fail_open_handles_timeout(monkeypatch):
+    class TimingOutCompressionService(FakeCompressionService):
+        def compress(self, *args, **kwargs):
+            raise TimeoutError("compression deadline exceeded")
+
+    monkeypatch.setattr(main, "compression_service", TimingOutCompressionService())
+
+    response = main.compress_v1_messages(
+        V1MessagesCompressRequest(
+            messages=[{"role": "user", "content": "Prompts are code."}],
+        )
+    )
+
+    assert response.messages == [{"role": "user", "content": "Prompts are code."}]
+    assert response.fail_open_used is True
+    assert "compression_fail_open_original_preserved" in response.warnings
+
+
+def test_v1_messages_fail_open_http_is_never_cached(monkeypatch):
+    class FailingCompressionService(FakeCompressionService):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+
+        def compress(self, *args, **kwargs):
+            self.attempts += 1
+            raise CompressionRuntimeError("compressor unavailable")
+
+    service = FailingCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+    client = TestClient(main.app)
+    headers = {"Authorization": "Bearer cmp-test-key"}
+    body = {"messages": [{"role": "user", "content": "Prompts are code."}]}
+
+    first = client.post("/v1/messages/compress", headers=headers, json=body)
+    second = client.post("/v1/messages/compress", headers=headers, json=body)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.headers["cache-control"] == "no-store"
+    assert second.headers["cache-control"] == "no-store"
+    assert first.headers["x-compression-cache"] == "bypass"
+    assert second.headers["x-compression-cache"] == "bypass"
+    assert service.attempts == 2

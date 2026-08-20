@@ -1,6 +1,8 @@
 import type { EdgeContext, Env, JsonObject } from "./types";
+import { applyCorsResponseHeaders } from "./cors";
+import { buildGpuPolicyCacheIdentity, GPU_POLICY } from "./gpuPolicy";
 
-const CACHE_SCHEMA_VERSION = "edge-cache-v1";
+const CACHE_SCHEMA_VERSION = "edge-cache-v2";
 const CACHE_KEY_ORIGIN = "https://cache.prompt-compression.local";
 
 export interface EdgeCacheHandle {
@@ -35,9 +37,17 @@ export async function matchEdgeCache(
 export async function storeEdgeCache(
   handle: EdgeCacheHandle | null,
   response: Response,
-  context: EdgeContext
+  context: EdgeContext,
+  ctx?: ExecutionContext
 ): Promise<Response> {
-  if (!handle || !isCacheableResponse(response, context)) {
+  if (!handle) {
+    return response;
+  }
+  if (!isCacheableResponse(response, context)) {
+    if (responseDisablesStorage(response)) {
+      context.cache = "bypass";
+      return withEdgeHeaders(response, context);
+    }
     return response;
   }
 
@@ -48,13 +58,19 @@ export async function storeEdgeCache(
   headers.set("x-edge-decision", context.decision);
   headers.set("x-edge-ratelimit", context.rateLimit);
   headers.set("x-edge-auth", context.auth);
+  headers.set("x-compression-policy", GPU_POLICY.schemaVersion);
 
   const cacheable = new Response(response.clone().body, {
     status: response.status,
     statusText: response.statusText,
     headers
   });
-  await caches.default.put(handle.request, cacheable.clone());
+  const write = caches.default.put(handle.request, cacheable.clone());
+  if (ctx) {
+    ctx.waitUntil(write);
+  } else {
+    await write;
+  }
   context.cache = "store";
   return withEdgeHeaders(cacheable, context);
 }
@@ -66,6 +82,7 @@ export async function buildCacheKeyParts(
 ): Promise<JsonObject> {
   return {
     schema: CACHE_SCHEMA_VERSION,
+    compression_policy: buildGpuPolicyCacheIdentity(),
     route,
     tenant_header: request.headers.get("x-tenant-id") || "",
     body
@@ -108,11 +125,20 @@ async function buildCacheHandle(
 
 function shouldBypassCache(request: Request, body: JsonObject): boolean {
   const cacheControl = request.headers.get("cache-control") || "";
+  const compressionSettings = isJsonObject(body.compression_settings)
+    ? body.compression_settings
+    : {};
   return (
     /\bno-store\b/i.test(cacheControl)
+    || body.cache === false
+    || compressionSettings.cache === false
     || body.include_diagnostics === true
     || body.debug === true
   );
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isCacheableResponse(response: Response, context: EdgeContext): boolean {
@@ -120,7 +146,14 @@ function isCacheableResponse(response: Response, context: EdgeContext): boolean 
     return false;
   }
   const contentType = response.headers.get("content-type") || "";
-  return response.status === 200 && contentType.toLowerCase().includes("application/json");
+  return response.status === 200
+    && contentType.toLowerCase().includes("application/json")
+    && !responseDisablesStorage(response);
+}
+
+function responseDisablesStorage(response: Response): boolean {
+  const cacheControl = response.headers.get("cache-control") || "";
+  return /\b(?:no-store|private)\b/i.test(cacheControl);
 }
 
 function withEdgeHeaders(response: Response, context: EdgeContext): Response {
@@ -130,9 +163,8 @@ function withEdgeHeaders(response: Response, context: EdgeContext): Response {
   headers.set("x-edge-cache", context.cache);
   headers.set("x-edge-ratelimit", context.rateLimit);
   headers.set("x-edge-auth", context.auth);
-  headers.set("access-control-allow-origin", "*");
-  headers.set("access-control-allow-methods", "GET, POST, OPTIONS");
-  headers.set("access-control-allow-headers", "authorization, content-type, x-api-key, x-request-id, x-tenant-id");
+  headers.set("x-compression-policy", GPU_POLICY.schemaVersion);
+  applyCorsResponseHeaders(headers);
 
   return new Response(response.body, {
     status: response.status,

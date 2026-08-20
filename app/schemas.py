@@ -8,6 +8,8 @@ from app.token_estimator import REGEX_TOKEN_ESTIMATOR
 
 DEFAULT_AGGRESSIVENESS = 0.15
 CompressionMode = Literal["deterministic", "model_auto", "model_force"]
+ToolResultCompressionMode = Literal["deterministic", "model_auto"]
+ToolResultRolloutMode = Literal["shadow", "apply"]
 InputFormat = Literal["auto", "html"]
 HtmlMode = Literal["visible_text", "verbatim"]
 AggressivenessValue = Annotated[float, Field(ge=0.0, le=1.0)]
@@ -130,6 +132,13 @@ class CompressRequest(BaseModel):
         default=None,
         ge=0.0,
         description="Optional synchronous latency budget for model_auto gating.",
+    )
+    cache: bool = Field(
+        default=True,
+        description=(
+            "Allow bounded response caching. Set false, or send "
+            "Cache-Control: no-store, to opt out."
+        ),
     )
     allow_cpu_model_auto: bool | None = Field(
         default=None,
@@ -361,6 +370,45 @@ class CompressResponse(BaseModel):
     experiment_profile: str = "baseline"
 
 
+class V1ToolResultCompressionSettings(BaseModel):
+    mode: ToolResultCompressionMode = Field(
+        default="deterministic",
+        description="Tool results start deterministic-only; model_auto is explicit opt-in.",
+    )
+    aggressiveness: AggressivenessValue = Field(default=DEFAULT_AGGRESSIVENESS)
+    min_tokens: int = Field(
+        default=8_000,
+        ge=1,
+        le=2_000_000,
+        description="Minimum tool-result text size eligible for compression.",
+    )
+    max_reduction: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=1.0,
+        description="Rollback the tool result when candidate reduction exceeds this bound.",
+    )
+    rollout_mode: ToolResultRolloutMode = Field(
+        default="shadow",
+        description="Shadow measures candidates but returns the original tool result.",
+    )
+    rollout_percentage: float = Field(
+        default=100.0,
+        ge=0.0,
+        le=100.0,
+        description="Stable percentage of rollout keys selected for tool-result evaluation.",
+    )
+    rollout_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description=(
+            "Optional stable cohort key. It is hashed for selection and is never logged "
+            "or forwarded downstream."
+        ),
+    )
+
+
 class V1CompressionSettings(BaseModel):
     mode: CompressionMode | None = Field(
         default=None,
@@ -381,6 +429,27 @@ class V1CompressionSettings(BaseModel):
         default=None,
         ge=0.0,
         description="Optional synchronous latency budget for model_auto gating.",
+    )
+    cache: bool = Field(
+        default=True,
+        description=(
+            "Allow bounded response and per-content caching. Set false, or send "
+            "Cache-Control: no-store, to opt out."
+        ),
+    )
+    fail_open: bool = Field(
+        default=True,
+        description=(
+            "For message compression, preserve the original request if the compressor "
+            "is unavailable."
+        ),
+    )
+    tool_result_policy: V1ToolResultCompressionSettings | None = Field(
+        default=None,
+        description=(
+            "Conservative opt-in policy for plain-text tool results. Tool metadata and "
+            "structured payloads remain protected."
+        ),
     )
     input_format: InputFormat = Field(
         default="auto",
@@ -488,6 +557,12 @@ class V1MessageCompressionStats(BaseModel):
     text_parts: int
     compressed_text_parts: int
     skipped_reason: str | None = None
+    content_cache_hits: int = 0
+    content_cache_misses: int = 0
+    content_cache_stores: int = 0
+    candidate_tokens_saved: int = 0
+    candidate_reduction: float = 0.0
+    tool_result_action: str | None = None
 
 
 class V1MessagesCompressResponse(BaseModel):
@@ -513,6 +588,7 @@ class V1MessagesCompressResponse(BaseModel):
     training_sample_recorded: bool = False
     message_stats: list[V1MessageCompressionStats]
     warnings: list[str] = Field(default_factory=list)
+    fail_open_used: bool = False
 
 
 class HealthResponse(BaseModel):

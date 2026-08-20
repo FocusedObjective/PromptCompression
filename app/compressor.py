@@ -14,6 +14,7 @@ from typing import Any
 from app.analytics import DetailedAnalytics, build_detailed_analytics
 from app.compression_pipeline import CompressionSegment, PromptPreprocessor
 from app.experiment_profiles import ExperimentProfile, resolve_experiment_profile
+from app.gpu_policy import GPU_COMPRESSION_POLICY
 from app.integrity_policy import evaluate_integrity, sha256_text
 from app.protected_spans import (
     ProtectedSpan,
@@ -37,8 +38,18 @@ from app.token_estimator import (
 
 DEFAULT_MODEL = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
 LOGGER = logging.getLogger(__name__)
-MIN_SEGMENT_CHARS = int(os.getenv("COMPRESSOR_MIN_SEGMENT_CHARS", "160"))
-MIN_SEGMENT_TOKENS = int(os.getenv("COMPRESSOR_MIN_SEGMENT_TOKENS", "24"))
+MIN_SEGMENT_CHARS = int(
+    os.getenv(
+        "COMPRESSOR_MIN_SEGMENT_CHARS",
+        str(GPU_COMPRESSION_POLICY.min_model_segment_chars),
+    )
+)
+MIN_SEGMENT_TOKENS = int(
+    os.getenv(
+        "COMPRESSOR_MIN_SEGMENT_TOKENS",
+        str(GPU_COMPRESSION_POLICY.min_model_segment_tokens),
+    )
+)
 PLACEHOLDER_PREFIX = "__CK_KEEP_"
 PLACEHOLDER_SUFFIX = "__"
 COMPRESSION_MODE_DETERMINISTIC = "deterministic"
@@ -74,7 +85,10 @@ DEFAULT_CPU_MIN_MODEL_CANDIDATE_TOKENS = int(
 DEFAULT_GPU_MIN_MODEL_CANDIDATE_TOKENS = int(
     os.getenv(
         "COMPRESSOR_GPU_MIN_MODEL_CANDIDATE_TOKENS",
-        os.getenv("COMPRESSOR_MIN_MODEL_CANDIDATE_TOKENS", "2000"),
+        os.getenv(
+            "COMPRESSOR_MIN_MODEL_CANDIDATE_TOKENS",
+            str(GPU_COMPRESSION_POLICY.min_model_candidate_tokens),
+        ),
     )
 )
 DEFAULT_CPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS = int(
@@ -86,20 +100,35 @@ DEFAULT_CPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS = int(
 DEFAULT_GPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS = int(
     os.getenv(
         "COMPRESSOR_GPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS",
-        os.getenv("COMPRESSOR_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS", "200"),
+        os.getenv(
+            "COMPRESSOR_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS",
+            str(GPU_COMPRESSION_POLICY.min_model_incremental_savings_tokens),
+        ),
     )
 )
 DEFAULT_MIN_MODEL_INCREMENTAL_REDUCTION = float(
-    os.getenv("COMPRESSOR_MIN_MODEL_INCREMENTAL_REDUCTION", "0.05")
+    os.getenv(
+        "COMPRESSOR_MIN_MODEL_INCREMENTAL_REDUCTION",
+        str(GPU_COMPRESSION_POLICY.min_model_incremental_reduction),
+    )
 )
 DEFAULT_MAX_MODEL_PROJECTED_LATENCY_MS = float(
-    os.getenv("COMPRESSOR_MAX_MODEL_PROJECTED_LATENCY_MS", "2500")
+    os.getenv(
+        "COMPRESSOR_MAX_MODEL_PROJECTED_LATENCY_MS",
+        str(GPU_COMPRESSION_POLICY.max_model_projected_latency_ms),
+    )
 )
 DEFAULT_MAX_MODEL_AUTO_PLACEHOLDERS = int(
-    os.getenv("COMPRESSOR_MAX_MODEL_AUTO_PLACEHOLDERS", "400")
+    os.getenv(
+        "COMPRESSOR_MAX_MODEL_AUTO_PLACEHOLDERS",
+        str(GPU_COMPRESSION_POLICY.max_model_auto_placeholders),
+    )
 )
 DEFAULT_COLD_MODEL_TIGHT_LATENCY_BUDGET_MS = float(
-    os.getenv("COMPRESSOR_COLD_MODEL_TIGHT_LATENCY_BUDGET_MS", "1000")
+    os.getenv(
+        "COMPRESSOR_COLD_MODEL_TIGHT_LATENCY_BUDGET_MS",
+        str(GPU_COMPRESSION_POLICY.cold_model_tight_latency_budget_ms),
+    )
 )
 DEFAULT_MIN_DUPLICATE_BLOCK_TOKENS = int(
     os.getenv("COMPRESSOR_MIN_DUPLICATE_BLOCK_TOKENS", "32")
@@ -115,13 +144,22 @@ DEFAULT_MIN_LITERAL_PLACEHOLDER_REDUCTION = float(
     os.getenv("COMPRESSOR_MIN_LITERAL_PLACEHOLDER_REDUCTION", "0.05")
 )
 DEFAULT_MAX_PROTECTED_DENSITY = float(
-    os.getenv("COMPRESSOR_MAX_PROTECTED_DENSITY", "0.20")
+    os.getenv(
+        "COMPRESSOR_MAX_PROTECTED_DENSITY",
+        str(GPU_COMPRESSION_POLICY.max_protected_density),
+    )
 )
 DEFAULT_MAX_STRUCTURED_DENSITY = float(
-    os.getenv("COMPRESSOR_MAX_STRUCTURED_DENSITY", "0.35")
+    os.getenv(
+        "COMPRESSOR_MAX_STRUCTURED_DENSITY",
+        str(GPU_COMPRESSION_POLICY.max_structured_density),
+    )
 )
 DEFAULT_SKIP_MODEL_IF_DETERMINISTIC_REDUCTION_GTE = float(
-    os.getenv("COMPRESSOR_SKIP_MODEL_IF_DETERMINISTIC_REDUCTION_GTE", "0.12")
+    os.getenv(
+        "COMPRESSOR_SKIP_MODEL_IF_DETERMINISTIC_REDUCTION_GTE",
+        str(GPU_COMPRESSION_POLICY.skip_model_if_deterministic_reduction_gte),
+    )
 )
 DEFAULT_GPU_P50_FIXED_OVERHEAD_MS = os.getenv(
     "COMPRESSOR_GPU_P50_FIXED_OVERHEAD_MS",

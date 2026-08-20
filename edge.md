@@ -728,6 +728,7 @@ Routing behavior:
 supported JSON record-array deterministic requests are transformed at the edge
 unsupported complex deterministic and tenant_profile requests delegate to ORIGIN_BASE_URL when configured
 model_force and model_auto requests proxy to ORIGIN_BASE_URL
+model_auto uses the shared versioned GPU policy from app/gpu_compression_policy.json
 origin network failures and origin 5xx responses fall back to edge deterministic mode
 /tokens/estimate is answered at the edge with the regex token estimator
 successful 200 JSON responses use exact-response Cloudflare Cache API caching
@@ -791,11 +792,21 @@ CACHE_ENABLED=true enables cache when Cloudflare Cache API is available
 CACHE_TTL_SECONDS controls response TTL
 default TTL is 300 seconds
 Cache-Control: no-store bypasses cache
+top-level cache=false and compression_settings.cache=false bypass cache
 include_diagnostics=true bypasses cache
 debug=true bypasses cache
 only 200 JSON responses are stored
 fallback-deterministic responses are not stored
 ```
+
+Requests containing `compression_settings.tool_result_policy` always delegate to
+the GPU origin. The Worker validates the policy shape but does not independently
+compress tool results.
+
+The Worker emits content-free structured request events when
+`STRUCTURED_LOGS_ENABLED=true`. Workers Logs and sampled traces are enabled in
+`wrangler.jsonc`; events include route, status, decision, cache/rate-limit/auth
+state, elapsed time and compression policy version, never request bodies.
 
 Cache response headers:
 

@@ -1,10 +1,9 @@
 # GPU Cloud Run Preparation
 
 This runbook deploys the GPU container to the single production Cloud Run
-service named `prompt-compression`. There is no separate production CPU service.
-The Artifact Registry image is named `prompt-compression-gpu` only to identify
-its CUDA build; the image name must never be reused as the Cloud Run service
-name.
+service named `prompt-compression`. The Artifact Registry image is named
+`prompt-compression-gpu` only to identify its CUDA build; the image name must
+never be reused as the Cloud Run service name.
 
 The GPU image follows the Cloud Run GPU best-practice shape for this repository:
 
@@ -12,9 +11,9 @@ The GPU image follows the Cloud Run GPU best-practice shape for this repository:
 - Bake the current Hugging Face compression model into the image because it is
   small enough for the container-image loading path.
 - Run the deployed service with `COMPRESSOR_DEVICE=cuda`.
-- Use the GPU-aware `model_auto` defaults (2,000 candidate tokens and 200
-  expected saved tokens), or override the corresponding
-  `COMPRESSOR_GPU_MIN_MODEL_*` variables after benchmarking.
+- Use the versioned production policy in `app/gpu_compression_policy.json`
+  (2,000 candidate tokens and 200 expected saved tokens). The Cloudflare edge
+  consumes the same file.
 - Preload the base compression model during startup with
   `COMPRESSOR_PRELOAD_SLOTS=base`.
 - Start with `--concurrency 1`, then raise it only after load testing.
@@ -254,7 +253,15 @@ python scripts\smoke_test.py
 ```
 
 The health response should show `"model_loaded": true` when
-`COMPRESSOR_PRELOAD_SLOTS=base` is set.
+`COMPRESSOR_PRELOAD_SLOTS=base` is set. It also reports the compression policy,
+exact-response cache, per-content cache and content-free telemetry aggregates
+under `runtime`.
+
+Both cache layers default to bounded 32 MiB process-local storage with a
+five-minute TTL. Tune `RESPONSE_CACHE_*` and `CONTENT_CACHE_*` only after
+including their combined allowance in container-memory planning. Clients can
+bypass edge and origin caching with `Cache-Control: no-store` or the documented
+request-level `cache: false` setting.
 
 Before relying on `model_auto`, use `Model force` on the benchmark page to
 measure warm GPU fixed overhead, per-chunk LLMLingua latency, and token-estimate

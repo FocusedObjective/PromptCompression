@@ -14,6 +14,8 @@ import { authorizeRequest } from "./auth";
 import { matchEdgeCache, storeEdgeCache } from "./cache";
 import { fetchOrigin } from "./origin";
 import { checkRateLimit } from "./rateLimit";
+import { GPU_POLICY } from "./gpuPolicy";
+import { applyCorsPreflightHeaders, applyCorsResponseHeaders } from "./cors";
 import type { EdgeContext, Env, JsonObject } from "./types";
 
 const POST_ROUTES = new Set([
@@ -34,24 +36,34 @@ export default {
       auth: "not-checked"
     };
 
+    let response: Response;
     try {
-      return await handleRequest(request, env, context, ctx);
+      response = await handleRequest(request, env, context, ctx);
     } catch (error) {
       if (error instanceof RequestShapeError || error instanceof SyntaxError) {
         context.decision = "reject";
-        return jsonResponse(
+        response = jsonResponse(
           { error: "invalid_request", message: error.message || "Invalid JSON request body.", request_id: context.requestId },
           400,
           context
         );
+      } else {
+        context.decision = "reject";
+        console.error(JSON.stringify({
+          event: "prompt_compression_edge_error",
+          error_type: error instanceof Error ? error.name : "UnknownError",
+          method: request.method,
+          path: new URL(request.url).pathname
+        }));
+        response = jsonResponse(
+          { error: "edge_error", message: "The edge compression gateway failed.", request_id: context.requestId },
+          500,
+          context
+        );
       }
-      context.decision = "reject";
-      return jsonResponse(
-        { error: "edge_error", message: "The edge compression gateway failed.", request_id: context.requestId },
-        500,
-        context
-      );
     }
+    logEdgeRequest(request, response, context, env);
+    return response;
   }
 };
 
@@ -79,7 +91,8 @@ export async function handleRequest(
       deployment_timestamp: "edge-runtime",
       model: "edge-deterministic",
       model_loaded: true,
-      edge_env: env.EDGE_ENV || "dev"
+      edge_env: env.EDGE_ENV || "dev",
+      runtime: { compression_policy: GPU_POLICY.schemaVersion }
     }, 200, context);
   }
 
@@ -140,7 +153,8 @@ export async function handleRequest(
     return storeEdgeCache(
       handle,
       jsonResponse(buildTokenEstimateResponse(body), 200, context),
-      context
+      context,
+      ctx
     );
   }
 
@@ -160,7 +174,7 @@ export async function handleRequest(
       context.decision = "origin";
       const originResponse = await fetchOrigin(request, env, route, rawBody, context);
       if (originResponse) {
-        return storeEdgeCache(handle, originResponse, context);
+        return storeEdgeCache(handle, originResponse, context, ctx);
       }
       context.decision = "fallback-deterministic";
       return deterministicResponse(route, body, request, context, ["edge_origin_unavailable_deterministic_fallback"]);
@@ -169,7 +183,8 @@ export async function handleRequest(
     return storeEdgeCache(
       handle,
       deterministicResponse(route, body, request, context, originGate.reason ? [originGate.reason] : []),
-      context
+      context,
+      ctx
     );
   }
 
@@ -178,7 +193,7 @@ export async function handleRequest(
       context.decision = "origin";
       const originResponse = await fetchOrigin(request, env, route, rawBody, context);
       if (originResponse) {
-        return storeEdgeCache(handle, originResponse, context);
+        return storeEdgeCache(handle, originResponse, context, ctx);
       }
     }
     context.decision = "fallback-deterministic";
@@ -189,7 +204,8 @@ export async function handleRequest(
   return storeEdgeCache(
     handle,
     deterministicResponse(route, body, request, context),
-    context
+    context,
+    ctx
   );
 }
 
@@ -222,28 +238,26 @@ function jsonResponse(body: JsonObject, status: number, context: EdgeContext): R
     "x-edge-cache": context.cache,
     "x-edge-ratelimit": context.rateLimit,
     "x-edge-auth": context.auth,
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type, x-api-key, x-request-id, x-tenant-id"
+    "x-compression-policy": GPU_POLICY.schemaVersion
   });
+  applyCorsResponseHeaders(headers);
 
   return new Response(JSON.stringify(body), { status, headers });
 }
 
 function corsPreflightResponse(context: EdgeContext): Response {
+  const headers = new Headers({
+    "x-request-id": context.requestId,
+    "x-edge-decision": context.decision,
+    "x-edge-cache": context.cache,
+    "x-edge-ratelimit": context.rateLimit,
+    "x-edge-auth": context.auth
+  });
+  applyCorsPreflightHeaders(headers);
+
   return new Response(null, {
     status: 204,
-    headers: {
-      "x-request-id": context.requestId,
-      "x-edge-decision": context.decision,
-      "x-edge-cache": context.cache,
-      "x-edge-ratelimit": context.rateLimit,
-      "x-edge-auth": context.auth,
-      "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET, POST, OPTIONS",
-      "access-control-allow-headers": "authorization, content-type, x-api-key, x-request-id, x-tenant-id",
-      "access-control-max-age": "86400"
-    }
+    headers
   });
 }
 
@@ -266,6 +280,29 @@ function rateLimitedResponse(context: EdgeContext, retryAfterSeconds?: number): 
     response.headers.set("retry-after", String(retryAfterSeconds));
   }
   return response;
+}
+
+function logEdgeRequest(
+  request: Request,
+  response: Response,
+  context: EdgeContext,
+  env: Env
+): void {
+  if (env.STRUCTURED_LOGS_ENABLED?.toLowerCase() !== "true") {
+    return;
+  }
+  console.log(JSON.stringify({
+    event: "prompt_compression_edge_request",
+    method: request.method,
+    path: new URL(request.url).pathname,
+    status: response.status,
+    decision: context.decision,
+    cache_status: context.cache,
+    rate_limit: context.rateLimit,
+    auth: context.auth,
+    elapsed_ms: Math.max(0, Date.now() - context.startMs),
+    compression_policy: GPU_POLICY.schemaVersion
+  }));
 }
 
 function normalizePath(pathname: string): string {

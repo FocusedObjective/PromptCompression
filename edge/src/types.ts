@@ -16,6 +16,7 @@ export interface Env {
   ORIGIN_TIMEOUT_MS?: string;
   CACHE_ENABLED?: string;
   CACHE_TTL_SECONDS?: string;
+  STRUCTURED_LOGS_ENABLED?: string;
   RATE_LIMIT_ENABLED?: string;
   RATE_LIMIT_LOCAL_FALLBACK?: string;
   RATE_LIMIT_TENANT_TIERS?: string;

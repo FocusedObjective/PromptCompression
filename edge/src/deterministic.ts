@@ -7,6 +7,7 @@ import {
   reduction
 } from "./tokenEstimator";
 import { requiresOriginForJsonText, transformJsonSegmentsForEdge } from "./jsonTransform";
+import { GPU_POLICY } from "./gpuPolicy";
 
 const EDGE_MODEL = "edge-deterministic";
 const DEFAULT_AGGRESSIVENESS = 0.15;
@@ -16,15 +17,15 @@ const DEFAULT_ROLE_AGGRESSIVENESS: Record<string, number> = {
   user: DEFAULT_AGGRESSIVENESS
 };
 const VALID_COMPRESSION_MODES = new Set(["deterministic", "model_auto", "model_force"]);
-const MIN_MODEL_SEGMENT_CHARS = 160;
-const MIN_MODEL_SEGMENT_TOKENS = 24;
-const MIN_MODEL_AUTO_CANDIDATE_TOKENS = 20000;
-const MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS = 2000;
-const MIN_MODEL_INCREMENTAL_REDUCTION = 0.05;
-const MAX_PROTECTED_DENSITY = 0.20;
-const MAX_STRUCTURED_DENSITY = 0.35;
-const SKIP_MODEL_IF_DETERMINISTIC_REDUCTION_GTE = 0.12;
-const COLD_MODEL_TIGHT_LATENCY_BUDGET_MS = 1000;
+const MIN_MODEL_SEGMENT_CHARS = GPU_POLICY.minModelSegmentChars;
+const MIN_MODEL_SEGMENT_TOKENS = GPU_POLICY.minModelSegmentTokens;
+const MIN_MODEL_AUTO_CANDIDATE_TOKENS = GPU_POLICY.minModelCandidateTokens;
+const MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS = GPU_POLICY.minModelIncrementalSavingsTokens;
+const MIN_MODEL_INCREMENTAL_REDUCTION = GPU_POLICY.minModelIncrementalReduction;
+const MAX_PROTECTED_DENSITY = GPU_POLICY.maxProtectedDensity;
+const MAX_STRUCTURED_DENSITY = GPU_POLICY.maxStructuredDensity;
+const SKIP_MODEL_IF_DETERMINISTIC_REDUCTION_GTE = GPU_POLICY.skipModelIfDeterministicReductionGte;
+const COLD_MODEL_TIGHT_LATENCY_BUDGET_MS = GPU_POLICY.coldModelTightLatencyBudgetMs;
 
 export interface EdgeOriginGate {
   useOrigin: boolean;
@@ -180,6 +181,7 @@ export function validateRequestBody(body: JsonObject, route: string): void {
     validateMode(body.mode);
     validateNumberRange(body.aggressiveness, "aggressiveness", 0, 1);
     validateNumberRange(body.latency_budget_ms, "latency_budget_ms", 0, Number.POSITIVE_INFINITY);
+    validateBoolean(body.cache, "cache");
     validateTenantProfile(body.tenant_profile);
     return;
   }
@@ -223,6 +225,13 @@ export function needsOriginForDeterministic(body: JsonObject, route: string): bo
 
   if (route === "/compress" && (body.include_sections === true || body.include_diagnostics === true)) {
     return true;
+  }
+
+  if (route === "/v1/messages/compress") {
+    const settings = isObject(body.compression_settings) ? body.compression_settings : {};
+    if (isObject(settings.tool_result_policy)) {
+      return true;
+    }
   }
 
   return compressibleTexts(body, route).some(looksTooComplexForEdgeSubset);
@@ -508,6 +517,41 @@ function validateCompressionSettings(value: unknown): void {
   validateMode(value.mode);
   validateAggressiveness(value.aggressiveness, "compression_settings.aggressiveness");
   validateNumberRange(value.latency_budget_ms, "compression_settings.latency_budget_ms", 0, Number.POSITIVE_INFINITY);
+  validateBoolean(value.cache, "compression_settings.cache");
+  validateBoolean(value.fail_open, "compression_settings.fail_open");
+  validateToolResultPolicy(value.tool_result_policy);
+}
+
+function validateToolResultPolicy(value: unknown): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (!isObject(value)) {
+    throw new RequestShapeError("compression_settings.tool_result_policy must be an object");
+  }
+  if (value.mode !== undefined && value.mode !== "deterministic" && value.mode !== "model_auto") {
+    throw new RequestShapeError(
+      "compression_settings.tool_result_policy.mode must be deterministic or model_auto"
+    );
+  }
+  validateNumberRange(value.aggressiveness, "compression_settings.tool_result_policy.aggressiveness", 0, 1);
+  validateNumberRange(value.min_tokens, "compression_settings.tool_result_policy.min_tokens", 1, 2_000_000);
+  validateNumberRange(value.max_reduction, "compression_settings.tool_result_policy.max_reduction", 0, 1);
+  validateNumberRange(value.rollout_percentage, "compression_settings.tool_result_policy.rollout_percentage", 0, 100);
+  if (
+    value.rollout_mode !== undefined
+    && value.rollout_mode !== "shadow"
+    && value.rollout_mode !== "apply"
+  ) {
+    throw new RequestShapeError(
+      "compression_settings.tool_result_policy.rollout_mode must be shadow or apply"
+    );
+  }
+  if (value.rollout_key !== undefined && typeof value.rollout_key !== "string") {
+    throw new RequestShapeError(
+      "compression_settings.tool_result_policy.rollout_key must be a string"
+    );
+  }
 }
 
 function validateTenantProfile(value: unknown): void {
@@ -562,6 +606,12 @@ function validateNumberRange(
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
     throw new RequestShapeError(`${field} must be between ${min} and ${max}`);
+  }
+}
+
+function validateBoolean(value: unknown, field: string): void {
+  if (value !== undefined && value !== null && typeof value !== "boolean") {
+    throw new RequestShapeError(`${field} must be a boolean`);
   }
 }
 

@@ -1,5 +1,5 @@
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Annotated, Any, Callable
 import hashlib
 import json
@@ -19,14 +19,17 @@ from app.compressor import (
     CompressionRuntimeError,
     PromptCompressionService,
 )
+from app.content_cache import ContentCompressionCache
 from app.eval_suite import evaluate_compression, load_eval_cases, quality_passed
 from app.eval_ui import EVAL_HTML
 from app.embed_ui import EMBED_HTML
 from app.experiments_ui import EXPERIMENTS_HTML
 from app.message_compression import (
+    ToolResultCompressionPolicy,
     compress_user_messages,
     estimate_content_token_details,
 )
+from app.gpu_policy import GPU_COMPRESSION_POLICY
 from app.research_ui import RESEARCH_HTML
 from app.response_cache import LocalResponseCache
 from app.schemas import (
@@ -49,6 +52,7 @@ from app.schemas import (
     V1MessagesCompressResponse,
 )
 from app.tenant_profiles import TenantCompressionProfile, build_tenant_profile
+from app.telemetry import CompressionTelemetry
 from app.token_estimator import (
     REGEX_TOKEN_ESTIMATOR,
     TokenEstimate,
@@ -1410,9 +1414,11 @@ usage_tap_authorization_executor = ThreadPoolExecutor(
 usage_tap_metering_client = UsageTapMeteringClient.from_environment()
 demo_session_manager = DemoSessionManager.from_environment()
 compression_response_cache = LocalResponseCache.from_environment()
+message_content_cache = ContentCompressionCache.from_environment()
+compression_telemetry = CompressionTelemetry()
 eval_cases = load_eval_cases()
 
-_RESPONSE_CACHE_SCHEMA_VERSION = "compression-response-v1"
+_RESPONSE_CACHE_SCHEMA_VERSION = "compression-response-v2"
 _TRANSIENT_CACHE_WARNING_FRAGMENTS = (
     "cold_model",
     "fallback",
@@ -1778,6 +1784,9 @@ def health() -> HealthResponse:
     runtime_info = getattr(compression_service, "runtime_info", None)
     runtime = runtime_info() if callable(runtime_info) else {}
     runtime["response_cache"] = compression_response_cache.stats()
+    runtime["content_cache"] = message_content_cache.stats()
+    runtime["compression_policy"] = GPU_COMPRESSION_POLICY.schema_version
+    runtime["telemetry"] = compression_telemetry.snapshot()
     return HealthResponse(
         status="ok",
         deployment_version=DEPLOYMENT_VERSION,
@@ -1899,6 +1908,7 @@ def _response_cache_key(
     """Hash the complete, resolved compression behavior without credentials."""
     identity = {
         "schema": _RESPONSE_CACHE_SCHEMA_VERSION,
+        "compression_policy": GPU_COMPRESSION_POLICY.schema_version,
         "route": route,
         "request": request_payload,
         "tenant_profile": asdict(tenant_profile),
@@ -2024,6 +2034,7 @@ def compress_http(
     ],
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
     x_request_id: Annotated[str | None, Header(alias="X-Request-ID")] = None,
+    cache_control: Annotated[str | None, Header(alias="Cache-Control")] = None,
 ) -> CompressResponse:
     reserve_demo_compression_operation(
         http_request,
@@ -2047,6 +2058,11 @@ def compress_http(
             "mode": _resolve_compress_mode(request),
         },
     )
+    request_cacheable = (
+        request.cache
+        and not _cache_control_disables_storage(cache_control)
+        and _request_allows_response_cache(request)
+    )
     response, cache_status, cache_payload, cacheable = _run_cached_response(
         key=cache_key,
         response_type=CompressResponse,
@@ -2056,7 +2072,7 @@ def compress_http(
             x_request_id=x_request_id,
         ),
         cacheable=_compress_response_is_cacheable,
-        request_cacheable=_request_allows_response_cache(request),
+        request_cacheable=request_cacheable,
     )
     complete_usage_tap_compression_authorization(
         http_request,
@@ -2074,6 +2090,15 @@ def compress_http(
         cacheable=cacheable,
     )
     http_response.headers["X-Compression-Cache"] = cache_status
+    compression_telemetry.record(
+        route="/compress",
+        mode=response.compression_mode,
+        cache_status=cache_status,
+        input_tokens=response.original_tokens,
+        output_tokens=response.compressed_tokens,
+        elapsed_ms=response.elapsed_ms,
+        warnings=response.warnings,
+    )
     return response
 
 
@@ -2163,6 +2188,7 @@ def compress_v1_http(
         Depends(start_usage_tap_compression_authorization),
     ],
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    cache_control: Annotated[str | None, Header(alias="Cache-Control")] = None,
 ) -> V1CompressResponse:
     reserve_demo_compression_operation(
         http_request,
@@ -2194,6 +2220,10 @@ def compress_v1_http(
         response_type=V1CompressResponse,
         compute=lambda: compress_v1(request, x_tenant_id=x_tenant_id),
         cacheable=_v1_response_is_cacheable,
+        request_cacheable=(
+            _v1_cache_enabled(request.compression_settings)
+            and not _cache_control_disables_storage(cache_control)
+        ),
     )
     complete_usage_tap_compression_authorization(
         http_request,
@@ -2211,12 +2241,24 @@ def compress_v1_http(
         cacheable=cacheable,
     )
     http_response.headers["X-Compression-Cache"] = cache_status
+    compression_telemetry.record(
+        route="/v1/compress",
+        mode=_resolve_v1_mode(request.compression_settings),
+        cache_status=cache_status,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        elapsed_ms=response.compression_time,
+        warnings=response.warnings,
+    )
     return response
 
 
 def compress_v1_messages(
     request: V1MessagesCompressRequest,
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    *,
+    content_cache: ContentCompressionCache | None = None,
+    content_cache_enabled: bool = True,
 ) -> V1MessagesCompressResponse:
     tenant_profile = _tenant_profile_from_request(
         body_tenant_id=request.tenant_id,
@@ -2237,6 +2279,7 @@ def compress_v1_messages(
         message.model_dump(exclude_unset=True)
         for message in request.messages
     ]
+    fail_open_used = False
     try:
         result = compress_user_messages(
             messages,
@@ -2254,9 +2297,32 @@ def compress_v1_messages(
                     request.compression_settings,
                 )
             ),
+            content_cache=content_cache,
+            content_cache_enabled=content_cache_enabled,
+            tool_result_policy=_resolve_v1_tool_result_policy(
+                request.compression_settings,
+            ),
         )
-    except CompressionRuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (CompressionRuntimeError, TimeoutError) as exc:
+        if not _v1_fail_open_enabled(request.compression_settings):
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        fail_open_used = True
+        result = compress_user_messages(
+            messages,
+            compression_service=compression_service,
+            aggressiveness=0.0,
+            role_aggressiveness={
+                str(message.get("role", "")).lower(): 0.0 for message in messages
+            },
+            tenant_profile=tenant_profile,
+            mode=COMPRESSION_MODE_DETERMINISTIC,
+            content_cache=None,
+            content_cache_enabled=False,
+        )
+        result = replace(
+            result,
+            warnings=[*result.warnings, "compression_fail_open_original_preserved"],
+        )
 
     preserved_top_level = _top_level_preserved_token_details(
         request,
@@ -2309,6 +2375,7 @@ def compress_v1_messages(
         training_sample_recorded=False,
         message_stats=[asdict(stat) for stat in result.stats],
         warnings=result.warnings,
+        fail_open_used=fail_open_used,
     )
 
 
@@ -2325,6 +2392,7 @@ def compress_v1_messages_http(
         Depends(start_usage_tap_compression_authorization),
     ],
     x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    cache_control: Annotated[str | None, Header(alias="Cache-Control")] = None,
 ) -> V1MessagesCompressResponse:
     reserve_demo_compression_operation(
         http_request,
@@ -2364,11 +2432,21 @@ def compress_v1_messages_http(
             ),
         },
     )
+    request_cacheable = (
+        _v1_cache_enabled(request.compression_settings)
+        and not _cache_control_disables_storage(cache_control)
+    )
     response, cache_status, cache_payload, cacheable = _run_cached_response(
         key=cache_key,
         response_type=V1MessagesCompressResponse,
-        compute=lambda: compress_v1_messages(request, x_tenant_id=x_tenant_id),
+        compute=lambda: compress_v1_messages(
+            request,
+            x_tenant_id=x_tenant_id,
+            content_cache=message_content_cache,
+            content_cache_enabled=request_cacheable,
+        ),
         cacheable=_v1_response_is_cacheable,
+        request_cacheable=request_cacheable,
     )
     complete_usage_tap_compression_authorization(
         http_request,
@@ -2386,6 +2464,32 @@ def compress_v1_messages_http(
         cacheable=cacheable,
     )
     http_response.headers["X-Compression-Cache"] = cache_status
+    if response.fail_open_used:
+        http_response.headers["Cache-Control"] = "no-store"
+    content_hits = sum(stat.content_cache_hits for stat in response.message_stats)
+    content_misses = sum(stat.content_cache_misses for stat in response.message_stats)
+    content_stores = sum(stat.content_cache_stores for stat in response.message_stats)
+    http_response.headers["X-Compression-Content-Cache"] = (
+        f"hits={content_hits}; misses={content_misses}; stores={content_stores}"
+    )
+    compression_telemetry.record(
+        route="/v1/messages/compress",
+        mode=_resolve_v1_mode(request.compression_settings),
+        cache_status=cache_status,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        elapsed_ms=response.compression_time,
+        warnings=response.warnings,
+        fail_open_used=response.fail_open_used,
+        content_cache_hits=content_hits,
+        content_cache_misses=content_misses,
+        content_cache_stores=content_stores,
+        tool_actions=[
+            stat.tool_result_action
+            for stat in response.message_stats
+            if stat.tool_result_action is not None
+        ],
+    )
     return response
 
 
@@ -2511,6 +2615,40 @@ def _resolve_v1_latency_budget_ms(
     if settings is None:
         return None
     return settings.latency_budget_ms
+
+
+def _resolve_v1_tool_result_policy(
+    settings: V1CompressionSettings | None,
+) -> ToolResultCompressionPolicy | None:
+    if settings is None or settings.tool_result_policy is None:
+        return None
+    policy = settings.tool_result_policy
+    return ToolResultCompressionPolicy(
+        mode=policy.mode,
+        aggressiveness=policy.aggressiveness,
+        min_tokens=policy.min_tokens,
+        max_reduction=policy.max_reduction,
+        rollout_mode=policy.rollout_mode,
+        rollout_percentage=policy.rollout_percentage,
+        rollout_key=policy.rollout_key,
+    )
+
+
+def _v1_cache_enabled(settings: V1CompressionSettings | None) -> bool:
+    return settings is None or settings.cache
+
+
+def _v1_fail_open_enabled(settings: V1CompressionSettings | None) -> bool:
+    return settings is None or settings.fail_open
+
+
+def _cache_control_disables_storage(cache_control: str | None) -> bool:
+    if cache_control is None:
+        return False
+    return any(
+        directive.strip().casefold() == "no-store"
+        for directive in cache_control.split(",")
+    )
 
 
 def _resolve_v1_compact_empty_user_messages(
