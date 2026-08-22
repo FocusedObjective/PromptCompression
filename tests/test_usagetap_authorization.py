@@ -119,6 +119,16 @@ def test_valid_cmp_authorization_forwards_only_required_headers() -> None:
     ]
 
 
+def test_valid_universal_key_is_forwarded_for_permission_authorization() -> None:
+    client, post = build_client(FakeResponse(200, AUTHORIZED_PAYLOAD))
+    incoming = f"Bearer utk-{'A' * 43}"
+
+    result = client.authorize(incoming)
+
+    assert result.customer_id == "customer_server"
+    assert post.calls[0][1]["headers"]["Authorization"] == incoming
+
+
 def test_short_lived_session_is_forwarded_without_local_claim_trust() -> None:
     client, post = build_client(FakeResponse(200, AUTHORIZED_PAYLOAD))
     incoming = "Bearer eyJ0eXAiOiJjb21wcmVzc2lvbiJ9.eyJleHAiOjF9.signature"
@@ -186,6 +196,18 @@ def test_default_sanity_gate_requires_exact_43_character_cmp_suffix() -> None:
     assert_authorization_error(client, f"Bearer cmp-{'A' * 42}", 401)
     assert_authorization_error(client, f"Bearer cmp-{'A' * 44}", 401)
     assert_authorization_error(client, f"Bearer ck-{'A' * 43}", 401)
+
+
+def test_universal_key_sanity_gate_requires_exact_43_character_suffix() -> None:
+    client = UsageTapAuthorizationClient(
+        post=lambda *args, **kwargs: FakeResponse(200, AUTHORIZED_PAYLOAD),
+    )
+    valid = f"Bearer utk-{'A' * 43}"
+
+    assert client.validate_incoming_credential(valid) == valid
+    assert_authorization_error(client, f"Bearer utk-{'A' * 42}", 401)
+    assert_authorization_error(client, f"Bearer utk-{'A' * 44}", 401)
+    assert_authorization_error(client, f"Bearer utk-{'A' * 42}.", 401)
 
 
 def test_failure_cache_uses_salted_digest_and_expires() -> None:

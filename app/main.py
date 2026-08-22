@@ -1,4 +1,5 @@
 from concurrent.futures import Future, ThreadPoolExecutor
+import copy
 from dataclasses import asdict, dataclass, replace
 from typing import Annotated, Any, Callable
 import hashlib
@@ -16,6 +17,7 @@ from app.compressor import (
     COMPRESSION_MODE_DETERMINISTIC,
     COMPRESSION_MODE_MODEL_AUTO,
     COMPRESSION_MODE_MODEL_FORCE,
+    CompressionResult,
     CompressionRuntimeError,
     PromptCompressionService,
 )
@@ -29,6 +31,7 @@ from app.message_compression import (
     compress_user_messages,
     estimate_content_token_details,
 )
+from app.responses_compression import compress_responses_input
 from app.gpu_policy import GPU_COMPRESSION_POLICY
 from app.research_ui import RESEARCH_HTML
 from app.response_cache import LocalResponseCache
@@ -50,6 +53,8 @@ from app.schemas import (
     V1CompressionSettings,
     V1MessagesCompressRequest,
     V1MessagesCompressResponse,
+    V1ResponsesCompressRequest,
+    V1ResponsesCompressResponse,
 )
 from app.tenant_profiles import TenantCompressionProfile, build_tenant_profile
 from app.telemetry import CompressionTelemetry
@@ -699,11 +704,11 @@ Output:
                 spellcheck="false"
                 data-1p-ignore="true"
                 data-lpignore="true"
-                placeholder="cmp-..."
+                placeholder="utk-... or cmp-..."
               >
               <button class="example-button" id="startDemoButton" type="button">Start 10-minute demo</button>
             </div>
-            <span class="field-help" id="demoAccessStatus">Enter a cmp- key or start a bounded demo session. Credentials stay in page memory only.</span>
+            <span class="field-help" id="demoAccessStatus">Enter an API key with Use Compression permission or start a bounded demo session. Credentials stay in page memory only.</span>
           </div>
           <label class="tenant-field">
             Mode
@@ -843,7 +848,7 @@ Output:
     const reduction = document.getElementById("reduction");
     const tokens = document.getElementById("tokens");
     const elapsed = document.getElementById("elapsed");
-    const COMPRESSION_CREDENTIAL_PATTERN = /^(?:cmp-[A-Za-z0-9_-]{43}|demo-v1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)$/;
+    const COMPRESSION_CREDENTIAL_PATTERN = /^(?:cmp-[A-Za-z0-9_-]{43}|utk-[A-Za-z0-9_-]{43}|demo-v1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)$/;
     let latestCompressedText = "";
     const TEXT_AND_JSON_EXAMPLE = promptInput.value;
     const TENANT_TEST_PRESETS = {
@@ -1324,7 +1329,7 @@ Output:
       }
       const compressionApiKey = compressionApiKeyInput.value.trim();
       if (!COMPRESSION_CREDENTIAL_PATTERN.test(compressionApiKey)) {
-        setStatus("Enter a valid cmp- key or start a demo session", true);
+        setStatus("Enter a key with Use Compression permission or start a demo session", true);
         return;
       }
 
@@ -1814,11 +1819,13 @@ def estimate_tokens(request: TokenEstimateRequest) -> TokenEstimateResponse:
     )
 
 
-def compress(
+def _run_compress_request(
     request: CompressRequest,
-    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
-    x_request_id: Annotated[str | None, Header(alias="X-Request-ID")] = None,
-) -> CompressResponse:
+    x_tenant_id: str | None = None,
+    x_request_id: str | None = None,
+    *,
+    model_auto_plan_only: bool = False,
+) -> CompressionResult:
     tenant_profile = _tenant_profile_from_request(
         body_tenant_id=request.tenant_id,
         header_tenant_id=x_tenant_id,
@@ -1856,9 +1863,23 @@ def compress(
             compression_kwargs["experiment_profile"] = request.experiment_profile
         if x_request_id:
             compression_kwargs["request_id"] = x_request_id
-        result = compression_service.compress(**compression_kwargs)
+        if model_auto_plan_only:
+            compression_kwargs["model_auto_plan_only"] = True
+        return compression_service.compress(**compression_kwargs)
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def compress(
+    request: CompressRequest,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    x_request_id: Annotated[str | None, Header(alias="X-Request-ID")] = None,
+) -> CompressResponse:
+    result = _run_compress_request(
+        request,
+        x_tenant_id=x_tenant_id,
+        x_request_id=x_request_id,
+    )
 
     if result.token_savings is None:
         raise HTTPException(
@@ -1896,6 +1917,54 @@ def compress(
         ),
         experiment_profile=result.experiment_profile,
     )
+
+
+def plan_compress_model_auto(
+    request: CompressRequest,
+    *,
+    x_tenant_id: str | None = None,
+    x_request_id: str | None = None,
+) -> tuple[CompressResponse, bool]:
+    """Run deterministic compression and the GPU gate without loading a model."""
+    result = _run_compress_request(
+        request,
+        x_tenant_id=x_tenant_id,
+        x_request_id=x_request_id,
+        model_auto_plan_only=True,
+    )
+    if result.token_savings is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Compression result did not include token-savings attribution.",
+        )
+    response = CompressResponse(
+        compressed_text=result.compressed_text,
+        original_tokens=result.original_tokens,
+        compressed_tokens=result.compressed_tokens,
+        reduction=result.reduction,
+        aggressiveness=result.aggressiveness,
+        target_rate=result.target_rate,
+        model=result.model,
+        tenant_id=result.tenant_id,
+        compression_profile=result.compression_profile,
+        compression_profile_source=result.compression_profile_source,
+        training_sample_recorded=result.training_sample_recorded,
+        token_estimator=result.token_estimator,
+        compression_mode=result.compression_mode,
+        compression_path=result.compression_path,
+        token_savings=TokenSavingsResponse(**asdict(result.token_savings)),
+        warnings=result.warnings,
+        elapsed_ms=result.elapsed_ms,
+        labeled_tokens=[asdict(token) for token in result.labeled_tokens],
+        output_sections=[asdict(section) for section in result.output_sections],
+        diagnostics=(
+            asdict(result.diagnostics)
+            if request.include_diagnostics and result.diagnostics is not None
+            else None
+        ),
+        experiment_profile=result.experiment_profile,
+    )
+    return response, result.model_required
 
 
 def _response_cache_key(
@@ -1956,7 +2025,11 @@ def _compress_response_is_cacheable(response: CompressResponse) -> bool:
 
 
 def _v1_response_is_cacheable(
-    response: V1CompressResponse | V1MessagesCompressResponse,
+    response: (
+        V1CompressResponse
+        | V1MessagesCompressResponse
+        | V1ResponsesCompressResponse
+    ),
 ) -> bool:
     return (
         not response.training_sample_recorded
@@ -2102,10 +2175,12 @@ def compress_http(
     return response
 
 
-def compress_v1(
+def _compress_v1_response(
     request: V1CompressRequest,
-    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
-) -> V1CompressResponse:
+    x_tenant_id: str | None = None,
+    *,
+    model_auto_plan_only: bool = False,
+) -> tuple[V1CompressResponse, bool]:
     tenant_profile = _tenant_profile_from_request(
         body_tenant_id=request.tenant_id,
         header_tenant_id=x_tenant_id,
@@ -2119,7 +2194,7 @@ def compress_v1(
     latency_budget_ms = _resolve_v1_latency_budget_ms(request.compression_settings)
 
     try:
-        result = compression_service.compress(
+        compression_kwargs = dict(
             text=request.input,
             aggressiveness=aggressiveness,
             include_sections=False,
@@ -2138,6 +2213,9 @@ def compress_v1(
                 else "visible_text"
             ),
         )
+        if model_auto_plan_only:
+            compression_kwargs["model_auto_plan_only"] = True
+        result = compression_service.compress(**compression_kwargs)
     except CompressionRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -2153,7 +2231,7 @@ def compress_v1(
         request.model,
     )
 
-    return V1CompressResponse(
+    response = V1CompressResponse(
         output=result.compressed_text,
         output_tokens=result.compressed_tokens,
         input_tokens=result.original_tokens,
@@ -2172,6 +2250,30 @@ def compress_v1(
         compression_profile_source=result.compression_profile_source,
         training_sample_recorded=result.training_sample_recorded,
         warnings=result.warnings,
+    )
+    return response, result.model_required
+
+
+def compress_v1(
+    request: V1CompressRequest,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+) -> V1CompressResponse:
+    response, _model_required = _compress_v1_response(
+        request,
+        x_tenant_id=x_tenant_id,
+    )
+    return response
+
+
+def plan_v1_compress_model_auto(
+    request: V1CompressRequest,
+    *,
+    x_tenant_id: str | None = None,
+) -> tuple[V1CompressResponse, bool]:
+    return _compress_v1_response(
+        request,
+        x_tenant_id=x_tenant_id,
+        model_auto_plan_only=True,
     )
 
 
@@ -2253,13 +2355,14 @@ def compress_v1_http(
     return response
 
 
-def compress_v1_messages(
+def _compress_v1_messages_response(
     request: V1MessagesCompressRequest,
-    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    x_tenant_id: str | None = None,
     *,
     content_cache: ContentCompressionCache | None = None,
     content_cache_enabled: bool = True,
-) -> V1MessagesCompressResponse:
+    model_auto_plan_only: bool = False,
+) -> tuple[V1MessagesCompressResponse, bool]:
     tenant_profile = _tenant_profile_from_request(
         body_tenant_id=request.tenant_id,
         header_tenant_id=x_tenant_id,
@@ -2275,10 +2378,7 @@ def compress_v1_messages(
     mode = _resolve_v1_mode(request.compression_settings)
     latency_budget_ms = _resolve_v1_latency_budget_ms(request.compression_settings)
 
-    messages = [
-        message.model_dump(exclude_unset=True)
-        for message in request.messages
-    ]
+    messages = [copy.deepcopy(message) for message in request.messages]
     fail_open_used = False
     try:
         result = compress_user_messages(
@@ -2298,10 +2398,13 @@ def compress_v1_messages(
                 )
             ),
             content_cache=content_cache,
-            content_cache_enabled=content_cache_enabled,
+            content_cache_enabled=(
+                content_cache_enabled and not model_auto_plan_only
+            ),
             tool_result_policy=_resolve_v1_tool_result_policy(
                 request.compression_settings,
             ),
+            model_auto_plan_only=model_auto_plan_only,
         )
     except (CompressionRuntimeError, TimeoutError) as exc:
         if not _v1_fail_open_enabled(request.compression_settings):
@@ -2346,7 +2449,7 @@ def compress_v1_messages(
         request_messages=result.messages,
     )
 
-    return V1MessagesCompressResponse(
+    response = V1MessagesCompressResponse(
         compressed_request=compressed_request,
         messages=result.messages,
         input_tokens=input_tokens,
@@ -2376,6 +2479,37 @@ def compress_v1_messages(
         message_stats=[asdict(stat) for stat in result.stats],
         warnings=result.warnings,
         fail_open_used=fail_open_used,
+    )
+    return response, result.model_required
+
+
+def compress_v1_messages(
+    request: V1MessagesCompressRequest,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    *,
+    content_cache: ContentCompressionCache | None = None,
+    content_cache_enabled: bool = True,
+) -> V1MessagesCompressResponse:
+    response, _model_required = _compress_v1_messages_response(
+        request,
+        x_tenant_id=x_tenant_id,
+        content_cache=content_cache,
+        content_cache_enabled=content_cache_enabled,
+    )
+    return response
+
+
+def plan_v1_messages_model_auto(
+    request: V1MessagesCompressRequest,
+    *,
+    x_tenant_id: str | None = None,
+) -> tuple[V1MessagesCompressResponse, bool]:
+    return _compress_v1_messages_response(
+        request,
+        x_tenant_id=x_tenant_id,
+        content_cache=None,
+        content_cache_enabled=False,
+        model_auto_plan_only=True,
     )
 
 
@@ -2493,17 +2627,269 @@ def compress_v1_messages_http(
     return response
 
 
+def _compress_v1_responses_response(
+    request: V1ResponsesCompressRequest,
+    x_tenant_id: str | None = None,
+    *,
+    content_cache: ContentCompressionCache | None = None,
+    content_cache_enabled: bool = True,
+    model_auto_plan_only: bool = False,
+) -> tuple[V1ResponsesCompressResponse, bool]:
+    tenant_profile = _tenant_profile_from_request(
+        body_tenant_id=request.tenant_id,
+        header_tenant_id=x_tenant_id,
+        settings=request.tenant_profile,
+    )
+    aggressiveness = _resolve_v1_aggressiveness(
+        request.compression_settings,
+        tenant_profile,
+    )
+    role_aggressiveness = _responses_role_aggressiveness(
+        request.compression_settings,
+        aggressiveness,
+    )
+    mode = _resolve_v1_mode(request.compression_settings)
+    latency_budget_ms = _resolve_v1_latency_budget_ms(request.compression_settings)
+    fail_open_used = False
+
+    try:
+        result = compress_responses_input(
+            request.input,
+            compression_service=compression_service,
+            aggressiveness=aggressiveness,
+            role_aggressiveness=role_aggressiveness,
+            tenant_profile=tenant_profile,
+            mode=mode,
+            latency_budget_ms=latency_budget_ms,
+            content_cache=content_cache,
+            content_cache_enabled=(
+                content_cache_enabled and not model_auto_plan_only
+            ),
+            model_auto_plan_only=model_auto_plan_only,
+        )
+    except (CompressionRuntimeError, TimeoutError) as exc:
+        if not _v1_fail_open_enabled(request.compression_settings):
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        fail_open_used = True
+        result = compress_responses_input(
+            request.input,
+            compression_service=compression_service,
+            aggressiveness=0.0,
+            role_aggressiveness={
+                "developer": 0.0,
+                "system": 0.0,
+                "user": 0.0,
+            },
+            tenant_profile=tenant_profile,
+            mode=COMPRESSION_MODE_DETERMINISTIC,
+            content_cache=None,
+            content_cache_enabled=False,
+        )
+        result = replace(
+            result,
+            warnings=[*result.warnings, "compression_fail_open_original_preserved"],
+        )
+
+    compressed_request = request.model_dump(
+        exclude={"compression_settings", "tenant_id", "tenant_profile"},
+        exclude_unset=True,
+    )
+    compressed_request["input"] = result.input
+    downstream_input = _estimate_v1_responses_downstream_tokens(
+        request.input,
+        request.model,
+    )
+    downstream_output = _estimate_v1_responses_downstream_tokens(
+        result.input,
+        request.model,
+    )
+    response = V1ResponsesCompressResponse(
+        compressed_request=compressed_request,
+        input=result.input,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        original_input_tokens=result.input_tokens,
+        tokens_saved=max(0, result.input_tokens - result.output_tokens),
+        compression_ratio=(
+            0.0
+            if result.output_tokens == 0
+            else result.input_tokens / result.output_tokens
+        ),
+        compression_time=result.elapsed_ms,
+        token_estimator=result.token_estimator,
+        downstream_estimated_input_tokens=downstream_input.count,
+        downstream_estimated_output_tokens=downstream_output.count,
+        downstream_token_estimator=merge_token_estimator_names(
+            [downstream_input.estimator, downstream_output.estimator]
+        ),
+        tenant_id=tenant_profile.tenant_id,
+        compression_profile=tenant_profile.profile_id,
+        compression_profile_source=tenant_profile.source,
+        training_sample_recorded=False,
+        item_stats=[asdict(stat) for stat in result.stats],
+        warnings=result.warnings,
+        fail_open_used=fail_open_used,
+    )
+    return response, result.model_required
+
+
+def compress_v1_responses(
+    request: V1ResponsesCompressRequest,
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    *,
+    content_cache: ContentCompressionCache | None = None,
+    content_cache_enabled: bool = True,
+) -> V1ResponsesCompressResponse:
+    response, _model_required = _compress_v1_responses_response(
+        request,
+        x_tenant_id=x_tenant_id,
+        content_cache=content_cache,
+        content_cache_enabled=content_cache_enabled,
+    )
+    return response
+
+
+def plan_v1_responses_model_auto(
+    request: V1ResponsesCompressRequest,
+    *,
+    x_tenant_id: str | None = None,
+) -> tuple[V1ResponsesCompressResponse, bool]:
+    return _compress_v1_responses_response(
+        request,
+        x_tenant_id=x_tenant_id,
+        content_cache=None,
+        content_cache_enabled=False,
+        model_auto_plan_only=True,
+    )
+
+
+@app.post(
+    "/v1/responses/compress",
+    response_model=V1ResponsesCompressResponse,
+)
+def compress_v1_responses_http(
+    http_request: Request,
+    http_response: Response,
+    request: V1ResponsesCompressRequest,
+    pending_authorization: Annotated[
+        PendingUsageTapAuthorization,
+        Depends(start_usage_tap_compression_authorization),
+    ],
+    x_tenant_id: Annotated[str | None, Header(alias="X-Tenant-ID")] = None,
+    cache_control: Annotated[str | None, Header(alias="Cache-Control")] = None,
+) -> V1ResponsesCompressResponse:
+    reserve_demo_compression_operation(
+        http_request,
+        pending_authorization,
+        input_chars=_responses_input_chars(request),
+    )
+    tenant_profile = _tenant_profile_from_request(
+        body_tenant_id=request.tenant_id,
+        header_tenant_id=x_tenant_id,
+        settings=request.tenant_profile,
+    )
+    cache_key = _response_cache_key(
+        route="/v1/responses/compress",
+        request_payload=request.model_dump(mode="json"),
+        tenant_profile=tenant_profile,
+        effective_settings={
+            "aggressiveness": _resolve_v1_aggressiveness(
+                request.compression_settings,
+                tenant_profile,
+            ),
+            "role_aggressiveness": _responses_role_aggressiveness(
+                request.compression_settings,
+                _resolve_v1_aggressiveness(
+                    request.compression_settings,
+                    tenant_profile,
+                ),
+            ),
+            "mode": _resolve_v1_mode(request.compression_settings),
+            "latency_budget_ms": _resolve_v1_latency_budget_ms(
+                request.compression_settings
+            ),
+        },
+    )
+    request_cacheable = (
+        _v1_cache_enabled(request.compression_settings)
+        and not _cache_control_disables_storage(cache_control)
+    )
+    response, cache_status, cache_payload, cacheable = _run_cached_response(
+        key=cache_key,
+        response_type=V1ResponsesCompressResponse,
+        compute=lambda: compress_v1_responses(
+            request,
+            x_tenant_id=x_tenant_id,
+            content_cache=message_content_cache,
+            content_cache_enabled=request_cacheable,
+        ),
+        cacheable=_v1_response_is_cacheable,
+        request_cacheable=request_cacheable,
+    )
+    complete_usage_tap_compression_authorization(
+        http_request,
+        pending_authorization,
+    )
+    record_usage_tap_compression_metering(
+        http_request,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+    )
+    cache_status = _commit_response_cache(
+        key=cache_key,
+        payload=cache_payload,
+        status=cache_status,
+        cacheable=cacheable,
+    )
+    http_response.headers["X-Compression-Cache"] = cache_status
+    if response.fail_open_used:
+        http_response.headers["Cache-Control"] = "no-store"
+    content_hits = sum(stat.content_cache_hits for stat in response.item_stats)
+    content_misses = sum(stat.content_cache_misses for stat in response.item_stats)
+    content_stores = sum(stat.content_cache_stores for stat in response.item_stats)
+    http_response.headers["X-Compression-Content-Cache"] = (
+        f"hits={content_hits}; misses={content_misses}; stores={content_stores}"
+    )
+    compression_telemetry.record(
+        route="/v1/responses/compress",
+        mode=_resolve_v1_mode(request.compression_settings),
+        cache_status=cache_status,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        elapsed_ms=response.compression_time,
+        warnings=response.warnings,
+        fail_open_used=response.fail_open_used,
+        content_cache_hits=content_hits,
+        content_cache_misses=content_misses,
+        content_cache_stores=content_stores,
+    )
+    return response
+
+
 def _messages_input_chars(request: V1MessagesCompressRequest) -> int:
     return sum(
         len(
             json.dumps(
-                message.content,
+                message,
                 ensure_ascii=False,
                 separators=(",", ":"),
                 default=str,
             )
         )
         for message in request.messages
+    )
+
+
+def _responses_input_chars(request: V1ResponsesCompressRequest) -> int:
+    if isinstance(request.input, str):
+        return len(request.input)
+    return len(
+        json.dumps(
+            request.input,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
     )
 
 
@@ -2603,6 +2989,23 @@ def _resolve_v1_role_aggressiveness(
     }
 
 
+def _responses_role_aggressiveness(
+    settings: V1CompressionSettings | None,
+    default_aggressiveness: float,
+) -> dict[str, float]:
+    resolved = {
+        "developer": default_aggressiveness,
+        "system": default_aggressiveness,
+        "user": default_aggressiveness,
+    }
+    explicit = _resolve_v1_role_aggressiveness(settings)
+    if explicit is not None:
+        for role in resolved:
+            if role in explicit:
+                resolved[role] = explicit[role]
+    return resolved
+
+
 def _resolve_v1_mode(settings: V1CompressionSettings | None) -> str:
     if settings is not None and settings.mode is not None:
         return settings.mode
@@ -2698,19 +3101,62 @@ def _estimate_v1_messages_downstream_tokens(
     def estimate_text_tokens(text: str) -> TokenEstimate:
         return estimate_downstream_tokens(text, request.model)
 
-    message_estimates = [
-        estimate_content_token_details(
-            message.get("content"),
-            estimate_text_tokens=estimate_text_tokens,
-        )
-        for message in request_messages
-    ]
+    message_estimates = []
+    for message in request_messages:
+        item_type = message.get("type")
+        if isinstance(item_type, str) and item_type != "message":
+            message_estimates.append(
+                estimate_text_tokens(
+                    json.dumps(
+                        message,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        default=str,
+                    )
+                )
+            )
+        else:
+            message_estimates.append(
+                estimate_content_token_details(
+                    message.get("content"),
+                    estimate_text_tokens=estimate_text_tokens,
+                )
+            )
     top_level_estimate = _estimate_top_level_preserved_tokens(
         request,
         estimate_text_tokens=estimate_text_tokens,
     )
     estimates = [*message_estimates, top_level_estimate]
 
+    return TokenEstimate(
+        count=sum(estimate.count for estimate in estimates),
+        estimator=merge_token_estimator_names(
+            [estimate.estimator for estimate in estimates]
+        ),
+        tokenizer_backed=any(estimate.tokenizer_backed for estimate in estimates),
+    )
+
+
+def _estimate_v1_responses_downstream_tokens(
+    responses_input: str | list[Any],
+    model: str,
+) -> TokenEstimate:
+    if isinstance(responses_input, str):
+        return estimate_downstream_tokens(responses_input, model)
+    estimates = [
+        estimate_downstream_tokens(
+            json.dumps(
+                item,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            ),
+            model,
+        )
+        for item in responses_input
+    ]
+    if not estimates:
+        return TokenEstimate(count=0, estimator=REGEX_TOKEN_ESTIMATOR)
     return TokenEstimate(
         count=sum(estimate.count for estimate in estimates),
         estimator=merge_token_estimator_names(

@@ -12,7 +12,7 @@ The GPU image follows the Cloud Run GPU best-practice shape for this repository:
   small enough for the container-image loading path.
 - Run the deployed service with `COMPRESSOR_DEVICE=cuda`.
 - Use the versioned production policy in `app/gpu_compression_policy.json`
-  (2,000 candidate tokens and 200 expected saved tokens). The Cloudflare edge
+  (2,000 candidate tokens and 200 expected saved tokens). The Python CPU edge
   consumes the same file.
 - Preload the base compression model during startup with
   `COMPRESSOR_PRELOAD_SLOTS=base`.
@@ -150,23 +150,26 @@ gcloud run deploy $env:SERVICE `
 ```
 
 `--allow-unauthenticated` applies only to Google IAM ingress. The application
-still requires `Authorization: Bearer cmp-...` and checks UsageTap PAYG credit
-before every operation on `/compress`, `/v1/compress`, and
-`/v1/messages/compress`.
+still requires either a legacy `Authorization: Bearer cmp-...` key or a
+universal `Authorization: Bearer utk-...` key with the **Use Compression**
+permission, and checks UsageTap PAYG credit before every operation on
+`/compress`, `/v1/compress`, and `/v1/messages/compress`.
 
 `USAGETAP_API_BASE_URL` and `USAGETAP_AUTHORIZATION_TIMEOUT_SECONDS` are
 non-secret settings with production defaults of `https://api.usagetap.com` and
-`3` seconds. The local credential sanity gate requires a `cmp-` key with exactly
-43 Base64URL characters after the prefix. Definitive authorization failures are cached by salted
-digest for five seconds; successful checks are never cached.
+`3` seconds. The local credential sanity gate accepts either `cmp-` or `utk-`
+followed by exactly 43 Base64URL characters. UsageTap remains authoritative for
+the universal key's permissions. Definitive authorization failures are cached
+by salted digest for five seconds; successful checks are never cached.
 
 `USAGETAP_METERING_API_KEY` is a runtime-only Secret Manager
 reference pinned to secret version `1`; the secret value never enters the
 repository, Cloud Build, or command line. The authorization flow does not use
-this platform key—it forwards only the caller's incoming `cmp-` credential.
+this platform key—it forwards only the caller's incoming `cmp-` or `utk-`
+credential.
 Application startup rejects the metering configuration unless the trimmed
-secret is `ck-` or `cmp-` followed by exactly 43 Base64URL characters; rejected
-values are never included in errors or logs.
+secret is `ck-`, `cmp-`, or `utk-` followed by exactly 43 Base64URL characters;
+rejected values are never included in errors or logs.
 
 For the public UI demo, `POST /demo/session` issues signed `demo-v1` sessions.
 Each session lasts 10 minutes and has its own operation/input allowances.

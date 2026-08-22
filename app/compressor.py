@@ -325,6 +325,7 @@ class CompressionResult:
     warnings: list[str] = field(default_factory=list)
     token_savings: TokenSavings | None = None
     experiment_profile: str = "baseline"
+    model_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -567,20 +568,36 @@ class PromptCompressionService:
         )
         self.model_auto_enabled = DEFAULT_MODEL_AUTO_ENABLED
         self.allow_cpu_model_auto = DEFAULT_ALLOW_CPU_MODEL_AUTO
+        self.cpu_min_model_candidate_tokens = max(
+            0,
+            DEFAULT_CPU_MIN_MODEL_CANDIDATE_TOKENS,
+        )
+        self.gpu_min_model_candidate_tokens = max(
+            0,
+            DEFAULT_GPU_MIN_MODEL_CANDIDATE_TOKENS,
+        )
         self.min_model_candidate_tokens = max(
             0,
             (
-                DEFAULT_CPU_MIN_MODEL_CANDIDATE_TOKENS
+                self.cpu_min_model_candidate_tokens
                 if self._device_is_cpu()
-                else DEFAULT_GPU_MIN_MODEL_CANDIDATE_TOKENS
+                else self.gpu_min_model_candidate_tokens
             ),
+        )
+        self.cpu_min_model_incremental_savings_tokens = max(
+            0,
+            DEFAULT_CPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS,
+        )
+        self.gpu_min_model_incremental_savings_tokens = max(
+            0,
+            DEFAULT_GPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS,
         )
         self.min_model_incremental_savings_tokens = max(
             0,
             (
-                DEFAULT_CPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS
+                self.cpu_min_model_incremental_savings_tokens
                 if self._device_is_cpu()
-                else DEFAULT_GPU_MIN_MODEL_INCREMENTAL_SAVINGS_TOKENS
+                else self.gpu_min_model_incremental_savings_tokens
             ),
         )
         self.min_model_incremental_reduction = max(
@@ -1891,6 +1908,7 @@ class PromptCompressionService:
         allow_cpu_model_auto: bool | None,
         min_model_candidate_tokens: int | None,
         model_chunk_chars: int | None,
+        plan_for_gpu: bool = False,
     ) -> _ModelGateEvaluation:
         candidate_tokens = sum(
             candidate.token_count
@@ -1994,11 +2012,16 @@ class PromptCompressionService:
         if (
             mode == COMPRESSION_MODE_MODEL_AUTO
             and self._device_is_cpu()
+            and not plan_for_gpu
             and not cpu_model_auto_allowed
         ):
             return skip("llmlingua_skipped_cpu_auto_disabled")
         candidate_token_floor = (
-            self.min_model_candidate_tokens
+            (
+                self.gpu_min_model_candidate_tokens
+                if plan_for_gpu
+                else self.min_model_candidate_tokens
+            )
             if min_model_candidate_tokens is None
             else max(0, min_model_candidate_tokens)
         )
@@ -2041,9 +2064,13 @@ class PromptCompressionService:
             return skip("llmlingua_skipped_high_protected_density")
         if structured_density > self.max_structured_density:
             return skip("llmlingua_skipped_high_structured_density")
+        incremental_savings_floor = (
+            self.gpu_min_model_incremental_savings_tokens
+            if plan_for_gpu
+            else self.min_model_incremental_savings_tokens
+        )
         if (
-            expected_incremental_savings_tokens
-            < self.min_model_incremental_savings_tokens
+            expected_incremental_savings_tokens < incremental_savings_floor
             or expected_incremental_reduction
             < self.min_model_incremental_reduction
         ):
@@ -2055,7 +2082,10 @@ class PromptCompressionService:
             model_input_chars,
             model_chunk_chars=model_chunk_chars,
         )
-        projected_latency_ms = self._project_model_latency_ms(projected_chunk_count)
+        projected_latency_ms = self._project_model_latency_ms(
+            projected_chunk_count,
+            use_gpu=plan_for_gpu,
+        )
 
         if placeholder_count > self.max_model_auto_placeholders:
             return skip("llmlingua_skipped_high_placeholder_count")
@@ -2089,14 +2119,19 @@ class PromptCompressionService:
             return 1
         return max(1, math.ceil(model_input_chars / resolved_chunk_chars))
 
-    def _project_model_latency_ms(self, projected_chunk_count: int) -> float | None:
+    def _project_model_latency_ms(
+        self,
+        projected_chunk_count: int,
+        *,
+        use_gpu: bool = False,
+    ) -> float | None:
         if projected_chunk_count <= 0:
             return 0.0
 
         fixed_ms: float | None
         chunk_ms: float | None
         token_ms: float | None
-        if self._device_is_cpu():
+        if self._device_is_cpu() and not use_gpu:
             fixed_ms = self.cpu_p50_fixed_overhead_ms
             chunk_ms = self.cpu_p50_llmlingua_chunk_ms
             token_ms = self.cpu_p50_token_estimate_ms
@@ -2797,12 +2832,15 @@ class PromptCompressionService:
         allow_inline_json_compression_paths: bool = False,
         input_format: str = "auto",
         html_mode: str = "visible_text",
+        model_auto_plan_only: bool = False,
     ) -> CompressionResult:
         start = time.perf_counter()
         timings = dict.fromkeys(TIMED_PHASES, 0.0)
         profile = tenant_profile or TenantCompressionProfile()
         model_was_loaded = self.is_loaded
         compression_mode = self._normalize_compression_mode(mode)
+        if model_auto_plan_only and compression_mode != COMPRESSION_MODE_MODEL_AUTO:
+            raise ValueError("model_auto_plan_only requires mode=model_auto")
         resolved_experiment = resolve_experiment_profile(experiment_profile)
         tenant_boilerplate_enabled = (
             experiment_profile is None
@@ -2974,6 +3012,7 @@ class PromptCompressionService:
             allow_cpu_model_auto=allow_cpu_model_auto,
             min_model_candidate_tokens=min_model_candidate_tokens,
             model_chunk_chars=model_chunk_chars,
+            plan_for_gpu=model_auto_plan_only,
         )
         timings["model_gate_ms"] = _elapsed_ms(phase_start)
 
@@ -3001,10 +3040,11 @@ class PromptCompressionService:
                 allow_cpu_model_auto=allow_cpu_model_auto,
                 min_model_candidate_tokens=min_model_candidate_tokens,
                 model_chunk_chars=model_chunk_chars,
+                plan_for_gpu=model_auto_plan_only,
             )
             timings["model_gate_ms"] += _elapsed_ms(phase_start)
 
-        if model_gate.should_run:
+        if model_gate.should_run and not model_auto_plan_only:
             phase_start = time.perf_counter()
             compressor = self._load_for_profile(profile)
             timings["model_load_ms"] = _elapsed_ms(phase_start)
@@ -3289,6 +3329,7 @@ class PromptCompressionService:
             warnings=warnings,
             token_savings=token_savings,
             experiment_profile=resolved_experiment.profile_id,
+            model_required=model_auto_plan_only and model_gate.should_run,
         )
 
     def _preprocessor_for_experiment(

@@ -1,0 +1,30 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file
+      - Dockerfile.edge
+      - --build-arg
+      - COMPRESSOR_MODEL=${_COMPRESSOR_MODEL}
+      - --build-arg
+      - COMPRESSOR_MODEL_REVISION=${_COMPRESSOR_MODEL_REVISION}
+      - --build-arg
+      - COMPRESSOR_GIT_COMMIT=${_COMPRESSOR_GIT_COMMIT}
+      - --build-arg
+      - COMPRESSOR_SOURCE_SHA256=${_COMPRESSOR_SOURCE_SHA256}
+      - --tag
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:${_IMAGE_TAG}
+      - .
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE_NAME}:${_IMAGE_TAG}
+
+substitutions:
+  _REGION: us-central1
+  _REPO: prompt-compression
+  _IMAGE_NAME: prompt-compression-edge-cpu
+  _IMAGE_TAG: latest
+  _COMPRESSOR_MODEL: microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
+  _COMPRESSOR_MODEL_REVISION: main
+  _COMPRESSOR_GIT_COMMIT: unknown
+  _COMPRESSOR_SOURCE_SHA256: unknown

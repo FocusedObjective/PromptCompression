@@ -39,6 +39,7 @@ class MessageCompressionStats:
     candidate_tokens_saved: int = 0
     candidate_reduction: float = 0.0
     tool_result_action: str | None = None
+    item_type: str = "message"
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class MessagesCompressionResult:
     stats: list[MessageCompressionStats]
     token_estimator: str = REGEX_TOKEN_ESTIMATOR
     warnings: list[str] = field(default_factory=list)
+    model_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,7 @@ class _TextCompressionResult:
     changed: bool
     warnings: list[str]
     cache_status: str = "bypass"
+    model_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +92,7 @@ def compress_user_messages(
     content_cache: ContentCompressionCache | None = None,
     content_cache_enabled: bool = True,
     tool_result_policy: ToolResultCompressionPolicy | None = None,
+    model_auto_plan_only: bool = False,
 ) -> MessagesCompressionResult:
     start = time.perf_counter()
     compressed_messages: list[dict[str, Any]] = []
@@ -100,6 +104,7 @@ def compress_user_messages(
     non_user_tokens_preserved = 0
     estimator_names: list[str] = []
     warnings: list[str] = []
+    model_required = False
     seen_user_text_parts: set[str] = set()
     estimate_text_tokens = _compression_text_estimator(
         compression_service,
@@ -114,6 +119,38 @@ def compress_user_messages(
         role = str(message.get("role", ""))
         normalized_role = role.lower()
         content = message.get("content")
+        item_type = message.get("type")
+        if isinstance(item_type, str) and item_type != "message":
+            original_estimate = estimate_text_tokens(
+                json.dumps(
+                    message,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                )
+            )
+            original_tokens = original_estimate.count
+            estimator_names.append(original_estimate.estimator)
+            input_tokens += original_tokens
+            output_tokens += original_tokens
+            non_user_tokens_preserved += original_tokens
+            compressed_messages.append(copy.deepcopy(message))
+            stats.append(
+                MessageCompressionStats(
+                    index=index,
+                    role=role,
+                    item_type=item_type,
+                    original_tokens=original_tokens,
+                    compressed_tokens=original_tokens,
+                    tokens_saved=0,
+                    compression_applied=False,
+                    compressed=False,
+                    text_parts=0,
+                    compressed_text_parts=0,
+                    skipped_reason="item_type_preserved",
+                )
+            )
+            continue
         original_estimate = estimate_content_token_details(
             content,
             estimate_text_tokens=estimate_text_tokens,
@@ -229,6 +266,7 @@ def compress_user_messages(
             applied,
             content_warnings,
             cache_statuses,
+            content_model_required,
         ) = (
             _compress_user_content(
                 content_to_compress,
@@ -240,8 +278,10 @@ def compress_user_messages(
                 role=normalized_role,
                 content_cache=content_cache,
                 content_cache_enabled=content_cache_enabled,
+                model_auto_plan_only=model_auto_plan_only,
             )
         )
+        model_required = model_required or content_model_required
         for warning in content_warnings:
             if warning not in warnings:
                 warnings.append(warning)
@@ -346,6 +386,7 @@ def compress_user_messages(
         stats=stats,
         token_estimator=merge_token_estimator_names(estimator_names),
         warnings=warnings,
+        model_required=model_required,
     )
 
 
@@ -458,10 +499,11 @@ def _compress_user_content(
     role: str,
     content_cache: ContentCompressionCache | None,
     content_cache_enabled: bool,
-) -> tuple[Any, int, int, bool, list[str], list[str]]:
+    model_auto_plan_only: bool = False,
+) -> tuple[Any, int, int, bool, list[str], list[str], bool]:
     if isinstance(content, str):
         if not content:
-            return content, 0, 0, False, [], []
+            return content, 0, 0, False, [], [], False
 
         result = _compress_text(
             content,
@@ -473,6 +515,7 @@ def _compress_user_content(
             role=role,
             content_cache=content_cache,
             content_cache_enabled=content_cache_enabled,
+            model_auto_plan_only=model_auto_plan_only,
         )
         return (
             result.text,
@@ -481,10 +524,11 @@ def _compress_user_content(
             True,
             result.warnings,
             [result.cache_status],
+            result.model_required,
         )
 
     if not isinstance(content, list):
-        return content, 0, 0, False, [], []
+        return content, 0, 0, False, [], [], False
 
     compressed_parts: list[Any] = []
     text_parts = 0
@@ -492,6 +536,7 @@ def _compress_user_content(
     applied = False
     warnings: list[str] = []
     cache_statuses: list[str] = []
+    model_required = False
 
     for part in content:
         if isinstance(part, str):
@@ -508,6 +553,7 @@ def _compress_user_content(
                 role=role,
                 content_cache=content_cache,
                 content_cache_enabled=content_cache_enabled,
+                model_auto_plan_only=model_auto_plan_only,
             )
             compressed_parts.append(result.text)
             for warning in result.warnings:
@@ -517,6 +563,7 @@ def _compress_user_content(
             compressed_text_parts += 1 if result.changed else 0
             applied = True
             cache_statuses.append(result.cache_status)
+            model_required = model_required or result.model_required
             continue
 
         if _is_text_dict_part(part):
@@ -530,6 +577,7 @@ def _compress_user_content(
                 role=role,
                 content_cache=content_cache,
                 content_cache_enabled=content_cache_enabled,
+                model_auto_plan_only=model_auto_plan_only,
             )
             compressed_part = copy.deepcopy(part)
             compressed_part["text"] = result.text
@@ -541,6 +589,7 @@ def _compress_user_content(
             compressed_text_parts += 1 if result.changed else 0
             applied = True
             cache_statuses.append(result.cache_status)
+            model_required = model_required or result.model_required
             continue
 
         compressed_parts.append(copy.deepcopy(part))
@@ -552,6 +601,7 @@ def _compress_user_content(
         applied,
         warnings,
         cache_statuses,
+        model_required,
     )
 
 
@@ -621,7 +671,28 @@ def _compress_text(
     role: str,
     content_cache: ContentCompressionCache | None,
     content_cache_enabled: bool,
+    model_auto_plan_only: bool = False,
 ) -> _TextCompressionResult:
+    if model_auto_plan_only and mode == "model_auto":
+        result = compression_service.compress(
+            text=text,
+            aggressiveness=aggressiveness,
+            include_sections=False,
+            tenant_profile=tenant_profile,
+            mode=mode,
+            latency_budget_ms=latency_budget_ms,
+            collect_diagnostics=False,
+            model_auto_plan_only=True,
+        )
+        return _TextCompressionResult(
+            text=result.compressed_text,
+            original_tokens=result.original_tokens,
+            compressed_tokens=result.compressed_tokens,
+            changed=result.compressed_text != text,
+            warnings=list(result.warnings),
+            model_required=result.model_required,
+        )
+
     def compute() -> CachedTextCompression:
         result = compression_service.compress(
             text=text,

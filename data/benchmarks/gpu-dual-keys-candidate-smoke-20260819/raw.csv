@@ -1,0 +1,629 @@
+analytics,apply_deterministic_transforms,attribution_residual_tokens,candidateOpportunities,case_id,chunk_chars_max,chunk_placeholder_avg,chunk_placeholder_max,client_wall_ms,cohort_id,compressible_segment_count,compression_mode,compression_path,condition_aggressiveness,condition_id,deterministicGateReasons,deterministic_reduction,deterministic_tokens_saved,diagnostics_present,duplicate_block_candidate_count,duplicate_block_candidate_tokens,error,fallback_reason,fallback_used,final_text,html_chars,html_markdown_tokens_saved,html_ratio_target,http_status,input_chars,integrity,json_chars,json_minify_tokens_saved,json_ratio_target,label_key_type,label_revision,label_service,literal_placeholder_count,literal_placeholder_tokens_saved,llmlingua_call_count,llmlingua_called,measured,model,model_candidate_tokens,model_chunk_count,model_expected_incremental_reduction,model_expected_incremental_savings_tokens,model_gate_decision,model_gate_reason,model_incremental_reduction,model_incremental_tokens_saved,model_input_chars,model_projected_latency_ms,model_segment_count,nocompress_wrapper_tokens_saved,original_sha256,original_text,output_chars,placeholder_count,prompt_id,prompt_sha256,provenance,reduction,repeat,requested_compression_mode,response_compressed_tokens,response_original_tokens,response_tokens_saved,schema_version,segment_count,segment_kinds_json,server_elapsed_ms,skipped_model_chunk_count,skipped_segment_count,stages,status,synthetic_html_tokens,synthetic_input_tokens,synthetic_json_ratio,synthetic_json_tokens,target_rate,target_tokens,timing_diagnostics_ms,timing_force_drop_ms,timing_force_tokens_ms,timing_llmlingua_ms,timing_model_expand_ms,timing_model_gate_ms,timing_model_input_ms,timing_model_load_ms,timing_other_ms,timing_placeholder_validation_ms,timing_preprocessing_ms,timing_segment_selection_ms,timing_target_rate_ms,timing_token_estimate_ms,timing_total_ms,timing_uncompressed_expand_ms,token_estimator,toon_tokens_saved,whitespace_tokens_saved
+{},True,0,{},tok3000_json0p25_html0p25,0,0.0,0,2886.368000001312,cohort-5b926a581792644a,3,deterministic,deterministic_only,,deterministic_only,{},0.12623031496062992,513,True,0,0,,,False,"You are a support operations analyst preparing an escalation brief.
+
+Preserve customer IDs, URLs, dates, retry limits, and hard constraints.
+
+Summarize risk, identify likely blockers, and propose next actions.
+
+Incident INC-000000 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000000, and support notes requiring concise executive summary with exact identifiers. Incident INC-000001 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000001, and support notes requiring concise executive summary with exact identifiers. Incident INC-000002 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000002, and support notes requiring concise executive summary with exact identifiers. Incident INC-000003 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000003, and support notes requiring concise executive summary with exact identifiers. Incident INC-000004 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000004, and support notes requiring concise executive summary with exact identifiers. Incident INC-000005 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000005, and support notes requiring concise executive summary with exact identifiers. Incident INC-000006 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000006, and support notes requiring concise executive summary with exact identifiers. Incident INC-000007 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000007, and support notes requiring concise executive summary with exact identifiers. Incident INC-000008 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000008, and support notes requiring concise executive summary with exact identifiers. Incident INC-000009 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000009, and support notes requiring concise executive summary with exact identifiers. Incident INC-000010 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000010, and support notes requiring concise executive summary with exact identifiers. Incident INC-000011 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000011, and support notes requiring concise executive summary with exact identifiers. Incident INC-000012 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000012, and support notes requiring concise executive summary with exact identifiers. Incident INC-000013 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000013, and support notes requiring concise executive summary with exact identifiers. Incident INC-000014 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000014, and support notes requiring concise executive summary with exact identifiers. Incident INC-000015 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000015, and support notes requiring concise executive summary with exact identifiers. Incident INC-000016 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000016, and support notes requiring concise executive summary with exact identifiers. Incident INC-000017 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000017, and support notes requiring concise executive summary with exact identifiers. Incident INC-000018 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000018, and support notes requiring concise executive summary with exact identifiers. Incident INC-000019 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000019, and support notes requiring concise executive summary with exact identifiers. Incident INC-000020 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000020, and support notes requiring concise executive summary with exact identifiers. Incident INC-000021 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000021, and support notes requiring concise executive summary with exact identifiers. Incident INC-000022 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000022, and support notes requiring concise executive summary with exact identifiers. Incident INC-000023 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000023, and support notes requiring concise executive summary with exact identifiers. Incident INC-000024 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000024, and support notes requiring concise executive summary with exact identifiers. Incident INC-000025 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000025, and support notes requiring concise executive summary with exact identifiers. Incident INC-000026 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000026, and support notes requiring concise executive summary with exact identifiers. Incident INC-000027 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000027, and support notes requiring concise executive summary with exact identifiers. Incident INC-000028 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000028, and support notes requiring concise executive summary with exact identifiers.
+
+Customer telemetry JSON:
+{
+  ""generated_for"": ""prompt-compression-performance"",
+  ""records"": [
+    {
+      ""account_id"": ""acct_00000000"",
+      ""dashboard_url"": ""https://example.com/dashboards/000000"",
+      ""incident_id"": ""INC-000000"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 250,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 3,
+      ""severity"": ""low"",
+      ""status"": ""open""
+    },
+    {
+      ""account_id"": ""acct_00000001"",
+      ""dashboard_url"": ""https://example.com/dashboards/000001"",
+      ""incident_id"": ""INC-000001"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 251,
+      ""region"": ""us-east1"",
+      ""retry_limit"": 4,
+      ""severity"": ""medium"",
+      ""status"": ""monitoring""
+    },
+    {
+      ""account_id"": ""acct_00000002"",
+      ""dashboard_url"": ""https://example.com/dashboards/000002"",
+      ""incident_id"": ""INC-000002"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 252,
+      ""region"": ""us-west1"",
+      ""retry_limit"": 3,
+      ""severity"": ""high"",
+      ""status"": ""resolved""
+    },
+    {
+      ""account_id"": ""acct_00000003"",
+      ""dashboard_url"": ""https://example.com/dashboards/000003"",
+      ""incident_id"": ""INC-000003"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 253,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 4,
+      ""severity"": ""critical"",
+      ""status"": ""open""
+    },
+    {
+      ""account_id"": ""acct_00000004"",
+      ""dashboard_url"": ""https://example.com/dashboards/000004"",
+      ""incident_id"": ""INC-000004"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 254,
+      ""region"": ""us-east1"",
+      ""retry_limit"": 3,
+      ""severity"": ""low"",
+      ""status"": ""monitoring""
+    },
+    {
+      ""account_id"": ""acct_00000005"",
+      ""dashboard_url"": ""https://example.com/dashboards/000005"",
+      ""incident_id"": ""INC-000005"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 255,
+      ""region"": ""us-west1"",
+      ""retry_limit"": 4,
+      ""severity"": ""medium"",
+      ""status"": ""resolved""
+    },
+    {
+      ""account_id"": ""acct_00000006"",
+      ""dashboard_url"": ""https://example.com/dashboards/000006"",
+      ""incident_id"": ""INC-000006"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 256,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 3,
+      ""severity"": ""high"",
+      ""status"": ""open""
+    }
+  ],
+  ""schema_version"": ""benchmark.v1""
+}
+
+Downloaded incident HTML page:
+Benchmark HTML Incident Page
+
+Home Docs Synthetic benchmark advertisement.
+
+# Benchmark HTML Incident Page
+
+Downloaded web page content for HTML-to-Markdown preprocessing.
+
+## Incident INC-000000
+
+Account acct_00000000 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000000.
+
+- Hard constraint: never raise retry_count above 3.
+- Owner: support operations.
+
+## Incident INC-000001
+
+Account acct_00000001 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000001.
+
+- Hard constraint: never raise retry_count above 3.
+- Owner: support operations.
+
+## Incident INC-000002
+
+Account acct_00000002 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000002.
+
+- Hard constraint: never raise retry_count above 3.
+- Owner: support operations.
+
+## Incident INC-000003
+
+Account acct_00000003 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000003.
+
+- Hard constraint: never raise retry_count above 3.
+- Owner: support operations.
+
+## Incident INC-000004
+
+Account acct_00000004 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000004.
+
+- Hard constraint: never raise retry_count above 3.
+- Owner: support operations.
+
+## Incident INC-000005
+
+Account acct_00000005 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000005.
+
+- Hard constraint: never raise retry_count above 3.
+- Owner: support operations.
+
+Generated for prompt compression benchmark.
+
+Output: executive summary, blockers and owner, next three actions.",2900,513,0.25,200,13610,{},2858,0,0.25,universal,prompt-compression-dual-keys-205556,gpu-candidate,0,0,0,False,True,microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank,2042,0,0.0,0,skip,llmlingua_skipped_mode_deterministic,0.0,0,0,,1,0,c26c5937a4c6097fbeb4c5f65df94e9e6630a83cfb76ca45fa1109688feb1cb0,"You are a support operations analyst preparing an escalation brief.
+
+Preserve customer IDs, URLs, dates, retry limits, and hard constraints.
+
+Summarize risk, identify likely blockers, and propose next actions.
+
+Incident INC-000000 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000000, and support notes requiring concise executive summary with exact identifiers. Incident INC-000001 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000001, and support notes requiring concise executive summary with exact identifiers. Incident INC-000002 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000002, and support notes requiring concise executive summary with exact identifiers. Incident INC-000003 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000003, and support notes requiring concise executive summary with exact identifiers. Incident INC-000004 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000004, and support notes requiring concise executive summary with exact identifiers. Incident INC-000005 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000005, and support notes requiring concise executive summary with exact identifiers. Incident INC-000006 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000006, and support notes requiring concise executive summary with exact identifiers. Incident INC-000007 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000007, and support notes requiring concise executive summary with exact identifiers. Incident INC-000008 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000008, and support notes requiring concise executive summary with exact identifiers. Incident INC-000009 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000009, and support notes requiring concise executive summary with exact identifiers. Incident INC-000010 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000010, and support notes requiring concise executive summary with exact identifiers. Incident INC-000011 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000011, and support notes requiring concise executive summary with exact identifiers. Incident INC-000012 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000012, and support notes requiring concise executive summary with exact identifiers. Incident INC-000013 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000013, and support notes requiring concise executive summary with exact identifiers. Incident INC-000014 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000014, and support notes requiring concise executive summary with exact identifiers. Incident INC-000015 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000015, and support notes requiring concise executive summary with exact identifiers. Incident INC-000016 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000016, and support notes requiring concise executive summary with exact identifiers. Incident INC-000017 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000017, and support notes requiring concise executive summary with exact identifiers. Incident INC-000018 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000018, and support notes requiring concise executive summary with exact identifiers. Incident INC-000019 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000019, and support notes requiring concise executive summary with exact identifiers. Incident INC-000020 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000020, and support notes requiring concise executive summary with exact identifiers. Incident INC-000021 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000021, and support notes requiring concise executive summary with exact identifiers. Incident INC-000022 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000022, and support notes requiring concise executive summary with exact identifiers. Incident INC-000023 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000023, and support notes requiring concise executive summary with exact identifiers. Incident INC-000024 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000024, and support notes requiring concise executive summary with exact identifiers. Incident INC-000025 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000025, and support notes requiring concise executive summary with exact identifiers. Incident INC-000026 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000026, and support notes requiring concise executive summary with exact identifiers. Incident INC-000027 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000027, and support notes requiring concise executive summary with exact identifiers. Incident INC-000028 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000028, and support notes requiring concise executive summary with exact identifiers. 
+
+Customer telemetry JSON:
+{
+  ""generated_for"": ""prompt-compression-performance"",
+  ""records"": [
+    {
+      ""account_id"": ""acct_00000000"",
+      ""dashboard_url"": ""https://example.com/dashboards/000000"",
+      ""incident_id"": ""INC-000000"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 250,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 3,
+      ""severity"": ""low"",
+      ""status"": ""open""
+    },
+    {
+      ""account_id"": ""acct_00000001"",
+      ""dashboard_url"": ""https://example.com/dashboards/000001"",
+      ""incident_id"": ""INC-000001"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 251,
+      ""region"": ""us-east1"",
+      ""retry_limit"": 4,
+      ""severity"": ""medium"",
+      ""status"": ""monitoring""
+    },
+    {
+      ""account_id"": ""acct_00000002"",
+      ""dashboard_url"": ""https://example.com/dashboards/000002"",
+      ""incident_id"": ""INC-000002"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 252,
+      ""region"": ""us-west1"",
+      ""retry_limit"": 3,
+      ""severity"": ""high"",
+      ""status"": ""resolved""
+    },
+    {
+      ""account_id"": ""acct_00000003"",
+      ""dashboard_url"": ""https://example.com/dashboards/000003"",
+      ""incident_id"": ""INC-000003"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 253,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 4,
+      ""severity"": ""critical"",
+      ""status"": ""open""
+    },
+    {
+      ""account_id"": ""acct_00000004"",
+      ""dashboard_url"": ""https://example.com/dashboards/000004"",
+      ""incident_id"": ""INC-000004"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 254,
+      ""region"": ""us-east1"",
+      ""retry_limit"": 3,
+      ""severity"": ""low"",
+      ""status"": ""monitoring""
+    },
+    {
+      ""account_id"": ""acct_00000005"",
+      ""dashboard_url"": ""https://example.com/dashboards/000005"",
+      ""incident_id"": ""INC-000005"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 255,
+      ""region"": ""us-west1"",
+      ""retry_limit"": 4,
+      ""severity"": ""medium"",
+      ""status"": ""resolved""
+    },
+    {
+      ""account_id"": ""acct_00000006"",
+      ""dashboard_url"": ""https://example.com/dashboards/000006"",
+      ""incident_id"": ""INC-000006"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 256,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 3,
+      ""severity"": ""high"",
+      ""status"": ""open""
+    }
+  ],
+  ""schema_version"": ""benchmark.v1""
+}
+
+Downloaded incident HTML page:
+<!doctype html>
+<html lang=""en"">
+<head>
+  <meta charset=""utf-8"">
+  <title>Benchmark HTML Incident Page</title>
+  <style>body{font-family:system-ui}.ad{display:block}</style>
+</head>
+<body>
+  <header><nav><a href=""/"">Home</a><a href=""/docs"">Docs</a></nav></header>
+  <aside class=""ad"">Synthetic benchmark advertisement.</aside>
+  <main>
+    <h1>Benchmark HTML Incident Page</h1>
+    <p>Downloaded web page content for HTML-to-Markdown preprocessing.</p>
+    <section class=""incident-card"" data-incident=""INC-000000"">
+      <h2>Incident INC-000000</h2>
+      <p>Account acct_00000000 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000000.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000001"">
+      <h2>Incident INC-000001</h2>
+      <p>Account acct_00000001 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000001.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000002"">
+      <h2>Incident INC-000002</h2>
+      <p>Account acct_00000002 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000002.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000003"">
+      <h2>Incident INC-000003</h2>
+      <p>Account acct_00000003 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000003.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000004"">
+      <h2>Incident INC-000004</h2>
+      <p>Account acct_00000004 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000004.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000005"">
+      <h2>Incident INC-000005</h2>
+      <p>Account acct_00000005 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000005.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+  </main>
+  <footer>Generated for prompt compression benchmark.</footer>
+</body>
+</html>
+
+Output: executive summary, blockers and owner, next three actions.",12366,0,tok3000_json0p25_html0p25,c26c5937a4c6097fbeb4c5f65df94e9e6630a83cfb76ca45fa1109688feb1cb0,{},0.12623031496062997,1,deterministic,3551,4064,513,benchmark.v3,5,"{""html_markdown"": 1, ""json"": 1, ""prose"": 3}",476.37475900000936,0,4,"{'deterministicText': None, 'deterministicSha256': None, 'deterministicCharacters': None, 'deterministicTokens': None, 'deterministicTokensSaved': None, 'deterministicTransforms': [], 'modelInputSha256': None, 'finalSha256': None, 'modelIncrementalTokensSaved': None, 'modelCalled': None}",ok,848,3243,0.2488436632747456,807,0.8625,3000,351.09509899999125,0.0024420000102054473,0.0,0.0,0.0,0.03287999999201929,0.0,0.0,0.22115500001973487,0.0,2.733062000004338,55.92480299998215,0.005296000011867363,66.34324300000571,476.37475900000936,0.01677899999208421,huggingface:microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank,0,0
+{},False,0,{},tok3000_json0p25_html0p25,8663,61.5,80,2685.4708999999275,cohort-5b926a581792644a,1,model_force,deterministic_plus_model,,model_force,{},0.0,0,True,0,0,,output_rejected_integrity_protected_span,True,"You are a support operations analyst preparing an escalation brief.
+
+Preserve customer IDs, URLs, dates, retry limits, and hard constraints.
+
+Summarize risk, identify likely blockers, and propose next actions.
+
+Incident INC-000000 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000000, and support notes requiring concise executive summary with exact identifiers. Incident INC-000001 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000001, and support notes requiring concise executive summary with exact identifiers. Incident INC-000002 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000002, and support notes requiring concise executive summary with exact identifiers. Incident INC-000003 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000003, and support notes requiring concise executive summary with exact identifiers. Incident INC-000004 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000004, and support notes requiring concise executive summary with exact identifiers. Incident INC-000005 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000005, and support notes requiring concise executive summary with exact identifiers. Incident INC-000006 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000006, and support notes requiring concise executive summary with exact identifiers. Incident INC-000007 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000007, and support notes requiring concise executive summary with exact identifiers. Incident INC-000008 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000008, and support notes requiring concise executive summary with exact identifiers. Incident INC-000009 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000009, and support notes requiring concise executive summary with exact identifiers. Incident INC-000010 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000010, and support notes requiring concise executive summary with exact identifiers. Incident INC-000011 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000011, and support notes requiring concise executive summary with exact identifiers. Incident INC-000012 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000012, and support notes requiring concise executive summary with exact identifiers. Incident INC-000013 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000013, and support notes requiring concise executive summary with exact identifiers. Incident INC-000014 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000014, and support notes requiring concise executive summary with exact identifiers. Incident INC-000015 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000015, and support notes requiring concise executive summary with exact identifiers. Incident INC-000016 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000016, and support notes requiring concise executive summary with exact identifiers. Incident INC-000017 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000017, and support notes requiring concise executive summary with exact identifiers. Incident INC-000018 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000018, and support notes requiring concise executive summary with exact identifiers. Incident INC-000019 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000019, and support notes requiring concise executive summary with exact identifiers. Incident INC-000020 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000020, and support notes requiring concise executive summary with exact identifiers. Incident INC-000021 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000021, and support notes requiring concise executive summary with exact identifiers. Incident INC-000022 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000022, and support notes requiring concise executive summary with exact identifiers. Incident INC-000023 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000023, and support notes requiring concise executive summary with exact identifiers. Incident INC-000024 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000024, and support notes requiring concise executive summary with exact identifiers. Incident INC-000025 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000025, and support notes requiring concise executive summary with exact identifiers. Incident INC-000026 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000026, and support notes requiring concise executive summary with exact identifiers. Incident INC-000027 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000027, and support notes requiring concise executive summary with exact identifiers. Incident INC-000028 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000028, and support notes requiring concise executive summary with exact identifiers. 
+
+Customer telemetry JSON:
+{
+  ""generated_for"": ""prompt-compression-performance"",
+  ""records"": [
+    {
+      ""account_id"": ""acct_00000000"",
+      ""dashboard_url"": ""https://example.com/dashboards/000000"",
+      ""incident_id"": ""INC-000000"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 250,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 3,
+      ""severity"": ""low"",
+      ""status"": ""open""
+    },
+    {
+      ""account_id"": ""acct_00000001"",
+      ""dashboard_url"": ""https://example.com/dashboards/000001"",
+      ""incident_id"": ""INC-000001"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 251,
+      ""region"": ""us-east1"",
+      ""retry_limit"": 4,
+      ""severity"": ""medium"",
+      ""status"": ""monitoring""
+    },
+    {
+      ""account_id"": ""acct_00000002"",
+      ""dashboard_url"": ""https://example.com/dashboards/000002"",
+      ""incident_id"": ""INC-000002"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 252,
+      ""region"": ""us-west1"",
+      ""retry_limit"": 3,
+      ""severity"": ""high"",
+      ""status"": ""resolved""
+    },
+    {
+      ""account_id"": ""acct_00000003"",
+      ""dashboard_url"": ""https://example.com/dashboards/000003"",
+      ""incident_id"": ""INC-000003"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 253,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 4,
+      ""severity"": ""critical"",
+      ""status"": ""open""
+    },
+    {
+      ""account_id"": ""acct_00000004"",
+      ""dashboard_url"": ""https://example.com/dashboards/000004"",
+      ""incident_id"": ""INC-000004"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 254,
+      ""region"": ""us-east1"",
+      ""retry_limit"": 3,
+      ""severity"": ""low"",
+      ""status"": ""monitoring""
+    },
+    {
+      ""account_id"": ""acct_00000005"",
+      ""dashboard_url"": ""https://example.com/dashboards/000005"",
+      ""incident_id"": ""INC-000005"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 255,
+      ""region"": ""us-west1"",
+      ""retry_limit"": 4,
+      ""severity"": ""medium"",
+      ""status"": ""resolved""
+    },
+    {
+      ""account_id"": ""acct_00000006"",
+      ""dashboard_url"": ""https://example.com/dashboards/000006"",
+      ""incident_id"": ""INC-000006"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 256,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 3,
+      ""severity"": ""high"",
+      ""status"": ""open""
+    }
+  ],
+  ""schema_version"": ""benchmark.v1""
+}
+
+Downloaded incident HTML page:
+<!doctype html>
+<html lang=""en"">
+<head>
+  <meta charset=""utf-8"">
+  <title>Benchmark HTML Incident Page</title>
+  <style>body{font-family:system-ui}.ad{display:block}</style>
+</head>
+<body>
+  <header><nav><a href=""/"">Home</a><a href=""/docs"">Docs</a></nav></header>
+  <aside class=""ad"">Synthetic benchmark advertisement.</aside>
+  <main>
+    <h1>Benchmark HTML Incident Page</h1>
+    <p>Downloaded web page content for HTML-to-Markdown preprocessing.</p>
+    <section class=""incident-card"" data-incident=""INC-000000"">
+      <h2>Incident INC-000000</h2>
+      <p>Account acct_00000000 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000000.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000001"">
+      <h2>Incident INC-000001</h2>
+      <p>Account acct_00000001 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000001.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000002"">
+      <h2>Incident INC-000002</h2>
+      <p>Account acct_00000002 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000002.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000003"">
+      <h2>Incident INC-000003</h2>
+      <p>Account acct_00000003 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000003.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000004"">
+      <h2>Incident INC-000004</h2>
+      <p>Account acct_00000004 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000004.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000005"">
+      <h2>Incident INC-000005</h2>
+      <p>Account acct_00000005 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000005.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+  </main>
+  <footer>Generated for prompt compression benchmark.</footer>
+</body>
+</html>
+
+Output: executive summary, blockers and owner, next three actions.",2900,0,0.25,200,13610,{},2858,0,0.25,universal,prompt-compression-dual-keys-205556,gpu-candidate,0,0,2,True,True,microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank,4064,2,0.039999999999999994,162,run,,0.0,0,12398,,1,0,c26c5937a4c6097fbeb4c5f65df94e9e6630a83cfb76ca45fa1109688feb1cb0,"You are a support operations analyst preparing an escalation brief.
+
+Preserve customer IDs, URLs, dates, retry limits, and hard constraints.
+
+Summarize risk, identify likely blockers, and propose next actions.
+
+Incident INC-000000 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000000, and support notes requiring concise executive summary with exact identifiers. Incident INC-000001 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000001, and support notes requiring concise executive summary with exact identifiers. Incident INC-000002 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000002, and support notes requiring concise executive summary with exact identifiers. Incident INC-000003 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000003, and support notes requiring concise executive summary with exact identifiers. Incident INC-000004 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000004, and support notes requiring concise executive summary with exact identifiers. Incident INC-000005 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000005, and support notes requiring concise executive summary with exact identifiers. Incident INC-000006 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000006, and support notes requiring concise executive summary with exact identifiers. Incident INC-000007 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000007, and support notes requiring concise executive summary with exact identifiers. Incident INC-000008 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000008, and support notes requiring concise executive summary with exact identifiers. Incident INC-000009 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000009, and support notes requiring concise executive summary with exact identifiers. Incident INC-000010 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000010, and support notes requiring concise executive summary with exact identifiers. Incident INC-000011 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000011, and support notes requiring concise executive summary with exact identifiers. Incident INC-000012 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000012, and support notes requiring concise executive summary with exact identifiers. Incident INC-000013 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000013, and support notes requiring concise executive summary with exact identifiers. Incident INC-000014 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000014, and support notes requiring concise executive summary with exact identifiers. Incident INC-000015 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000015, and support notes requiring concise executive summary with exact identifiers. Incident INC-000016 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000016, and support notes requiring concise executive summary with exact identifiers. Incident INC-000017 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000017, and support notes requiring concise executive summary with exact identifiers. Incident INC-000018 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000018, and support notes requiring concise executive summary with exact identifiers. Incident INC-000019 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000019, and support notes requiring concise executive summary with exact identifiers. Incident INC-000020 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000020, and support notes requiring concise executive summary with exact identifiers. Incident INC-000021 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000021, and support notes requiring concise executive summary with exact identifiers. Incident INC-000022 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000022, and support notes requiring concise executive summary with exact identifiers. Incident INC-000023 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000023, and support notes requiring concise executive summary with exact identifiers. Incident INC-000024 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000024, and support notes requiring concise executive summary with exact identifiers. Incident INC-000025 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000025, and support notes requiring concise executive summary with exact identifiers. Incident INC-000026 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000026, and support notes requiring concise executive summary with exact identifiers. Incident INC-000027 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000027, and support notes requiring concise executive summary with exact identifiers. Incident INC-000028 shows queue latency, retry pressure, payment authorization drift, account owner follow-up, contract deadline 2026-07-15, dashboard https://example.com/run/000028, and support notes requiring concise executive summary with exact identifiers. 
+
+Customer telemetry JSON:
+{
+  ""generated_for"": ""prompt-compression-performance"",
+  ""records"": [
+    {
+      ""account_id"": ""acct_00000000"",
+      ""dashboard_url"": ""https://example.com/dashboards/000000"",
+      ""incident_id"": ""INC-000000"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 250,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 3,
+      ""severity"": ""low"",
+      ""status"": ""open""
+    },
+    {
+      ""account_id"": ""acct_00000001"",
+      ""dashboard_url"": ""https://example.com/dashboards/000001"",
+      ""incident_id"": ""INC-000001"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 251,
+      ""region"": ""us-east1"",
+      ""retry_limit"": 4,
+      ""severity"": ""medium"",
+      ""status"": ""monitoring""
+    },
+    {
+      ""account_id"": ""acct_00000002"",
+      ""dashboard_url"": ""https://example.com/dashboards/000002"",
+      ""incident_id"": ""INC-000002"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 252,
+      ""region"": ""us-west1"",
+      ""retry_limit"": 3,
+      ""severity"": ""high"",
+      ""status"": ""resolved""
+    },
+    {
+      ""account_id"": ""acct_00000003"",
+      ""dashboard_url"": ""https://example.com/dashboards/000003"",
+      ""incident_id"": ""INC-000003"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 253,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 4,
+      ""severity"": ""critical"",
+      ""status"": ""open""
+    },
+    {
+      ""account_id"": ""acct_00000004"",
+      ""dashboard_url"": ""https://example.com/dashboards/000004"",
+      ""incident_id"": ""INC-000004"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 254,
+      ""region"": ""us-east1"",
+      ""retry_limit"": 3,
+      ""severity"": ""low"",
+      ""status"": ""monitoring""
+    },
+    {
+      ""account_id"": ""acct_00000005"",
+      ""dashboard_url"": ""https://example.com/dashboards/000005"",
+      ""incident_id"": ""INC-000005"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 255,
+      ""region"": ""us-west1"",
+      ""retry_limit"": 4,
+      ""severity"": ""medium"",
+      ""status"": ""resolved""
+    },
+    {
+      ""account_id"": ""acct_00000006"",
+      ""dashboard_url"": ""https://example.com/dashboards/000006"",
+      ""incident_id"": ""INC-000006"",
+      ""note"": ""Synthetic benchmark record used to stress JSON preprocessing and TOON conversion paths."",
+      ""p95_latency_ms"": 256,
+      ""region"": ""us-central1"",
+      ""retry_limit"": 3,
+      ""severity"": ""high"",
+      ""status"": ""open""
+    }
+  ],
+  ""schema_version"": ""benchmark.v1""
+}
+
+Downloaded incident HTML page:
+<!doctype html>
+<html lang=""en"">
+<head>
+  <meta charset=""utf-8"">
+  <title>Benchmark HTML Incident Page</title>
+  <style>body{font-family:system-ui}.ad{display:block}</style>
+</head>
+<body>
+  <header><nav><a href=""/"">Home</a><a href=""/docs"">Docs</a></nav></header>
+  <aside class=""ad"">Synthetic benchmark advertisement.</aside>
+  <main>
+    <h1>Benchmark HTML Incident Page</h1>
+    <p>Downloaded web page content for HTML-to-Markdown preprocessing.</p>
+    <section class=""incident-card"" data-incident=""INC-000000"">
+      <h2>Incident INC-000000</h2>
+      <p>Account acct_00000000 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000000.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000001"">
+      <h2>Incident INC-000001</h2>
+      <p>Account acct_00000001 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000001.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000002"">
+      <h2>Incident INC-000002</h2>
+      <p>Account acct_00000002 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000002.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000003"">
+      <h2>Incident INC-000003</h2>
+      <p>Account acct_00000003 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000003.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000004"">
+      <h2>Incident INC-000004</h2>
+      <p>Account acct_00000004 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000004.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+    <section class=""incident-card"" data-incident=""INC-000005"">
+      <h2>Incident INC-000005</h2>
+      <p>Account acct_00000005 has checkout latency, retry pressure, deadline 2026-08-15, and dashboard https://example.com/html/000005.</p>
+      <ul>
+        <li>Hard constraint: never raise retry_count above 3.</li>
+        <li>Owner: support operations.</li>
+      </ul>
+    </section>
+  </main>
+  <footer>Generated for prompt compression benchmark.</footer>
+</body>
+</html>
+
+Output: executive summary, blockers and owner, next three actions.",13610,123,tok3000_json0p25_html0p25,c26c5937a4c6097fbeb4c5f65df94e9e6630a83cfb76ca45fa1109688feb1cb0,{},0.0,1,model_force,4064,4064,0,benchmark.v3,1,"{""prose"": 1}",2549.252327999994,0,0,"{'deterministicText': None, 'deterministicSha256': None, 'deterministicCharacters': None, 'deterministicTokens': None, 'deterministicTokensSaved': None, 'deterministicTransforms': [], 'modelInputSha256': None, 'finalSha256': None, 'modelIncrementalTokensSaved': None, 'modelCalled': None}",ok,848,3243,0.2488436632747456,807,0.8625,3000,184.4806040000151,0.00026000000730164174,3.180482999994183,2250.4430689999995,0.20201500001348904,8.612867000010738,8.2454109999901,0.005321000003277732,14.801077999947665,0.33474699998237156,0.0094950000004701,43.7740920000067,0.004674000024351699,35.15821199999891,2549.252327999994,0.0,huggingface:microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank,0,0

@@ -10,6 +10,8 @@ LOGGER = logging.getLogger(__name__)
 REGEX_TOKEN_ESTIMATOR = "regex:unicode-word-or-non-space"
 TIKTOKEN_FALLBACK_ENCODING = "o200k_base"
 HF_TOKENIZER_ALLOW_DOWNLOAD_ENV = "COMPRESSOR_TOKENIZER_ALLOW_DOWNLOAD"
+HF_TOKENIZER_PATH_ENV = "COMPRESSOR_TOKENIZER_PATH"
+HF_TOKENIZER_MODEL_ENV = "COMPRESSOR_MODEL"
 
 _HF_TOKENIZER_CACHE: dict[str, Any] = {}
 _HF_TOKENIZER_FAILURES: set[str] = set()
@@ -121,7 +123,7 @@ def _load_huggingface_tokenizer(model_name: str) -> Any | None:
             from transformers import AutoTokenizer
 
             tokenizer = AutoTokenizer.from_pretrained(
-                model_name,
+                _huggingface_tokenizer_source(model_name),
                 use_fast=True,
                 local_files_only=not _allow_huggingface_tokenizer_download(),
             )
@@ -232,8 +234,19 @@ def _load_tiktoken_encoding(model_name: str) -> Any | None:
 
 def _tokenizer_name(tokenizer: Any, model_name: str) -> str:
     name = getattr(tokenizer, "name_or_path", None)
+    source = _huggingface_tokenizer_source(model_name)
+    if source != model_name and name == source:
+        return model_name
     if isinstance(name, str) and name:
         return name
+    return model_name
+
+
+def _huggingface_tokenizer_source(model_name: str) -> str:
+    configured_model = os.getenv(HF_TOKENIZER_MODEL_ENV, "").strip()
+    configured_path = os.getenv(HF_TOKENIZER_PATH_ENV, "").strip()
+    if configured_path and configured_model == model_name:
+        return configured_path
     return model_name
 
 

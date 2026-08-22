@@ -30,6 +30,7 @@ USAGETAP_AUTHORIZATION_FAILURE_CACHE_SECONDS_ENV = (
 DEFAULT_USAGETAP_API_BASE_URL = "https://api.usagetap.com"
 DEFAULT_USAGETAP_AUTHORIZATION_TIMEOUT_SECONDS = 3.0
 COMPRESSION_KEY_SUFFIX_LENGTH = 43
+UNIVERSAL_API_KEY_SUFFIX_LENGTH = 43
 DEFAULT_COMPRESSION_KEY_MIN_SUFFIX_LENGTH = COMPRESSION_KEY_SUFFIX_LENGTH
 DEFAULT_COMPRESSION_KEY_MAX_SUFFIX_LENGTH = COMPRESSION_KEY_SUFFIX_LENGTH
 DEFAULT_AUTHORIZATION_FAILURE_CACHE_SECONDS = 5.0
@@ -39,6 +40,9 @@ USAGETAP_ACCEPT_HEADER = "application/vnd.usagetap.v1+json"
 
 _BEARER_CREDENTIAL_PATTERN = re.compile(r"(?i:Bearer) ([^\s]+)")
 _COMPRESSION_KEY_PATTERN = re.compile(r"cmp-([A-Za-z0-9_-]+)")
+_UNIVERSAL_API_KEY_PATTERN = re.compile(
+    rf"utk-([A-Za-z0-9_-]{{{UNIVERSAL_API_KEY_SUFFIX_LENGTH}}})"
+)
 _COMPRESSION_SESSION_PATTERN = re.compile(
     r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"
 )
@@ -270,6 +274,7 @@ class UsageTapAuthorizationClient:
         )
         credential = bearer_match.group(1) if bearer_match is not None else ""
         key_match = _COMPRESSION_KEY_PATTERN.fullmatch(credential)
+        universal_key_match = _UNIVERSAL_API_KEY_PATTERN.fullmatch(credential)
         suffix_length = len(key_match.group(1)) if key_match is not None else 0
         valid_api_key = bool(
             key_match is not None
@@ -277,12 +282,13 @@ class UsageTapAuthorizationClient:
             <= suffix_length
             <= self._max_key_suffix_length
         )
+        valid_universal_api_key = universal_key_match is not None
         valid_session = bool(
             credential
             and len(credential) <= MAX_COMPRESSION_SESSION_LENGTH
             and _COMPRESSION_SESSION_PATTERN.fullmatch(credential)
         )
-        if not (valid_api_key or valid_session):
+        if not (valid_api_key or valid_universal_api_key or valid_session):
             raise UsageTapAuthorizationError(
                 401,
                 "Invalid or missing compression credentials.",

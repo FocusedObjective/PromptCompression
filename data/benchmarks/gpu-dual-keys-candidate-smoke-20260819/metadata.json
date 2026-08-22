@@ -1,0 +1,38 @@
+{
+  "aggressiveness": 0.25,
+  "benchmark_schema_version": "benchmark.v3",
+  "cohort_id": "cohort-5b926a581792644a",
+  "compression_mode": "model_force",
+  "concurrency": 1,
+  "conditions": [
+    "deterministic_only",
+    "model_force"
+  ],
+  "diagnostics": "basic",
+  "error_count": 0,
+  "finished_at": "2026-08-20T04:06:08.615233+00:00",
+  "html_ratios": [
+    0.25
+  ],
+  "include_sections": false,
+  "json_ratios": [
+    0.25
+  ],
+  "labels": {
+    "key_type": "universal",
+    "revision": "prompt-compression-dual-keys-205556",
+    "service": "gpu-candidate"
+  },
+  "latency_budget_ms": null,
+  "mode": "http",
+  "repeats": 1,
+  "seed": 1729,
+  "started_at": "2026-08-20T04:06:03.035645+00:00",
+  "success_count": 2,
+  "target_token_median": 3000,
+  "target_tokens": [
+    3000
+  ],
+  "url": "https://dual-keys-20260819---prompt-compression-3sayt2t5na-uc.a.run.app/compress",
+  "warmup": 0
+}

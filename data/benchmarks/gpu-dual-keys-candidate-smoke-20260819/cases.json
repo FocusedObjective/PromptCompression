@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "case_id": "tok3000_json0p25_html0p25",
+      "html_chars": 2900,
+      "html_ratio_target": 0.25,
+      "input_chars": 13610,
+      "json_chars": 2858,
+      "json_ratio_target": 0.25,
+      "prompt_sha256": "c26c5937a4c6097fbeb4c5f65df94e9e6630a83cfb76ca45fa1109688feb1cb0",
+      "synthetic_html_tokens": 848,
+      "synthetic_input_tokens": 3243,
+      "synthetic_json_tokens": 807,
+      "target_tokens": 3000
+    }
+  ],
+  "metadata": {
+    "aggressiveness": 0.25,
+    "benchmark_schema_version": "benchmark.v3",
+    "cohort_id": "cohort-5b926a581792644a",
+    "compression_mode": "model_force",
+    "concurrency": 1,
+    "conditions": [
+      "deterministic_only",
+      "model_force"
+    ],
+    "diagnostics": "basic",
+    "html_ratios": [
+      0.25
+    ],
+    "include_sections": false,
+    "json_ratios": [
+      0.25
+    ],
+    "labels": {
+      "key_type": "universal",
+      "revision": "prompt-compression-dual-keys-205556",
+      "service": "gpu-candidate"
+    },
+    "latency_budget_ms": null,
+    "mode": "http",
+    "repeats": 1,
+    "seed": 1729,
+    "started_at": "2026-08-20T04:06:03.035645+00:00",
+    "target_token_median": 3000,
+    "target_tokens": [
+      3000
+    ],
+    "url": "https://dual-keys-20260819---prompt-compression-3sayt2t5na-uc.a.run.app/compress",
+    "warmup": 0
+  }
+}

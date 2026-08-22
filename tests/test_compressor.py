@@ -1023,6 +1023,37 @@ def test_model_auto_runs_when_gpu_gate_passes():
     assert result.diagnostics.model_projected_latency_ms == 3.0
 
 
+def test_model_auto_gpu_plan_never_loads_cpu_model():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.device = "cpu"
+    service.gpu_min_model_candidate_tokens = 1
+    service.gpu_min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.max_model_projected_latency_ms = 1000.0
+    service.skip_model_if_deterministic_reduction_gte = 1.0
+    service.gpu_p50_fixed_overhead_ms = 1.0
+    service.gpu_p50_llmlingua_chunk_ms = 1.0
+    service.gpu_p50_token_estimate_ms = 1.0
+
+    result = service.compress(
+        "Please review this longer prompt.",
+        aggressiveness=0.25,
+        include_sections=False,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+        model_auto_plan_only=True,
+    )
+
+    assert compressor.inputs == []
+    assert result.model_required is True
+    assert result.compressed_text == "Please review this longer prompt."
+    assert result.compression_mode == COMPRESSION_MODE_MODEL_AUTO
+    assert result.compression_path == "unchanged"
+    assert result.diagnostics is not None
+    assert result.diagnostics.model_gate_decision == "run"
+    assert result.diagnostics.model_projected_latency_ms == 3.0
+
+
 def test_duplicate_blocks_are_reported_without_rewriting_output():
     compressor = RecordingCompressor()
     service = build_service_with_pipeline(compressor)

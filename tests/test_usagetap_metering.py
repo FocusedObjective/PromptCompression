@@ -316,8 +316,12 @@ def test_missing_platform_key_fails_without_calling_upstream() -> None:
 
 
 @pytest.mark.parametrize("prefix", ["ck-", "cmp-"])
-def test_meter_client_accepts_both_exact_key_formats(prefix: str) -> None:
+def test_meter_client_accepts_legacy_exact_key_formats(prefix: str) -> None:
     UsageTapMeteringClient(api_key=f"{prefix}{'A' * 43}")
+
+
+def test_meter_client_accepts_universal_key_with_track_usage_permission() -> None:
+    UsageTapMeteringClient(api_key=f"utk-{'A' * 43}")
 
 
 @pytest.mark.parametrize(

@@ -26,7 +26,9 @@ COMPRESSION_FEATURE = "platform.compression"
 COMPRESSION_TAGS = ("platform-usage", "promptcompression")
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
 
-_METER_KEY_PATTERN = re.compile(r"(?:ck-|cmp-)[A-Za-z0-9_-]{43}")
+_METER_KEY_PATTERN = re.compile(
+    r"(?:(?:ck-|cmp-|utk-)[A-Za-z0-9_-]{43})"
+)
 
 _SUCCESS_CODES = {
     "CUSTOM_METER_SUCCESS",

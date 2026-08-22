@@ -1,0 +1,51 @@
+{
+  "cases": [
+    {
+      "case_id": "tok256_json0p0_html0p0",
+      "html_chars": 0,
+      "html_ratio_target": 0.0,
+      "input_chars": 1584,
+      "json_chars": 0,
+      "json_ratio_target": 0.0,
+      "prompt_sha256": "d7c2cf201643e037cfcdc242de22b510243f19374909e05a16d41ee60ee77a8b",
+      "synthetic_html_tokens": 0,
+      "synthetic_input_tokens": 316,
+      "synthetic_json_tokens": 0,
+      "target_tokens": 256
+    }
+  ],
+  "metadata": {
+    "aggressiveness": 0.25,
+    "benchmark_schema_version": "benchmark.v3",
+    "cohort_id": "cohort-83f5b11998ad9e14",
+    "compression_mode": "deterministic",
+    "concurrency": 1,
+    "conditions": [
+      "deterministic"
+    ],
+    "diagnostics": "basic",
+    "html_ratios": [
+      0.0
+    ],
+    "include_sections": false,
+    "json_ratios": [
+      0.0
+    ],
+    "labels": {
+      "key_type": "universal",
+      "region": "us-central1",
+      "service": "edge"
+    },
+    "latency_budget_ms": null,
+    "mode": "http",
+    "repeats": 1,
+    "seed": 1729,
+    "started_at": "2026-08-20T03:21:05.270065+00:00",
+    "target_token_median": 256,
+    "target_tokens": [
+      256
+    ],
+    "url": "https://prompt-compression-edge-3sayt2t5na-uc.a.run.app/compress",
+    "warmup": 0
+  }
+}

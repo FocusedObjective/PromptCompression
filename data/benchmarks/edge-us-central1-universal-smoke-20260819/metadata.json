@@ -1,0 +1,37 @@
+{
+  "aggressiveness": 0.25,
+  "benchmark_schema_version": "benchmark.v3",
+  "cohort_id": "cohort-83f5b11998ad9e14",
+  "compression_mode": "deterministic",
+  "concurrency": 1,
+  "conditions": [
+    "deterministic"
+  ],
+  "diagnostics": "basic",
+  "error_count": 0,
+  "finished_at": "2026-08-20T03:21:06.080548+00:00",
+  "html_ratios": [
+    0.0
+  ],
+  "include_sections": false,
+  "json_ratios": [
+    0.0
+  ],
+  "labels": {
+    "key_type": "universal",
+    "region": "us-central1",
+    "service": "edge"
+  },
+  "latency_budget_ms": null,
+  "mode": "http",
+  "repeats": 1,
+  "seed": 1729,
+  "started_at": "2026-08-20T03:21:05.270065+00:00",
+  "success_count": 1,
+  "target_token_median": 256,
+  "target_tokens": [
+    256
+  ],
+  "url": "https://prompt-compression-edge-3sayt2t5na-uc.a.run.app/compress",
+  "warmup": 0
+}

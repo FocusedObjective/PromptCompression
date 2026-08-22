@@ -2,6 +2,7 @@
 .agents
 .codex
 .env
+.env.local
 .env.example
 .venv
 .dockerignore
@@ -27,10 +28,6 @@ models/*
 !models/tenant_rick_probe/
 !models/tenant_rick_probe/**
 .huggingface
-edge/node_modules
-edge/.wrangler
-edge/dist
-edge/.dev.vars
 outputs
 reports
 data/benchmarks

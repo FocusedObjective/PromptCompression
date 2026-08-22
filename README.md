@@ -115,16 +115,17 @@ conflating savings with correctness.
 
 ### `POST /compress`
 
-All real-time compression endpoints (`/compress`, `/v1/compress`, and
-`/v1/messages/compress`) require a UsageTap compression credential:
+All real-time compression endpoints (`/compress`, `/v1/compress`,
+`/v1/messages/compress`, and `/v1/responses/compress`) require a UsageTap
+compression credential:
 
 ```http
-Authorization: Bearer cmp-...
+Authorization: Bearer utk-...
 ```
 
 The service rejects malformed credentials locally, then checks the credential
 and current PAYG credit concurrently with compression. Missing credentials,
-non-`cmp-` credentials, keys outside the configured length bounds, and keys
+credentials outside the supported legacy `cmp-` or universal `utk-` formats, keys outside the configured length bounds, and keys
 containing characters other than letters, numbers, `_`, or `-` return `401`
 before GPU work starts. For locally sane keys, compression may run while the
 remote check is pending, but its result is discarded unless UsageTap authorizes
@@ -504,7 +505,11 @@ request fields and all non-user messages, then compresses only `user` message
 string content or text parts such as `{"type": "text", "text": "..."}` and
 `{"type": "input_text", "text": "..."}`. This keeps stable system/developer
 instructions byte-stable for downstream prompt caching while reducing
-request-specific user context.
+request-specific user context. Typed non-message entries embedded in the chain,
+such as `function_call`, `function_call_output`, reasoning records, and unknown
+future item types, are accepted and preserved individually rather than causing
+the whole request to fail. Their `message_stats` entry uses
+`skipped_reason: "item_type_preserved"`.
 
 Request:
 
@@ -625,6 +630,61 @@ exact-output content and non-text blocks are protected. Message metadata such as
 `tool_call_id`, tool name and arguments is preserved. See
 [Compression Rollout and Measurement](docs/rollout.md).
 
+### `POST /v1/responses/compress`
+
+Native OpenAI Responses input endpoint. Send the complete provider request with
+`input` as either a string or an ordered heterogeneous array. In array input,
+only `message` items whose role is `user`, `developer`, or `system` are eligible;
+within those messages, string content and `input_text` parts are compressed.
+All other items and parts—including function calls, function outputs, images,
+reasoning/reference records, and unknown future types—remain in their original
+positions and are returned unchanged.
+
+```json
+{
+  "model": "gpt-5",
+  "input": [
+    {
+      "type": "message",
+      "role": "developer",
+      "content": [{"type": "input_text", "text": "Long instructions..."}]
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_123",
+      "name": "lookup",
+      "arguments": "{\"id\":123}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_123",
+      "output": "Exact tool output"
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": "Long user context..."
+    }
+  ],
+  "tools": [{"type": "function", "name": "lookup"}],
+  "compression_settings": {"aggressiveness": 0.15}
+}
+```
+
+The response contains `compressed_request`, which is ready to forward to the
+OpenAI Responses API without shape conversion. It retains `model`, `tools`, and
+all other provider fields, replaces only eligible text with token-positive
+results, and removes the compressor-only `tenant_id`, `tenant_profile`, and
+`compression_settings` fields. The top-level `input` mirrors
+`compressed_request.input`.
+
+`item_stats` contains content-free diagnostics: item index/type/role,
+compressed-versus-preserved state, skip reason, original/compressed token
+estimates, tokens saved, and safe per-content-part status. Aggregate
+`input_tokens`, `output_tokens`, and `tokens_saved` cover the complete Responses
+input array. When no text is eligible, or a candidate has no positive estimated
+savings, the endpoint succeeds with the original input and zero savings.
+
 ## How Aggressiveness Works
 
 This MVP maps `aggressiveness` to LLMLingua-2's retention `rate`.
@@ -644,9 +704,10 @@ validated compression setting in its key. See
 [Local Compression Response Cache](docs/local-response-cache.md) for behavior,
 configuration, analytics bypass rules, and the future edge migration plan.
 
-`/v1/messages/compress` also caches successful compressed text parts by exact
-content hash, role, tenant profile and behavior version. This lets growing agent
-histories reuse earlier message work even when the whole-request cache misses.
+`/v1/messages/compress` and `/v1/responses/compress` also cache successful
+compressed text parts by exact content hash, role, tenant profile and behavior
+version. This lets growing agent histories reuse earlier message work even when
+the whole-request cache misses.
 Responses expose `X-Compression-Content-Cache` counts and `/health` exposes both
 cache summaries.
 
@@ -663,7 +724,7 @@ more compression over latency.
 Production `model_auto` uses the versioned GPU policy in
 `app/gpu_compression_policy.json`: 2,000 model-candidate tokens and 200 expected
 incremental saved tokens before the remaining safety and latency gates. Both the
-Python origin and Cloudflare Worker consume this file so edge decisions cannot
+Python origin and Python CPU edge consume this file so edge decisions cannot
 drift from the GPU service. Development-only runtime behavior is outside this
 production contract.
 
@@ -756,14 +817,16 @@ Compression authorization configuration:
 
 - `USAGETAP_API_BASE_URL` defaults to `https://api.usagetap.com`.
 - `USAGETAP_AUTHORIZATION_TIMEOUT_SECONDS` defaults to `3`.
-- `USAGETAP_COMPRESSION_KEY_MIN_SUFFIX_LENGTH` defaults to `43`.
-- `USAGETAP_COMPRESSION_KEY_MAX_SUFFIX_LENGTH` defaults to `43`.
+- `USAGETAP_COMPRESSION_KEY_MIN_SUFFIX_LENGTH` defaults to `43` for legacy `cmp-` keys.
+- `USAGETAP_COMPRESSION_KEY_MAX_SUFFIX_LENGTH` defaults to `43` for legacy `cmp-` keys.
 - `USAGETAP_AUTHORIZATION_FAILURE_CACHE_SECONDS` defaults to `5`; set it to
   `0` to disable negative caching.
 - `USAGETAP_METERING_TIMEOUT_SECONDS` defaults to `3`.
 - `USAGETAP_METERING_API_KEY` must be supplied through the Cloud Run Secret
   Manager reference for positive-savings operations. Startup accepts only
-  `ck-` or `cmp-` followed by exactly 43 Base64URL characters.
+  legacy `ck-` or `cmp-` followed by exactly 43 Base64URL characters, or a
+  universal `utk-` key followed by exactly 43 Base64URL characters. The
+  UsageTap endpoint remains authoritative for the required permission flag.
 
 The main and benchmark UIs also support an explicitly enabled public demo mode.
 A `POST /demo/session` call returns a signed `demo-v1` credential with a
@@ -782,7 +845,7 @@ receive a customer identity and skip customer metering. Setting
 existing sessions.
 
 These settings are not credentials. Authorization forwards each request's
-incoming `Bearer cmp-...` value directly to UsageTap. The platform-owned
+incoming bearer key directly to UsageTap. The platform-owned
 metering key is mounted separately by the production deploy command as the
 Secret Manager-backed `USAGETAP_METERING_API_KEY` environment variable. It is
 reserved for the platform-owned `/custom_meter` integration and is never used
@@ -791,6 +854,14 @@ to authorize customer compression requests.
 Use [`DEPLOYMENT_GPU.md`](DEPLOYMENT_GPU.md) for every production build,
 deployment, rollback, and verification. `Dockerfile` and `cloudbuild.yaml` are
 local-development artifacts and must not be deployed to the production service.
+
+The model-free Python CPU edge is built separately with `Dockerfile.edge` and
+`cloudbuild.edge.yaml`. It runs the same deterministic Python pipeline locally,
+evaluates the shared GPU gate locally for `model_auto`, forwards only requests
+that need model work (plus every `model_force` request), and returns a
+deterministic response if the GPU origin is unavailable. Its compression routes
+use the same request and response schemas as the GPU API. See
+[`DEPLOYMENT_EDGE.md`](DEPLOYMENT_EDGE.md).
 
 ## Performance Benchmark
 
@@ -832,7 +903,7 @@ python scripts\benchmark_performance.py `
 Pass a UsageTap compression key to the benchmark script:
 
 ```powershell
-$env:COMPRESSION_KEY="cmp-..."
+$env:COMPRESSION_KEY="utk-..."
 python scripts\benchmark_performance.py `
   --url "$env:SERVICE_URL/compress" `
   --header "Authorization: Bearer $env:COMPRESSION_KEY"

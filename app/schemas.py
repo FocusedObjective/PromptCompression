@@ -540,15 +540,36 @@ class V1MessagesCompressRequest(BaseModel):
         default="bear-2",
         description="Accepted for request compatibility and preserved in output.",
     )
-    messages: list[V1Message] = Field(..., min_length=1)
+    messages: list[dict[str, Any]] = Field(..., min_length=1)
     compression_settings: V1CompressionSettings | None = None
 
     model_config = ConfigDict(extra="allow")
+
+    @field_validator("messages", mode="before")
+    @classmethod
+    def validate_mixed_messages(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        normalized: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, V1Message):
+                item = item.model_dump(exclude_unset=True)
+            if not isinstance(item, dict):
+                raise ValueError("each message item must be an object")
+            item_type = item.get("type")
+            is_typed_non_message = (
+                isinstance(item_type, str) and item_type != "message"
+            )
+            if not is_typed_non_message and not isinstance(item.get("role"), str):
+                raise ValueError("message.role must be a string")
+            normalized.append(item)
+        return normalized
 
 
 class V1MessageCompressionStats(BaseModel):
     index: int
     role: str
+    item_type: str = "message"
     original_tokens: int
     compressed_tokens: int
     tokens_saved: int
@@ -587,6 +608,82 @@ class V1MessagesCompressResponse(BaseModel):
     compression_profile_source: str
     training_sample_recorded: bool = False
     message_stats: list[V1MessageCompressionStats]
+    warnings: list[str] = Field(default_factory=list)
+    fail_open_used: bool = False
+
+
+class V1ResponsesCompressRequest(BaseModel):
+    tenant_id: str | None = Field(
+        default=None,
+        description="Tenant identity. X-Tenant-ID may be used instead.",
+    )
+    tenant_profile: TenantCompressionSettings | None = Field(
+        default=None,
+        description="Tenant-specific compression rules supplied by the API caller.",
+    )
+    model: str = Field(
+        default="bear-2",
+        description="OpenAI Responses model value, preserved in compressed_request.",
+    )
+    input: str | list[Any] = Field(
+        ...,
+        description="Native OpenAI Responses string or heterogeneous input array.",
+    )
+    compression_settings: V1CompressionSettings | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class V1ResponseContentPartCompressionStats(BaseModel):
+    index: int
+    type: str
+    original_tokens: int
+    compressed_tokens: int
+    tokens_saved: int
+    compressed: bool
+    preserved: bool
+    skipped_reason: str | None = None
+
+
+class V1ResponseItemCompressionStats(BaseModel):
+    index: int
+    type: str
+    role: str | None = None
+    original_tokens: int
+    compressed_tokens: int
+    tokens_saved: int
+    compression_applied: bool
+    compressed: bool
+    preserved: bool
+    skipped_reason: str | None = None
+    text_parts: int = 0
+    compressed_text_parts: int = 0
+    content_parts: list[V1ResponseContentPartCompressionStats] = Field(
+        default_factory=list
+    )
+    content_cache_hits: int = 0
+    content_cache_misses: int = 0
+    content_cache_stores: int = 0
+
+
+class V1ResponsesCompressResponse(BaseModel):
+    compressed_request: dict[str, Any]
+    input: str | list[Any]
+    input_tokens: int
+    output_tokens: int
+    original_input_tokens: int
+    tokens_saved: int
+    compression_ratio: float
+    compression_time: float
+    token_estimator: str = Field(default=REGEX_TOKEN_ESTIMATOR)
+    downstream_estimated_input_tokens: int | None = None
+    downstream_estimated_output_tokens: int | None = None
+    downstream_token_estimator: str | None = None
+    tenant_id: str
+    compression_profile: str
+    compression_profile_source: str
+    training_sample_recorded: bool = False
+    item_stats: list[V1ResponseItemCompressionStats]
     warnings: list[str] = Field(default_factory=list)
     fail_open_used: bool = False
 

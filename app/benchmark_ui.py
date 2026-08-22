@@ -402,11 +402,11 @@ BENCHMARK_HTML = """
             spellcheck="false"
             data-1p-ignore="true"
             data-lpignore="true"
-            placeholder="cmp-..."
+            placeholder="utk-... or cmp-..."
           >
           <button class="secondary-button" id="startDemoButton" type="button">Start 10-minute demo</button>
         </div>
-        <span class="field-help" id="demoAccessStatus">Enter a cmp- key or start a bounded demo session. Credentials stay in page memory and out of downloads.</span>
+        <span class="field-help" id="demoAccessStatus">Enter an API key with Use Compression permission or start a bounded demo session. Credentials stay in page memory and out of downloads.</span>
       </div>
       <label class="field wide">
         Target tokens
@@ -645,7 +645,7 @@ BENCHMARK_HTML = """
     const summaryBody = document.getElementById("summaryBody");
     const rawBody = document.getElementById("rawBody");
     const logNode = document.getElementById("logNode");
-    const COMPRESSION_CREDENTIAL_PATTERN = /^(?:cmp-[A-Za-z0-9_-]{43}|demo-v1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)$/;
+    const COMPRESSION_CREDENTIAL_PATTERN = /^(?:cmp-[A-Za-z0-9_-]{43}|utk-[A-Za-z0-9_-]{43}|demo-v1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)$/;
 
     function setStatus(message, state = "") {
       statusNode.textContent = message;
@@ -1575,7 +1575,7 @@ BENCHMARK_HTML = """
     runButton.addEventListener("click", async () => {
       const compressionApiKey = compressionApiKeyInput.value.trim();
       if (!COMPRESSION_CREDENTIAL_PATTERN.test(compressionApiKey)) {
-        setStatus("Enter a valid cmp- key or start a demo session", "error");
+        setStatus("Enter a key with Use Compression permission or start a demo session", "error");
         return;
       }
       currentCohortId = `cohort-${Date.now().toString(36)}`;
