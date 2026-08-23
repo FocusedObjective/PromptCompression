@@ -151,6 +151,65 @@ def test_mixed_responses_input_preserves_order_and_non_message_fields(
     assert "Prompts are code." not in response.model_dump_json(include={"item_stats"})
 
 
+def test_concise_responses_messages_without_type_are_compressed_in_place(
+    responses_dependencies,
+):
+    service, _metering = responses_dependencies
+    original_input = [
+        {
+            "role": "developer",
+            "content": [{"type": "input_text", "text": "Prompts are code."}],
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_123",
+            "name": "lookup",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_123",
+            "output": "Exact tool output.",
+        },
+        {
+            "type": "reasoning",
+            "role": "user",
+            "content": "Message-like fields must not override an explicit type.",
+        },
+        {"role": "user", "content": "Prompts are code."},
+        {"role": "assistant", "content": "Assistant stays unchanged."},
+    ]
+
+    response = main.compress_v1_responses(
+        V1ResponsesCompressRequest(model="gpt-test", input=original_input)
+    )
+
+    result = response.compressed_request["input"]
+    assert result[0]["content"][0]["text"] == "Prompts code."
+    assert result[1] == original_input[1]
+    assert result[2] == original_input[2]
+    assert result[3] == original_input[3]
+    assert result[4]["content"] == "Prompts code."
+    assert result[5] == original_input[5]
+    assert all("type" not in result[index] for index in (0, 4, 5))
+    assert service.calls == [
+        ("Prompts are code.", 0.15),
+        ("Prompts are code.", 0.15),
+    ]
+    assert [response.item_stats[index].type for index in (0, 4, 5)] == [
+        "message",
+        "message",
+        "message",
+    ]
+    assert response.item_stats[1].type == "function_call"
+    assert response.item_stats[2].type == "function_call_output"
+    assert response.item_stats[3].type == "reasoning"
+    assert all(response.item_stats[index].preserved for index in (1, 2, 3, 5))
+    assert response.item_stats[0].compressed is True
+    assert response.item_stats[4].compressed is True
+    assert response.item_stats[5].skipped_reason == "role_not_compressible"
+
+
 @pytest.mark.parametrize("function_index", [2, 4])
 def test_function_call_at_gateway_reported_indexes_is_preserved(
     responses_dependencies,
@@ -308,7 +367,7 @@ def test_messages_endpoint_skips_standalone_function_items_individually(
         "id": "fc_messages",
         "call_id": "call_messages",
         "name": "lookup",
-        "arguments": "{\"exact\":true}",
+        "arguments": '{"exact":true}',
     }
     function_output = {
         "type": "function_call_output",

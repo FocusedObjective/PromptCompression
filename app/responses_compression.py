@@ -367,11 +367,15 @@ def _compress_string_input(
 
 def _is_eligible_message(item: Any) -> bool:
     return (
-        isinstance(item, dict)
-        and item.get("type") == "message"
-        and isinstance(item.get("role"), str)
-        and item["role"].lower() in COMPRESSIBLE_RESPONSES_ROLES
+        _is_message_item(item) and item["role"].lower() in COMPRESSIBLE_RESPONSES_ROLES
     )
+
+
+def _is_message_item(item: Any) -> bool:
+    """Recognize both explicit and concise OpenAI Responses messages."""
+    if not isinstance(item, dict) or not isinstance(item.get("role"), str):
+        return False
+    return "type" not in item or item["type"] == "message"
 
 
 def _is_input_text_part(part: Any) -> bool:
@@ -457,6 +461,8 @@ def _content_part_stats(
 def _item_type(item: Any) -> str:
     if isinstance(item, dict) and isinstance(item.get("type"), str):
         return item["type"]
+    if _is_message_item(item):
+        return "message"
     if isinstance(item, str):
         return "input_text"
     return type(item).__name__
@@ -481,7 +487,7 @@ def _item_skip_reason(
         return "no_positive_savings"
     if pipeline_skip_reason is not None:
         return pipeline_skip_reason
-    if not isinstance(item, dict) or item.get("type") != "message":
+    if not _is_message_item(item):
         return "item_type_preserved"
     role = item.get("role")
     if not isinstance(role, str) or role.lower() not in COMPRESSIBLE_RESPONSES_ROLES:
