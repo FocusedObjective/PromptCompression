@@ -6,7 +6,7 @@
   "min_model_incremental_savings_tokens": 200,
   "min_model_incremental_reduction": 0.05,
   "max_model_projected_latency_ms": 2500,
-  "max_model_auto_placeholders": 400,
+  "max_model_auto_placeholders": 500,
   "cold_model_tight_latency_budget_ms": 1000,
   "max_protected_density": 0.2,
   "max_structured_density": 0.35,

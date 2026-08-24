@@ -719,6 +719,13 @@ Output:
             </select>
           </label>
           <label class="tenant-field">
+            Protection
+            <select id="protectionMode">
+              <option value="hybrid" selected>Hybrid automatic</option>
+              <option value="explicit_first">Explicit first</option>
+            </select>
+          </label>
+          <label class="tenant-field">
             Latency Budget ms
             <input id="latencyBudgetMs" type="number" min="0" step="25" placeholder="model_auto only">
           </label>
@@ -820,6 +827,7 @@ Output:
     const startDemoButton = document.getElementById("startDemoButton");
     const demoAccessStatus = document.getElementById("demoAccessStatus");
     const compressionModeInput = document.getElementById("compressionMode");
+    const protectionModeInput = document.getElementById("protectionMode");
     const latencyBudgetMsInput = document.getElementById("latencyBudgetMs");
     const allowCpuModelAutoInput = document.getElementById("allowCpuModelAuto");
     const includeDetailedAnalyticsInput = document.getElementById("includeDetailedAnalytics");
@@ -1344,6 +1352,7 @@ Output:
         const requestPayload = buildTenantPayload();
         requestPayload.text = text;
         requestPayload.mode = compressionModeInput.value;
+        requestPayload.protection_mode = protectionModeInput.value;
         requestPayload.include_sections = true;
         requestPayload.include_diagnostics = true;
         requestPayload.include_detailed_analytics = includeDetailedAnalyticsInput.checked;
@@ -1848,6 +1857,7 @@ def _run_compress_request(
             collect_detailed_analytics=request.include_detailed_analytics,
             input_format=request.input_format,
             html_mode=request.html_mode,
+            protection_mode=request.protection_mode,
         )
         if request.allow_inline_json_compression_paths:
             compression_kwargs["allow_inline_json_compression_paths"] = True
@@ -2212,6 +2222,9 @@ def _compress_v1_response(
                 if request.compression_settings is not None
                 else "visible_text"
             ),
+            protection_mode=_resolve_v1_protection_mode(
+                request.compression_settings
+            ),
         )
         if model_auto_plan_only:
             compression_kwargs["model_auto_plan_only"] = True
@@ -2389,6 +2402,9 @@ def _compress_v1_messages_response(
             tenant_profile=tenant_profile,
             mode=mode,
             latency_budget_ms=latency_budget_ms,
+            protection_mode=_resolve_v1_protection_mode(
+                request.compression_settings
+            ),
             compact_empty_user_messages=_resolve_v1_compact_empty_user_messages(
                 request.compression_settings,
             ),
@@ -2661,6 +2677,9 @@ def _compress_v1_responses_response(
             tenant_profile=tenant_profile,
             mode=mode,
             latency_budget_ms=latency_budget_ms,
+            protection_mode=_resolve_v1_protection_mode(
+                request.compression_settings
+            ),
             content_cache=content_cache,
             content_cache_enabled=(
                 content_cache_enabled and not model_auto_plan_only
@@ -3010,6 +3029,14 @@ def _resolve_v1_mode(settings: V1CompressionSettings | None) -> str:
     if settings is not None and settings.mode is not None:
         return settings.mode
     return COMPRESSION_MODE_DETERMINISTIC
+
+
+def _resolve_v1_protection_mode(
+    settings: V1CompressionSettings | None,
+) -> str:
+    if settings is None:
+        return "hybrid"
+    return settings.protection_mode
 
 
 def _resolve_v1_latency_budget_ms(

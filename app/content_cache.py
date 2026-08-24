@@ -82,6 +82,7 @@ class ContentCompressionCache:
         aggressiveness: float,
         mode: str | None,
         latency_budget_ms: float | None,
+        protection_mode: str = "hybrid",
         tenant_profile: TenantCompressionProfile | None,
         compute: Callable[[], CachedTextCompression],
     ) -> CachedTextCompression:
@@ -92,6 +93,7 @@ class ContentCompressionCache:
             aggressiveness=aggressiveness,
             mode=mode,
             latency_budget_ms=latency_budget_ms,
+            protection_mode=protection_mode,
             tenant_profile=tenant_profile,
         )
 
@@ -136,6 +138,7 @@ class ContentCompressionCache:
         aggressiveness: float,
         mode: str | None,
         latency_budget_ms: float | None,
+        protection_mode: str = "hybrid",
         tenant_profile: TenantCompressionProfile | None,
     ) -> str:
         identity: dict[str, Any] = {
@@ -151,6 +154,7 @@ class ContentCompressionCache:
             "aggressiveness": aggressiveness,
             "mode": mode,
             "latency_budget_ms": latency_budget_ms,
+            "protection_mode": protection_mode,
             "tenant_profile": (
                 None if tenant_profile is None else asdict(tenant_profile)
             ),

@@ -38,11 +38,21 @@ def evaluate_integrity(
     *,
     placeholder_tokens: Iterable[str] = (),
     required_terms: Iterable[str] = (),
+    allowed_span_kinds: frozenset[str] | None = None,
+    protect_critical_clauses: bool = True,
 ) -> IntegrityResult:
     """Compare accepted output to the exact content entering a risky stage."""
 
-    reference_spans = _protected_value_counts(reference)
-    output_spans = _protected_value_counts(output)
+    reference_spans = _protected_value_counts(
+        reference,
+        allowed_span_kinds=allowed_span_kinds,
+        protect_critical_clauses=protect_critical_clauses,
+    )
+    output_spans = _protected_value_counts(
+        output,
+        allowed_span_kinds=allowed_span_kinds,
+        protect_critical_clauses=protect_critical_clauses,
+    )
     span_counts = Counter(kind for kind, _value in reference_spans.elements())
     missing: Counter[str] = Counter()
     added: Counter[str] = Counter()
@@ -88,8 +98,16 @@ def evaluate_integrity(
     )
 
 
-def _protected_value_counts(text: str) -> Counter[tuple[str, str]]:
-    spans = [*protected_spans_for_text(text), *critical_clause_spans(text)]
+def _protected_value_counts(
+    text: str,
+    *,
+    allowed_span_kinds: frozenset[str] | None,
+    protect_critical_clauses: bool,
+) -> Counter[tuple[str, str]]:
+    spans = [
+        *protected_spans_for_text(text, allowed_kinds=allowed_span_kinds),
+        *(critical_clause_spans(text) if protect_critical_clauses else []),
+    ]
     return Counter((span.kind, span.text) for span in spans)
 
 

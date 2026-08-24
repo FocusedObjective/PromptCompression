@@ -108,6 +108,18 @@ PROTECTED_PATTERN_SPECS = [
     ("constant", re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")),
 ]
 PROTECTED_PATTERNS = [pattern for _, pattern in PROTECTED_PATTERN_SPECS]
+MACHINE_CRITICAL_SPAN_KINDS = frozenset(
+    {
+        "code_fence",
+        "markdown_link",
+        "citation",
+        "template",
+        "url",
+        "email",
+        "inline_code",
+        "identifier",
+    }
+)
 
 CLAUSE_PATTERN = re.compile(r"(?m)(?:^|(?<=[.!?]))[^\n.!?]*[^\s\n.!?][.!?]?")
 CLAUSE_ACTION_PATTERN = re.compile(
@@ -133,9 +145,15 @@ CLAUSE_GOVERNING_VALUE_PATTERN = re.compile(
 )
 
 
-def protected_spans_for_text(text: str) -> list[ProtectedSpan]:
+def protected_spans_for_text(
+    text: str,
+    *,
+    allowed_kinds: frozenset[str] | None = None,
+) -> list[ProtectedSpan]:
     candidates: list[ProtectedSpan] = []
     for kind, pattern in PROTECTED_PATTERN_SPECS:
+        if allowed_kinds is not None and kind not in allowed_kinds:
+            continue
         for match in pattern.finditer(text):
             value = match.group(0)
             if value.strip():

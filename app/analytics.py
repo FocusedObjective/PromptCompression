@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from app.experiment_profiles import ExperimentProfile
 from app.integrity_policy import evaluate_integrity
+from app.protected_spans import MACHINE_CRITICAL_SPAN_KINDS
 from app.version import DEPLOYMENT_VERSION
 
 
@@ -281,6 +282,7 @@ def build_detailed_analytics(
     duplicate_wrapper_alias_tokens_saved: int = 0,
     duplicate_wrapper_aliases_enabled: bool = False,
     tenant_boilerplate_enabled: bool = True,
+    protection_mode: str = "hybrid",
 ) -> DetailedAnalytics:
     active_preprocessor = preprocessor or service.preprocessor
     def estimate(value: str) -> int:
@@ -344,6 +346,7 @@ def build_detailed_analytics(
         evaluation_constraints=evaluation_constraints,
         output_rollback_reason=output_rollback_reason,
         rejected_output_sha256=rejected_output_sha256,
+        protection_mode=protection_mode,
     )
     provenance = _provenance(
         service,
@@ -351,6 +354,7 @@ def build_detailed_analytics(
         token_estimator,
         preprocessor=active_preprocessor,
         experiment_profile=experiment_profile,
+        protection_mode=protection_mode,
     )
     net_model_saved = max(0, post_deterministic_tokens - final_tokens)
     net_deterministic_saved = max(0, original_tokens - post_deterministic_tokens)
@@ -812,6 +816,7 @@ def _integrity_validation(
     evaluation_constraints: dict[str, list[str]] | None = None,
     output_rollback_reason: str | None = None,
     rejected_output_sha256: str | None = None,
+    protection_mode: str = "hybrid",
 ) -> IntegrityValidation:
     constraints = evaluation_constraints or {}
     required_terms = [
@@ -823,6 +828,12 @@ def _integrity_validation(
         output,
         placeholder_tokens=placeholder_tokens,
         required_terms=required_terms,
+        allowed_span_kinds=(
+            MACHINE_CRITICAL_SPAN_KINDS
+            if protection_mode == "explicit_first"
+            else None
+        ),
+        protect_critical_clauses=protection_mode == "hybrid",
     )
     warnings = [f"integrity_{failure}" for failure in result.failure_classes]
     if output_rollback_reason:
@@ -1009,10 +1020,12 @@ def _provenance(
     *,
     preprocessor: Any,
     experiment_profile: ExperimentProfile | None,
+    protection_mode: str,
 ) -> CompressionProvenance:
     resolved_experiment = experiment_profile or ExperimentProfile("baseline")
     settings = {
         "device": service.device,
+        "protection_mode": protection_mode,
         "min_rate": service.min_rate,
         "min_segment_characters": service.min_segment_chars,
         "min_segment_tokens": service.min_segment_tokens,

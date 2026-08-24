@@ -1,4 +1,5 @@
 from app.protected_spans import (
+    MACHINE_CRITICAL_SPAN_KINDS,
     critical_clause_spans,
     force_tokens_for_text,
     protected_spans_for_text,
@@ -38,6 +39,24 @@ def test_protected_spans_include_exact_money_ids_and_constraints():
         ("ORD-7781", "identifier"),
         ("$15,000", "money"),
         ("2026-08-15", "number"),
+    ]
+
+
+def test_machine_critical_filter_excludes_unmarked_policy_values():
+    text = (
+        "Do not delete ORD-7781 before paying $15,000 by 2026-08-15. "
+        "Use `sessions_spawn` at https://example.com/run."
+    )
+
+    spans = protected_spans_for_text(
+        text,
+        allowed_kinds=MACHINE_CRITICAL_SPAN_KINDS,
+    )
+
+    assert [(span.text, span.kind) for span in spans] == [
+        ("ORD-7781", "identifier"),
+        ("`sessions_spawn`", "inline_code"),
+        ("https://example.com/run.", "url"),
     ]
 
 

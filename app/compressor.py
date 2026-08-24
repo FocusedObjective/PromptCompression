@@ -5,7 +5,6 @@ from collections import Counter
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 import logging
-import math
 from pathlib import Path
 import re
 from threading import Lock
@@ -17,6 +16,7 @@ from app.experiment_profiles import ExperimentProfile, resolve_experiment_profil
 from app.gpu_policy import GPU_COMPRESSION_POLICY
 from app.integrity_policy import evaluate_integrity, sha256_text
 from app.protected_spans import (
+    MACHINE_CRITICAL_SPAN_KINDS,
     ProtectedSpan,
     critical_clause_spans,
     force_tokens_for_text,
@@ -59,6 +59,12 @@ COMPRESSION_MODES = {
     COMPRESSION_MODE_DETERMINISTIC,
     COMPRESSION_MODE_MODEL_AUTO,
     COMPRESSION_MODE_MODEL_FORCE,
+}
+PROTECTION_MODE_HYBRID = "hybrid"
+PROTECTION_MODE_EXPLICIT_FIRST = "explicit_first"
+PROTECTION_MODES = {
+    PROTECTION_MODE_HYBRID,
+    PROTECTION_MODE_EXPLICIT_FIRST,
 }
 COMPRESSION_PATH_UNCHANGED = "unchanged"
 COMPRESSION_PATH_DETERMINISTIC_ONLY = "deterministic_only"
@@ -1042,9 +1048,23 @@ class PromptCompressionService:
         text: str,
         *,
         critical_clause_shielding: bool = False,
+        protection_mode: str = PROTECTION_MODE_HYBRID,
     ) -> list[ProtectedSpan]:
-        candidates = [*protected_spans_for_text(text)]
-        if critical_clause_shielding:
+        resolved_mode = self._normalize_protection_mode(protection_mode)
+        candidates = [
+            *protected_spans_for_text(
+                text,
+                allowed_kinds=(
+                    MACHINE_CRITICAL_SPAN_KINDS
+                    if resolved_mode == PROTECTION_MODE_EXPLICIT_FIRST
+                    else None
+                ),
+            )
+        ]
+        if (
+            critical_clause_shielding
+            and resolved_mode == PROTECTION_MODE_HYBRID
+        ):
             candidates.extend(critical_clause_spans(text))
         spans: list[ProtectedSpan] = []
         for candidate in sorted(
@@ -1101,6 +1121,7 @@ class PromptCompressionService:
         should_compress_segments: list[bool],
         *,
         critical_clause_shielding: bool = False,
+        protection_mode: str = PROTECTION_MODE_HYBRID,
     ) -> _PreparedModelInput:
         source_text = "".join(segment.text for segment in segments)
         parts: list[str] = []
@@ -1131,6 +1152,7 @@ class PromptCompressionService:
                 for span in self._protected_spans_for_model_input(
                     segment.text,
                     critical_clause_shielding=critical_clause_shielding,
+                    protection_mode=protection_mode,
                 ):
                     parts.append(segment.text[cursor:span.start])
                     append_placeholder(
@@ -1908,6 +1930,7 @@ class PromptCompressionService:
         allow_cpu_model_auto: bool | None,
         min_model_candidate_tokens: int | None,
         model_chunk_chars: int | None,
+        protection_mode: str,
         plan_for_gpu: bool = False,
     ) -> _ModelGateEvaluation:
         candidate_tokens = sum(
@@ -1928,7 +1951,6 @@ class PromptCompressionService:
             )
             if should_compress
         )
-        model_input_chars = 0 if prepared is None else len(prepared.text)
         placeholder_count = 0 if prepared is None else len(prepared.placeholders)
         projected_chunk_count = 0
         projected_latency_ms: float | None = None
@@ -2039,6 +2061,7 @@ class PromptCompressionService:
         protected_density = self._protected_density_for_model_candidates(
             segments,
             should_compress_segments,
+            protection_mode=protection_mode,
         )
         identifier_density = self._identifier_density_for_model_candidates(
             segments,
@@ -2079,7 +2102,7 @@ class PromptCompressionService:
             return prepare()
 
         projected_chunk_count = self._projected_model_chunk_count(
-            model_input_chars,
+            prepared,
             model_chunk_chars=model_chunk_chars,
         )
         projected_latency_ms = self._project_model_latency_ms(
@@ -2108,16 +2131,24 @@ class PromptCompressionService:
 
     def _projected_model_chunk_count(
         self,
-        model_input_chars: int,
+        prepared: _PreparedModelInput,
         *,
         model_chunk_chars: int | None = None,
     ) -> int:
-        if model_input_chars <= 0:
+        if not prepared.text:
             return 0
-        resolved_chunk_chars = self._resolved_model_chunk_chars(model_chunk_chars)
-        if resolved_chunk_chars <= 0:
-            return 1
-        return max(1, math.ceil(model_input_chars / resolved_chunk_chars))
+        placeholder_limit = (
+            self.placeholder_chunk_target
+            if self.placeholder_chunk_target > 0
+            else DEFAULT_MAX_FORCE_TOKENS
+        )
+        return len(
+            self._split_prepared_model_input(
+                prepared,
+                placeholder_limit=placeholder_limit,
+                max_chunk_chars=model_chunk_chars,
+            )
+        )
 
     def _project_model_latency_ms(
         self,
@@ -2148,6 +2179,8 @@ class PromptCompressionService:
         self,
         segments: list[CompressionSegment],
         should_compress_segments: list[bool],
+        *,
+        protection_mode: str = PROTECTION_MODE_HYBRID,
     ) -> float:
         candidate_chars = 0
         protected_chars = 0
@@ -2161,7 +2194,10 @@ class PromptCompressionService:
             candidate_chars += len(segment.text)
             protected_chars += sum(
                 len(span.text)
-                for span in self._protected_spans_for_model_input(segment.text)
+                for span in self._protected_spans_for_model_input(
+                    segment.text,
+                    protection_mode=protection_mode,
+                )
             )
 
         if candidate_chars <= 0:
@@ -2280,6 +2316,15 @@ class PromptCompressionService:
             raise ValueError(
                 "compression mode must be one of: "
                 + ", ".join(sorted(COMPRESSION_MODES))
+            )
+        return resolved
+
+    def _normalize_protection_mode(self, mode: str | None) -> str:
+        resolved = mode or PROTECTION_MODE_HYBRID
+        if resolved not in PROTECTION_MODES:
+            raise ValueError(
+                "protection mode must be one of: "
+                + ", ".join(sorted(PROTECTION_MODES))
             )
         return resolved
 
@@ -2727,6 +2772,7 @@ class PromptCompressionService:
         allow_cpu_model_auto: bool | None,
         min_model_candidate_tokens: int | None,
         model_chunk_chars: int | None,
+        protection_mode: str,
         allow_inline_paths: bool,
     ) -> TaggedJsonTransformResult:
         if "<compress-json" not in text.lower():
@@ -2759,6 +2805,7 @@ class PromptCompressionService:
                 allow_cpu_model_auto=allow_cpu_model_auto,
                 min_model_candidate_tokens=min_model_candidate_tokens,
                 model_chunk_chars=model_chunk_chars,
+                protection_mode=protection_mode,
                 collect_diagnostics=False,
             )
             if (
@@ -2768,6 +2815,7 @@ class PromptCompressionService:
                 or not self._preserves_protected_span_values(
                     value,
                     result.compressed_text,
+                    protection_mode=protection_mode,
                 )
             ):
                 return None
@@ -2802,9 +2850,19 @@ class PromptCompressionService:
         self,
         original_text: str,
         compressed_text: str,
+        *,
+        protection_mode: str = PROTECTION_MODE_HYBRID,
     ) -> bool:
         required = Counter(
-            span.text for span in protected_spans_for_text(original_text)
+            span.text
+            for span in protected_spans_for_text(
+                original_text,
+                allowed_kinds=(
+                    MACHINE_CRITICAL_SPAN_KINDS
+                    if protection_mode == PROTECTION_MODE_EXPLICIT_FIRST
+                    else None
+                ),
+            )
         )
         return all(
             compressed_text.count(value) >= count
@@ -2832,6 +2890,7 @@ class PromptCompressionService:
         allow_inline_json_compression_paths: bool = False,
         input_format: str = "auto",
         html_mode: str = "visible_text",
+        protection_mode: str = PROTECTION_MODE_HYBRID,
         model_auto_plan_only: bool = False,
     ) -> CompressionResult:
         start = time.perf_counter()
@@ -2839,6 +2898,7 @@ class PromptCompressionService:
         profile = tenant_profile or TenantCompressionProfile()
         model_was_loaded = self.is_loaded
         compression_mode = self._normalize_compression_mode(mode)
+        resolved_protection_mode = self._normalize_protection_mode(protection_mode)
         if model_auto_plan_only and compression_mode != COMPRESSION_MODE_MODEL_AUTO:
             raise ValueError("model_auto_plan_only requires mode=model_auto")
         resolved_experiment = resolve_experiment_profile(experiment_profile)
@@ -2869,6 +2929,7 @@ class PromptCompressionService:
                 allow_cpu_model_auto=allow_cpu_model_auto,
                 min_model_candidate_tokens=min_model_candidate_tokens,
                 model_chunk_chars=model_chunk_chars,
+                protection_mode=resolved_protection_mode,
                 allow_inline_paths=allow_inline_json_compression_paths,
             )
             if apply_deterministic_transforms
@@ -2995,6 +3056,7 @@ class PromptCompressionService:
                 critical_clause_shielding=(
                     resolved_experiment.enable_critical_clause_shielding
                 ),
+                protection_mode=resolved_protection_mode,
             )
             timings["model_input_ms"] = _elapsed_ms(phase_start)
 
@@ -3012,6 +3074,7 @@ class PromptCompressionService:
             allow_cpu_model_auto=allow_cpu_model_auto,
             min_model_candidate_tokens=min_model_candidate_tokens,
             model_chunk_chars=model_chunk_chars,
+            protection_mode=resolved_protection_mode,
             plan_for_gpu=model_auto_plan_only,
         )
         timings["model_gate_ms"] = _elapsed_ms(phase_start)
@@ -3024,6 +3087,7 @@ class PromptCompressionService:
                 critical_clause_shielding=(
                     resolved_experiment.enable_critical_clause_shielding
                 ),
+                protection_mode=resolved_protection_mode,
             )
             timings["model_input_ms"] += _elapsed_ms(phase_start)
             phase_start = time.perf_counter()
@@ -3040,6 +3104,7 @@ class PromptCompressionService:
                 allow_cpu_model_auto=allow_cpu_model_auto,
                 min_model_candidate_tokens=min_model_candidate_tokens,
                 model_chunk_chars=model_chunk_chars,
+                protection_mode=resolved_protection_mode,
                 plan_for_gpu=model_auto_plan_only,
             )
             timings["model_gate_ms"] += _elapsed_ms(phase_start)
@@ -3057,6 +3122,7 @@ class PromptCompressionService:
                     critical_clause_shielding=(
                         resolved_experiment.enable_critical_clause_shielding
                     ),
+                    protection_mode=resolved_protection_mode,
                 )
                 timings["model_input_ms"] += _elapsed_ms(phase_start)
 
@@ -3103,6 +3169,14 @@ class PromptCompressionService:
                     [] if prepared is None else [item.token for item in prepared.placeholders]
                 ),
                 required_terms=required_terms,
+                allowed_span_kinds=(
+                    MACHINE_CRITICAL_SPAN_KINDS
+                    if resolved_protection_mode == PROTECTION_MODE_EXPLICIT_FIRST
+                    else None
+                ),
+                protect_critical_clauses=(
+                    resolved_protection_mode == PROTECTION_MODE_HYBRID
+                ),
             )
             if not integrity.passed:
                 rejected_output_sha256 = sha256_text(compressed_text)
@@ -3275,6 +3349,7 @@ class PromptCompressionService:
                     cold_model_load=llmlingua_called and not model_was_loaded,
                     preprocessor=active_preprocessor,
                     experiment_profile=resolved_experiment,
+                    protection_mode=resolved_protection_mode,
                     integrity_reference_text=deterministic_text,
                     output_rollback_reason=output_rollback_reason,
                     rejected_output_sha256=rejected_output_sha256,

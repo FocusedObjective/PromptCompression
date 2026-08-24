@@ -144,6 +144,29 @@ class RemovingNeverClauseCompressor(RecordingCompressor):
         }
 
 
+class RewritingUnmarkedPolicyCompressor(RecordingCompressor):
+    def compress_prompt_llmlingua2(
+        self,
+        text: str,
+        rate: float,
+        force_tokens: list[str],
+        return_word_label: bool,
+    ) -> dict[str, str | int]:
+        self.inputs.append(text)
+        self.force_tokens_values.append(force_tokens)
+        self.return_word_label_values.append(return_word_label)
+        output = text.replace(
+            "Never delete records before 30 days.",
+            "Delete records sooner.",
+        ).replace("Please review", "Review")
+        return {
+            "compressed_prompt": output,
+            "origin_tokens": len(text.split()),
+            "compressed_tokens": len(output.split()),
+            "fn_labeled_original_prompt": "",
+        }
+
+
 class FakeTokenizer:
     name_or_path = "fake-tokenizer"
 
@@ -414,6 +437,58 @@ def test_default_profile_shields_critical_clause_before_model_call():
             "enable_critical_clause_shielding"
         ]
         is True
+    )
+
+
+def test_explicit_first_allows_unmarked_policy_prose_to_be_rewritten():
+    compressor = RewritingUnmarkedPolicyCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "Never delete records before 30 days. "
+        "Please review the remaining explanatory context."
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.35,
+        include_sections=False,
+        protection_mode="explicit_first",
+    )
+
+    assert "Never delete records before 30 days." in compressor.inputs[0]
+    assert result.compressed_text == (
+        "Delete records sooner. Review the remaining explanatory context."
+    )
+    assert result.diagnostics is not None
+    assert result.diagnostics.output_rollback_count == 0
+    assert result.diagnostics.analytics is not None
+    assert (
+        result.diagnostics.analytics.provenance.resolved_compression_settings[
+            "protection_mode"
+        ]
+        == "explicit_first"
+    )
+
+
+def test_explicit_first_still_honors_nocompress_and_machine_identifiers():
+    compressor = RewritingUnmarkedPolicyCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "<nocompress>Never delete records before 30 days.</nocompress> "
+        "Please review ORD-7781."
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.35,
+        include_sections=False,
+        protection_mode="explicit_first",
+    )
+
+    assert "Never delete records before 30 days." not in compressor.inputs[0]
+    assert "ORD-7781" not in compressor.inputs[0]
+    assert result.compressed_text == (
+        "Never delete records before 30 days. Review ORD-7781."
     )
 
 
@@ -991,6 +1066,40 @@ def test_model_auto_skips_high_placeholder_count():
     assert result.warnings == ["llmlingua_skipped_high_placeholder_count"]
     assert result.diagnostics is not None
     assert result.diagnostics.placeholder_count > service.max_model_auto_placeholders
+
+
+def test_model_auto_chunks_directive_prompt_with_414_placeholders():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    service.device = "cuda"
+    service.model_auto_enabled = True
+    service.min_model_candidate_tokens = 1
+    service.min_model_incremental_savings_tokens = 0
+    service.min_model_incremental_reduction = 0.0
+    service.max_protected_density = 1.0
+    service.skip_model_if_deterministic_reduction_gte = 1.0
+    service.gpu_p50_fixed_overhead_ms = 1.0
+    service.gpu_p50_llmlingua_chunk_ms = 1.0
+    service.gpu_p50_token_estimate_ms = 1.0
+    text = "\n".join(
+        f"Please review this detailed directive context for ORD-{index:04d} before launch."
+        for index in range(414)
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        include_sections=False,
+        mode=COMPRESSION_MODE_MODEL_AUTO,
+    )
+
+    assert result.diagnostics is not None
+    assert result.diagnostics.placeholder_count == 414
+    assert result.diagnostics.model_gate_decision == "run"
+    assert result.diagnostics.llmlingua_called is True
+    assert result.diagnostics.chunk_placeholder_max <= service.placeholder_chunk_target
+    assert result.diagnostics.model_projected_chunk_count == len(compressor.inputs)
+    assert len(compressor.inputs) > 1
 
 
 def test_model_auto_runs_when_gpu_gate_passes():

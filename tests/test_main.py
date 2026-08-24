@@ -101,6 +101,7 @@ class FakeCompressionService:
         allow_inline_json_compression_paths: bool = False,
         input_format: str = "auto",
         html_mode: str = "visible_text",
+        protection_mode: str = "hybrid",
     ) -> CompressionResult:
         self.calls.append((text, aggressiveness, include_sections))
         self.tenant_profiles.append(tenant_profile)
@@ -123,6 +124,7 @@ class FakeCompressionService:
         )
         self.last_input_format = input_format
         self.last_html_mode = html_mode
+        self.last_protection_mode = protection_mode
         labels = [
             CompressionToken(text="Prompts", kept=True),
             CompressionToken(text="are", kept=False),
@@ -680,6 +682,20 @@ def test_compress_passes_explicit_html_structure(monkeypatch):
 
     assert service.last_input_format == "html"
     assert service.last_html_mode == "visible_text"
+
+
+def test_compress_passes_explicit_first_protection_mode(monkeypatch):
+    service = FakeCompressionService()
+    monkeypatch.setattr(main, "compression_service", service)
+
+    main.compress(
+        CompressRequest(
+            text="Compress unmarked policy prose.",
+            protection_mode="explicit_first",
+        )
+    )
+
+    assert service.last_protection_mode == "explicit_first"
 
 
 def test_compress_response_includes_diagnostics_when_requested(monkeypatch):

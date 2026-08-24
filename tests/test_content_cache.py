@@ -75,6 +75,39 @@ def test_content_cache_separates_tenant_profiles():
     assert calls == 2
 
 
+def test_content_cache_separates_protection_modes():
+    cache = ContentCompressionCache(
+        LocalResponseCache(max_bytes=10_000, max_entry_bytes=2_000, ttl_seconds=60)
+    )
+    calls = 0
+
+    def compute() -> CachedTextCompression:
+        nonlocal calls
+        calls += 1
+        return CachedTextCompression(
+            text="compressed",
+            original_tokens=2,
+            compressed_tokens=1,
+            changed=True,
+            warnings=(),
+        )
+
+    for protection_mode in ("hybrid", "explicit_first"):
+        cache.compress(
+            text="same content",
+            role="user",
+            model_name="test-model",
+            aggressiveness=0.15,
+            mode="model_auto",
+            latency_budget_ms=None,
+            protection_mode=protection_mode,
+            tenant_profile=None,
+            compute=compute,
+        )
+
+    assert calls == 2
+
+
 def test_content_cache_does_not_store_integrity_rollbacks():
     cache = ContentCompressionCache(
         LocalResponseCache(max_bytes=10_000, max_entry_bytes=2_000, ttl_seconds=60)

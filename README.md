@@ -228,6 +228,25 @@ the original input unless the transform saves tokens. Use `html_mode: "verbatim"
 to protect the HTML source unchanged. The defaults remain `input_format: "auto"`
 and `html_mode: "visible_text"` for backward compatibility.
 
+### Protection modes
+
+Protection defaults to `hybrid`, which automatically shields machine syntax,
+exact values, and safety-sensitive clauses. Set `protection_mode` to
+`explicit_first` to automatically shield only machine-critical syntax (valid
+JSON and code/control blocks, templates, links, URLs, emails, inline code, and
+structured identifiers). In that mode, callers should wrap policy clauses,
+numbers, money, and other exact prose that must survive unchanged:
+
+```text
+<nocompress>
+Never send outreach without approval. Timeout: 30s.
+</nocompress>
+```
+
+The wrapper is removed from returned text. On `/compress`, set the top-level
+`protection_mode`. On v1 routes, set
+`compression_settings.protection_mode` to `explicit_first`.
+
 Response:
 
 ```json

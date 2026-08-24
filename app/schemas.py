@@ -8,6 +8,7 @@ from app.token_estimator import REGEX_TOKEN_ESTIMATOR
 
 DEFAULT_AGGRESSIVENESS = 0.15
 CompressionMode = Literal["deterministic", "model_auto", "model_force"]
+ProtectionMode = Literal["hybrid", "explicit_first"]
 ToolResultCompressionMode = Literal["deterministic", "model_auto"]
 ToolResultRolloutMode = Literal["shadow", "apply"]
 InputFormat = Literal["auto", "html"]
@@ -113,6 +114,14 @@ class CompressRequest(BaseModel):
         description=(
             "For input_format=html, visible_text removes markup and non-visible "
             "page machinery before compression; verbatim protects the HTML source."
+        ),
+    )
+    protection_mode: ProtectionMode = Field(
+        default="hybrid",
+        description=(
+            "hybrid automatically protects safety-sensitive prose and exact values; "
+            "explicit_first automatically protects only machine-critical syntax and "
+            "expects callers to wrap other exact text in <nocompress>."
         ),
     )
     aggressiveness: float = Field(
@@ -429,6 +438,14 @@ class V1CompressionSettings(BaseModel):
         default=None,
         ge=0.0,
         description="Optional synchronous latency budget for model_auto gating.",
+    )
+    protection_mode: ProtectionMode = Field(
+        default="hybrid",
+        description=(
+            "hybrid retains automatic critical-clause and exact-value shielding; "
+            "explicit_first limits automatic shielding to machine-critical syntax "
+            "and honors explicit <nocompress> sections."
+        ),
     )
     cache: bool = Field(
         default=True,
