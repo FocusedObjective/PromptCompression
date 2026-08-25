@@ -82,6 +82,18 @@ def test_critical_clause_spans_include_never_imply_policy():
     ]
 
 
+def test_critical_clause_spans_include_separated_ellipsis_terminator():
+    text = (
+        'Use only this skill and do not load another when the message is '
+        '"Continue sourcing ...", then inspect the result.'
+    )
+
+    assert [span.text for span in critical_clause_spans(text)] == [
+        'Use only this skill and do not load another when the message is '
+        '"Continue sourcing ...',
+    ]
+
+
 def test_protected_spans_keep_longest_non_overlapping_match():
     text = "The account ORD-7781 costs $15,000."
 
@@ -140,3 +152,17 @@ def test_url_span_stops_before_html_attribute_and_following_markup():
     urls = [span.text for span in protected_spans_for_text(text) if span.kind == "url"]
 
     assert urls == ["https://github.com/tailwindlabs/tailwindcss/releases"]
+
+
+def test_protected_spans_include_non_http_uris_and_snake_case_identifiers():
+    text = (
+        "Load runtime://skills/canary_test_2 and call "
+        "ff_sourcing_run_orchestrator_v1."
+    )
+
+    spans = protected_spans_for_text(text)
+
+    assert [(span.text, span.kind) for span in spans] == [
+        ("runtime://skills/canary_test_2", "url"),
+        ("ff_sourcing_run_orchestrator_v1", "identifier"),
+    ]

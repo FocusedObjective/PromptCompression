@@ -481,6 +481,47 @@ def test_critical_clause_overlap_does_not_split_inline_code_placeholder():
     assert result.diagnostics.output_rollback_count == 0
 
 
+def test_model_cannot_attach_separated_ellipsis_to_critical_clause():
+    class CompactingBoundaryCompressor:
+        def __init__(self) -> None:
+            self.inputs: list[str] = []
+
+        def compress_prompt_llmlingua2(
+            self,
+            text: str,
+            rate: float,
+            force_tokens: list[str],
+            return_word_label: bool,
+        ) -> dict[str, str | int]:
+            self.inputs.append(text)
+            return {
+                "compressed_prompt": text.replace(" ...", "..."),
+                "origin_tokens": len(text.split()),
+                "compressed_tokens": len(text.split()),
+                "fn_labeled_original_prompt": "",
+            }
+
+    compressor = CompactingBoundaryCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    text = (
+        '- `worker_v1`: Use only this skill and do not load another when the message is '
+        '"Continue sourcing ...", then inspect the remaining context. '
+        "Source: runtime://skills/canary_test_2"
+    )
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    assert compressor.inputs
+    assert " ..." not in compressor.inputs[0]
+    assert "runtime://skills/canary_test_2" not in compressor.inputs[0]
+    assert result.compressed_text == text
+    assert result.diagnostics is not None
+    assert result.diagnostics.output_rollback_count == 0
+
+
 def test_full_text_protection_maps_code_span_across_segment_boundaries():
     service = PromptCompressionService()
     segments = [

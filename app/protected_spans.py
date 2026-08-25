@@ -84,7 +84,13 @@ PROTECTED_PATTERN_SPECS = [
     # Stop before HTML/template delimiters. ``\S+`` greedily included markup
     # following href values, producing false integrity failures when prose was
     # compressed while the URL itself remained intact.
-    ("url", re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)),
+    (
+        "url",
+        re.compile(
+            r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\"']+",
+            re.IGNORECASE,
+        ),
+    ),
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
     ("money", re.compile(r"\$\s?\d+(?:[.,]\d+)*")),
     (
@@ -97,7 +103,12 @@ PROTECTED_PATTERN_SPECS = [
     ),
     (
         "identifier",
-        re.compile(r"\b[A-Z][A-Z0-9_]*(?:[-_][A-Z0-9]+)+\b"),
+        re.compile(
+            r"\b(?:"
+            r"[A-Z][A-Z0-9_]*(?:[-_][A-Z0-9]+)+"
+            r"|[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+"
+            r")\b"
+        ),
     ),
     (
         "number",
@@ -152,6 +163,7 @@ CLAUSE_GOVERNING_VALUE_PATTERN = re.compile(
     r"(?:\d|https?://|\b[A-Z][A-Z0-9_]*(?:[-_][A-Z0-9]+)+\b)",
     re.IGNORECASE,
 )
+CLAUSE_SEPARATED_TERMINATOR_PATTERN = re.compile(r"[ \t]+[.!?]+")
 
 
 def protected_spans_for_text(
@@ -266,6 +278,13 @@ def critical_clause_spans(text: str) -> list[ProtectedSpan]:
             or (has_action and CLAUSE_GOVERNING_VALUE_PATTERN.search(clause) is not None)
         )
         if sensitive:
+            separated_terminator = CLAUSE_SEPARATED_TERMINATOR_PATTERN.match(
+                text,
+                end,
+            )
+            if separated_terminator is not None:
+                end = separated_terminator.end()
+                clause = text[start:end]
             spans.append(
                 ProtectedSpan(
                     start=start,

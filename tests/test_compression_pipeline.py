@@ -528,8 +528,10 @@ Please review after."""
         "prose",
         "protected",
     }
-    assert "Line __CK_KEEP_0000__" in compressor.inputs[0]
-    assert "Line __CK_KEEP_0001__" in compressor.inputs[0]
+    assert "card_123" not in compressor.inputs[0]
+    assert "Line 1" not in compressor.inputs[0]
+    assert "Line 2" not in compressor.inputs[0]
+    assert compressor.inputs[0].count("__CK_KEEP_") == 2
 
 
 def test_non_json_bracketed_output_format_is_not_dropped():
