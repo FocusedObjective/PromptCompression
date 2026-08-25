@@ -17,6 +17,7 @@ from app.gpu_policy import GPU_COMPRESSION_POLICY
 from app.integrity_policy import evaluate_integrity, sha256_text
 from app.protected_spans import (
     MACHINE_CRITICAL_SPAN_KINDS,
+    PARSER_BOUNDARY_SPAN_KINDS,
     ProtectedSpan,
     critical_clause_spans,
     force_tokens_for_text,
@@ -1066,17 +1067,40 @@ class PromptCompressionService:
             and resolved_mode == PROTECTION_MODE_HYBRID
         ):
             candidates.extend(critical_clause_spans(text))
-        spans: list[ProtectedSpan] = []
-        for candidate in sorted(
-            candidates,
-            key=lambda span: (span.start, -(span.end - span.start), span.end),
-        ):
-            if spans and candidate.start < spans[-1].end:
-                continue
-            spans.append(candidate)
+        spans = self._union_overlapping_protected_spans(text, candidates)
         if not spans:
             return spans
         return self._coalesce_protected_spans(text, spans)
+
+    def _union_overlapping_protected_spans(
+        self,
+        text: str,
+        spans: list[ProtectedSpan],
+    ) -> list[ProtectedSpan]:
+        """Return disjoint spans without cutting through an overlapping span."""
+
+        if not spans:
+            return []
+
+        ordered = sorted(spans, key=lambda span: (span.start, span.end))
+        unioned: list[ProtectedSpan] = []
+        current = ordered[0]
+        for span in ordered[1:]:
+            if span.start < current.end:
+                if span.end > current.end:
+                    current = ProtectedSpan(
+                        start=current.start,
+                        end=span.end,
+                        text=text[current.start : span.end],
+                        kind="protected_group",
+                    )
+                continue
+
+            unioned.append(current)
+            current = span
+
+        unioned.append(current)
+        return unioned
 
     def _coalesce_protected_spans(
         self,
@@ -1124,6 +1148,17 @@ class PromptCompressionService:
         protection_mode: str = PROTECTION_MODE_HYBRID,
     ) -> _PreparedModelInput:
         source_text = "".join(segment.text for segment in segments)
+        boundary_candidates = protected_spans_for_text(
+            source_text,
+            allowed_kinds=PARSER_BOUNDARY_SPAN_KINDS | {"code_fence"},
+        )
+        if critical_clause_shielding and protection_mode == PROTECTION_MODE_HYBRID:
+            boundary_candidates.extend(critical_clause_spans(source_text))
+        boundary_spans = self._union_overlapping_protected_spans(
+            source_text,
+            boundary_candidates,
+        )
+        boundary_spans = self._coalesce_protected_spans(source_text, boundary_spans)
         parts: list[str] = []
         placeholders: list[_CompressionPlaceholder] = []
         next_placeholder_index = 0
@@ -1142,18 +1177,54 @@ class PromptCompressionService:
             parts.append(placeholder)
             placeholders.append(_CompressionPlaceholder(placeholder, segment))
 
+        segment_start = 0
+        protected_span_index = 0
         for segment, should_compress in zip(
             segments,
             should_compress_segments,
             strict=True,
         ):
+            segment_end = segment_start + len(segment.text)
             if should_compress:
                 cursor = 0
-                for span in self._protected_spans_for_model_input(
+                while (
+                    protected_span_index < len(boundary_spans)
+                    and boundary_spans[protected_span_index].end <= segment_start
+                ):
+                    protected_span_index += 1
+
+                local_spans = self._protected_spans_for_model_input(
                     segment.text,
                     critical_clause_shielding=critical_clause_shielding,
                     protection_mode=protection_mode,
+                )
+                scan_index = protected_span_index
+                while (
+                    scan_index < len(boundary_spans)
+                    and boundary_spans[scan_index].start < segment_end
                 ):
+                    span = boundary_spans[scan_index]
+                    local_start = max(span.start, segment_start) - segment_start
+                    local_end = min(span.end, segment_end) - segment_start
+                    local_spans.append(
+                        ProtectedSpan(
+                            start=local_start,
+                            end=local_end,
+                            text=segment.text[local_start:local_end],
+                            kind=span.kind,
+                        )
+                    )
+                    scan_index += 1
+
+                local_spans = self._union_overlapping_protected_spans(
+                    segment.text,
+                    local_spans,
+                )
+                local_spans = self._coalesce_protected_spans(
+                    segment.text,
+                    local_spans,
+                )
+                for span in local_spans:
                     parts.append(segment.text[cursor:span.start])
                     append_placeholder(
                         CompressionSegment(
@@ -1164,9 +1235,11 @@ class PromptCompressionService:
                     )
                     cursor = span.end
                 parts.append(segment.text[cursor:])
+                segment_start = segment_end
                 continue
 
             append_placeholder(segment)
+            segment_start = segment_end
 
         return _PreparedModelInput(
             text="".join(parts),

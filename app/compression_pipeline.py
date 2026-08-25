@@ -4,7 +4,7 @@ import json
 import os
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.token_estimator import TokenEstimate
@@ -15,7 +15,11 @@ from app.html_compactor import (
     should_preserve_html_verbatim,
 )
 from app.json_regions import JsonRegionDetector, STRICT_CLASSES
-from app.protected_spans import critical_clause_spans
+from app.protected_spans import (
+    PARSER_BOUNDARY_SPAN_KINDS,
+    critical_clause_spans,
+    protected_spans_for_text,
+)
 from app.toon_adapter import ToonEncodingError, encode_toon, toon_round_trip_matches
 from app.whitespace_normalizer import (
     ENABLE_STRICT_PROSE_WHITESPACE,
@@ -302,6 +306,73 @@ class PromptPreprocessor:
         )
 
     def _prepare_compressible_text(self, text: str) -> list[CompressionSegment]:
+        masked_text, placeholders = self._mask_parser_boundary_spans(text)
+        segments = self._prepare_masked_compressible_text(masked_text)
+        if not placeholders:
+            return segments
+
+        if any(
+            sum(segment.text.count(token) for segment in segments) != 1
+            for token in placeholders
+        ):
+            return [
+                CompressionSegment(
+                    text=text,
+                    compressible=True,
+                    kind="prose",
+                    source_text=text,
+                )
+            ]
+
+        restored: list[CompressionSegment] = []
+        for segment in segments:
+            restored_text = segment.text
+            restored_source = segment.source_text
+            for token, value in placeholders.items():
+                restored_text = restored_text.replace(token, value)
+                if restored_source is not None:
+                    restored_source = restored_source.replace(token, value)
+            restored.append(
+                replace(
+                    segment,
+                    text=restored_text,
+                    source_text=restored_source,
+                )
+            )
+        return restored
+
+    def _mask_parser_boundary_spans(self, text: str) -> tuple[str, dict[str, str]]:
+        candidate_kinds = PARSER_BOUNDARY_SPAN_KINDS | {"code_fence"}
+        spans = [
+            span
+            for span in protected_spans_for_text(
+                text,
+                allowed_kinds=candidate_kinds,
+            )
+            if span.kind != "code_fence"
+        ]
+        if not spans:
+            return text, {}
+
+        parts: list[str] = []
+        placeholders: dict[str, str] = {}
+        cursor = 0
+        for index, span in enumerate(spans):
+            token = f"\ue000CKBOUNDARY{index:04d}\ue001"
+            while token in text or token in placeholders:
+                index += 1
+                token = f"\ue000CKBOUNDARY{index:04d}\ue001"
+            parts.append(text[cursor : span.start])
+            parts.append(token)
+            placeholders[token] = span.text
+            cursor = span.end
+        parts.append(text[cursor:])
+        return "".join(parts), placeholders
+
+    def _prepare_masked_compressible_text(
+        self,
+        text: str,
+    ) -> list[CompressionSegment]:
         html_markdown_segment = self._html_markdown_segment_for_candidate(text)
         if html_markdown_segment is not None:
             return [html_markdown_segment]

@@ -7,7 +7,9 @@ from app.compressor import (
     _parse_model_runtime,
     build_token_savings,
 )
+from app.compression_pipeline import CompressionSegment
 from app.experiment_profiles import ExperimentProfile, resolve_experiment_profile
+from app.protected_spans import ProtectedSpan
 from app.tenant_profiles import build_tenant_profile
 from app.token_estimator import TokenEstimate, estimate_huggingface_tokens, estimate_token_count
 from tests.pipeline_helpers import RecordingCompressor, build_service_with_pipeline
@@ -438,6 +440,70 @@ def test_default_profile_shields_critical_clause_before_model_call():
         ]
         is True
     )
+
+
+def test_overlapping_protected_spans_are_unioned_transitively():
+    service = PromptCompressionService()
+    text = "abcdefghijkl"
+    spans = [
+        ProtectedSpan(start=0, end=4, text="abcd", kind="inline_code"),
+        ProtectedSpan(start=3, end=8, text="defgh", kind="critical_clause"),
+        ProtectedSpan(start=7, end=10, text="hij", kind="url"),
+        ProtectedSpan(start=10, end=12, text="kl", kind="identifier"),
+    ]
+
+    unioned = service._union_overlapping_protected_spans(text, spans)
+
+    assert [
+        (span.start, span.end, span.text, span.kind) for span in unioned
+    ] == [
+        (0, 10, "abcdefghij", "protected_group"),
+        (10, 12, "kl", "identifier"),
+    ]
+
+
+def test_critical_clause_overlap_does_not_split_inline_code_placeholder():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "- `ff_notes` (read, write): use when you need to delete notes — "
+        "never expose note bodies (unless pinned via `Context.pinned.notes`). "
+        "Please review the remaining explanatory context."
+    )
+
+    result = service.compress(text, aggressiveness=0.25, include_sections=False)
+
+    model_input = "".join(compressor.inputs)
+    assert "`" not in model_input
+    assert "pinned.notes" not in model_input
+    assert "`Context.pinned.notes`" in result.compressed_text
+    assert result.diagnostics is not None
+    assert result.diagnostics.output_rollback_count == 0
+
+
+def test_full_text_protection_maps_code_span_across_segment_boundaries():
+    service = PromptCompressionService()
+    segments = [
+        CompressionSegment("Before `prefix", True, "prose"),
+        CompressionSegment('{"enabled":true}', False, "json"),
+        CompressionSegment("suffix` after.", True, "prose"),
+    ]
+    source_text = "".join(segment.text for segment in segments)
+
+    prepared = service._prepare_model_input(
+        segments,
+        [True, False, True],
+        critical_clause_shielding=True,
+    )
+    expanded = service._expand_compressed_model_text(
+        prepared.text,
+        prepared.placeholders,
+        include_sections=False,
+        model_labeled_tokens=[],
+    )
+
+    assert "`" not in prepared.text
+    assert expanded.text == source_text
 
 
 def test_explicit_first_allows_unmarked_policy_prose_to_be_rewritten():

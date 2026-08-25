@@ -2,6 +2,7 @@ from app.protected_spans import (
     MACHINE_CRITICAL_SPAN_KINDS,
     critical_clause_spans,
     force_tokens_for_text,
+    inline_code_spans,
     protected_spans_for_text,
 )
 
@@ -106,6 +107,28 @@ def test_protected_spans_include_markdown_citations_and_templates():
         ("{request_id}", "template"),
         ("{% if enabled %}", "template"),
     ]
+
+
+def test_inline_code_spans_match_delimiter_run_lengths():
+    text = (
+        "Use ``code with ` inside`` and `simple`, but not \\`escaped\\` "
+        "or \\``escaped run``."
+    )
+
+    spans = inline_code_spans(text)
+
+    assert [span.text for span in spans] == [
+        "``code with ` inside``",
+        "`simple`",
+    ]
+
+
+def test_inline_code_spans_allow_multiline_content_and_escaped_closers():
+    text = "Before `first line\nsecond \\` line` after."
+
+    spans = inline_code_spans(text)
+
+    assert [span.text for span in spans] == ["`first line\nsecond \\`"]
 
 
 def test_url_span_stops_before_html_attribute_and_following_markup():

@@ -1,4 +1,6 @@
 import re
+from bisect import bisect_right
+from collections import defaultdict
 from dataclasses import dataclass
 
 
@@ -84,7 +86,6 @@ PROTECTED_PATTERN_SPECS = [
     # compressed while the URL itself remained intact.
     ("url", re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)),
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
-    ("inline_code", re.compile(r"`[^`]+`")),
     ("money", re.compile(r"\$\s?\d+(?:[.,]\d+)*")),
     (
         "constraint",
@@ -118,6 +119,14 @@ MACHINE_CRITICAL_SPAN_KINDS = frozenset(
         "email",
         "inline_code",
         "identifier",
+    }
+)
+PARSER_BOUNDARY_SPAN_KINDS = frozenset(
+    {
+        "markdown_link",
+        "citation",
+        "template",
+        "inline_code",
     }
 )
 
@@ -166,6 +175,9 @@ def protected_spans_for_text(
                     )
                 )
 
+    if allowed_kinds is None or "inline_code" in allowed_kinds:
+        candidates.extend(inline_code_spans(text))
+
     if not candidates:
         return []
 
@@ -177,6 +189,61 @@ def protected_spans_for_text(
         if spans and candidate.start < spans[-1].end:
             continue
         spans.append(candidate)
+    return spans
+
+
+def inline_code_spans(text: str) -> list[ProtectedSpan]:
+    """Return Markdown code spans using matching backtick-run delimiters."""
+
+    runs: list[tuple[int, int]] = []
+    cursor = 0
+    while cursor < len(text):
+        if text[cursor] != "`":
+            cursor += 1
+            continue
+        end = cursor + 1
+        while end < len(text) and text[end] == "`":
+            end += 1
+        runs.append((cursor, end))
+        cursor = end
+
+    run_indices_by_length: dict[int, list[int]] = defaultdict(list)
+    for index, (start, end) in enumerate(runs):
+        run_indices_by_length[end - start].append(index)
+
+    spans: list[ProtectedSpan] = []
+    run_index = 0
+    while run_index < len(runs):
+        opener_start, opener_end = runs[run_index]
+        preceding_backslashes = 0
+        backslash_cursor = opener_start - 1
+        while backslash_cursor >= 0 and text[backslash_cursor] == "\\":
+            preceding_backslashes += 1
+            backslash_cursor -= 1
+
+        if preceding_backslashes % 2:
+            run_index += 1
+            continue
+
+        delimiter_length = opener_end - opener_start
+        matching_indices = run_indices_by_length.get(delimiter_length, [])
+        match_position = bisect_right(matching_indices, run_index)
+        if match_position >= len(matching_indices):
+            run_index += 1
+            continue
+
+        closer_index = matching_indices[match_position]
+        _, closer_end = runs[closer_index]
+        spans.append(
+            ProtectedSpan(
+                start=opener_start,
+                end=closer_end,
+                text=text[opener_start:closer_end],
+                kind="inline_code",
+            )
+        )
+        run_index = closer_index + 1
+
     return spans
 
 
@@ -236,5 +303,8 @@ def force_tokens_for_text(text: str, max_tokens: int = 100) -> list[str]:
         for match in pattern.finditer(text):
             value = match.group(0).strip()
             add_token(value)
+
+    for span in inline_code_spans(text):
+        add_token(span.text.strip())
 
     return tokens

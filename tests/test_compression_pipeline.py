@@ -66,6 +66,36 @@ def test_common_html_content_tags_remain_compressible_prose():
     assert result.output_sections[0].protected is False
 
 
+def test_inline_code_is_masked_before_json_segmentation():
+    preprocessor = PromptPreprocessor(
+        min_json_chars=1,
+        min_json_lines=1,
+        min_toon_savings=0.0,
+    )
+    text = 'Before `{\n  "enabled": true\n}` after.'
+
+    segments = preprocessor.prepare(text)
+
+    assert [(segment.text, segment.kind) for segment in segments] == [
+        (text, "prose"),
+    ]
+
+
+def test_multibacktick_code_is_masked_before_html_segmentation():
+    preprocessor = PromptPreprocessor(
+        html_markdown_converter=fallback_html_to_markdown,
+        min_html_chars=1,
+        min_html_markdown_savings=0.0,
+    )
+    text = "Before ``<script>alert(`x`)</script>`` after."
+
+    segments = preprocessor.prepare(text)
+
+    assert [(segment.text, segment.kind) for segment in segments] == [
+        (text, "prose"),
+    ]
+
+
 def build_service_with_html_markdown() -> tuple[RecordingCompressor, object]:
     compressor = RecordingCompressor()
     service = build_service_with_pipeline(compressor)
