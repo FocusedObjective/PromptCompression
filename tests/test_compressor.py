@@ -390,6 +390,29 @@ def test_model_integrity_failure_rolls_back_before_token_accounting():
     assert result.diagnostics.analytics.provenance.experiment_profile == "baseline"
 
 
+def test_detailed_analytics_reuses_runtime_integrity_result(monkeypatch):
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+
+    def fail_duplicate_integrity_scan(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("detailed analytics must reuse the runtime result")
+
+    monkeypatch.setattr(
+        "app.analytics.evaluate_integrity",
+        fail_duplicate_integrity_scan,
+    )
+
+    result = service.compress(
+        "Please review this prompt before launch.",
+        aggressiveness=0.25,
+        include_sections=False,
+    )
+
+    assert result.diagnostics is not None
+    assert result.diagnostics.analytics is not None
+    assert result.diagnostics.analytics.integrity.failure_classes == []
+
+
 def test_model_critical_clause_change_rolls_back_to_deterministic_output():
     compressor = AlteringCriticalClauseCompressor()
     service = PromptCompressionService()

@@ -47,6 +47,15 @@ CONTROL_BLOCK_PATTERN = re.compile(
     r"<(?P<tag>nocompress|protected-json)>(?P<body>.*?)</(?P=tag)>",
     re.IGNORECASE | re.DOTALL,
 )
+COMPRESS_PROSE_BLOCK_PATTERN = re.compile(
+    r"<compress-prose>(?P<body>.*?)</compress-prose\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+OPEN_COMPRESS_PROSE_PATTERN = re.compile(r"<compress-prose>", re.IGNORECASE)
+CLOSE_COMPRESS_PROSE_PATTERN = re.compile(
+    r"</compress-prose\s*>",
+    re.IGNORECASE,
+)
 
 MARKDOWN_FENCE_PATTERN = re.compile(
     r"(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)\n"
@@ -99,8 +108,6 @@ FOLLOW_ON_SECTION_PATTERN = re.compile(
 DATA_PAYLOAD_PATTERN = re.compile(
     r"(?ms)^# DATA TO PROCESS\b.*?(?=^---\s*$|\Z)",
 )
-
-
 @dataclass(frozen=True)
 class CompressionSegment:
     text: str
@@ -210,6 +217,9 @@ class PromptPreprocessor:
         input_format: str = "auto",
         html_mode: str = "visible_text",
     ) -> list[CompressionSegment]:
+        if "<compress-prose" in text.casefold():
+            return self._prepare_allowlisted_prose(text)
+
         if input_format == "html":
             return [self._explicit_html_segment(text, html_mode=html_mode)]
 
@@ -254,6 +264,48 @@ class PromptPreprocessor:
             cursor = match.end()
 
         segments.extend(self._prepare_compressible_text(text[cursor:]))
+        return [segment for segment in segments if segment.text]
+
+    def _prepare_allowlisted_prose(self, text: str) -> list[CompressionSegment]:
+        matches = list(COMPRESS_PROSE_BLOCK_PATTERN.finditer(text))
+        opening_count = len(OPEN_COMPRESS_PROSE_PATTERN.findall(text))
+        closing_count = len(CLOSE_COMPRESS_PROSE_PATTERN.findall(text))
+        if not matches or opening_count != len(matches) or closing_count != len(matches):
+            return [
+                CompressionSegment(
+                    text=text,
+                    compressible=False,
+                    kind="verbatim",
+                    source_text=text,
+                )
+            ]
+
+        segments: list[CompressionSegment] = []
+        cursor = 0
+        for match in matches:
+            if match.start() > cursor:
+                protected = text[cursor : match.start()]
+                segments.append(
+                    CompressionSegment(
+                        text=protected,
+                        compressible=False,
+                        kind="verbatim",
+                        source_text=protected,
+                    )
+                )
+            segments.extend(self._prepare_compressible_text(match.group("body")))
+            cursor = match.end()
+
+        if cursor < len(text):
+            protected = text[cursor:]
+            segments.append(
+                CompressionSegment(
+                    text=protected,
+                    compressible=False,
+                    kind="verbatim",
+                    source_text=protected,
+                )
+            )
         return [segment for segment in segments if segment.text]
 
     def _explicit_html_segment(

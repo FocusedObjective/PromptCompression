@@ -405,6 +405,40 @@ def test_inline_tagged_json_compresses_selected_values_for_profiler_only():
     assert '"body":"Review the long comment."' in result.compressed_text
 
 
+def test_inline_tagged_json_model_auto_bypasses_whole_prompt_candidate_floor():
+    compressor = RecordingCompressor()
+    service = PromptCompressionService()
+    service._compressor = compressor
+    service.min_segment_chars = 1
+    service.min_segment_tokens = 1
+    service.min_model_candidate_tokens = 2_000
+    profile = build_tenant_profile(
+        json_value_min_tokens=1,
+        json_value_max_reduction=0.9,
+    )
+    text = (
+        '<compress-json paths="$.description">'
+        '{"id":"ISSUE-73",'
+        '"description":"Please review this detailed narrative before launch."}'
+        "</compress-json>"
+    )
+
+    result = service.compress(
+        text,
+        aggressiveness=0.25,
+        tenant_profile=profile,
+        mode="model_auto",
+        allow_inline_json_compression_paths=True,
+    )
+
+    assert compressor.inputs == [
+        "Please review this detailed narrative before launch."
+    ]
+    assert '"description":"Review this detailed narrative before launch."' in (
+        result.compressed_text
+    )
+
+
 def test_inline_tagged_json_is_not_compressed_without_profiler_opt_in():
     compressor = RecordingCompressor()
     service = PromptCompressionService()

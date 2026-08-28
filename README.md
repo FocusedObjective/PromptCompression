@@ -247,6 +247,20 @@ The wrapper is removed from returned text. On `/compress`, set the top-level
 `protection_mode`. On v1 routes, set
 `compression_settings.protection_mode` to `explicit_first`.
 
+For instruction-heavy prompts, use an explicit prose allowlist. When one or
+more `<compress-prose>` blocks are present, only their contents are eligible
+for model compression; all policy, runtime context, and structured data outside
+the blocks remains verbatim. The wrappers are removed from returned text, and
+an unbalanced wrapper fails closed by protecting the entire input:
+
+```text
+Never alter account identifiers or runtime policy.
+<compress-prose>Summarize this narrative background for the next step.</compress-prose>
+<nocompress>
+<reference-data>...</reference-data>
+</nocompress>
+```
+
 Response:
 
 ```json

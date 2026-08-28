@@ -14,7 +14,11 @@ from app.analytics import DetailedAnalytics, build_detailed_analytics
 from app.compression_pipeline import CompressionSegment, PromptPreprocessor
 from app.experiment_profiles import ExperimentProfile, resolve_experiment_profile
 from app.gpu_policy import GPU_COMPRESSION_POLICY
-from app.integrity_policy import evaluate_integrity, sha256_text
+from app.integrity_policy import (
+    IntegrityResult,
+    evaluate_segment_integrity,
+    sha256_text,
+)
 from app.protected_spans import (
     MACHINE_CRITICAL_SPAN_KINDS,
     PARSER_BOUNDARY_SPAN_KINDS,
@@ -425,6 +429,7 @@ class CompressionDiagnostics:
 class _CompressionPlaceholder:
     token: str
     segment: CompressionSegment
+    protection_kind: str
 
 
 @dataclass(frozen=True)
@@ -469,6 +474,9 @@ class _ExpandedCompression:
     text: str
     labeled_tokens: list[CompressionToken]
     output_sections: list[CompressionOutputSection]
+    model_reference_parts: tuple[str, ...] = ()
+    model_output_parts: tuple[str, ...] = ()
+    protected_values: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1172,10 +1180,20 @@ class PromptCompressionService:
             next_placeholder_index += 1
             return placeholder
 
-        def append_placeholder(segment: CompressionSegment) -> None:
+        def append_placeholder(
+            segment: CompressionSegment,
+            *,
+            protection_kind: str | None = None,
+        ) -> None:
             placeholder = next_placeholder()
             parts.append(placeholder)
-            placeholders.append(_CompressionPlaceholder(placeholder, segment))
+            placeholders.append(
+                _CompressionPlaceholder(
+                    placeholder,
+                    segment,
+                    protection_kind or segment.kind,
+                )
+            )
 
         segment_start = 0
         protected_span_index = 0
@@ -1231,7 +1249,8 @@ class PromptCompressionService:
                             text=span.text,
                             compressible=False,
                             kind="protected",
-                        )
+                        ),
+                        protection_kind=span.kind,
                     )
                     cursor = span.end
                 parts.append(segment.text[cursor:])
@@ -1548,6 +1567,27 @@ class PromptCompressionService:
         chunks.append(labeled_tokens[cursor:])
         return chunks
 
+    def _text_parts_around_placeholders(
+        self,
+        text: str,
+        placeholders: list[_CompressionPlaceholder],
+    ) -> tuple[str, ...]:
+        if not placeholders:
+            return (text,) if text else ()
+
+        parts: list[str] = []
+        cursor = 0
+        for placeholder in placeholders:
+            position = text.find(placeholder.token, cursor)
+            if position < cursor:
+                return (text,) if text else ()
+            if position > cursor:
+                parts.append(text[cursor:position])
+            cursor = position + len(placeholder.token)
+        if cursor < len(text):
+            parts.append(text[cursor:])
+        return tuple(parts)
+
     def _append_compressed_prose_section(
         self,
         chunk: str,
@@ -1660,6 +1700,10 @@ class PromptCompressionService:
             text="".join(output_parts),
             labeled_tokens=labeled_tokens,
             output_sections=output_sections,
+            protected_values=tuple(
+                (placeholder.protection_kind, placeholder.segment.text)
+                for placeholder in chunk.placeholders
+            ),
         )
 
     def _expand_compressed_model_text(
@@ -1668,7 +1712,11 @@ class PromptCompressionService:
         placeholders: list[_CompressionPlaceholder],
         include_sections: bool,
         model_labeled_tokens: list[CompressionToken],
+        model_reference_text: str | None = None,
     ) -> _ExpandedCompression:
+        reference_text = (
+            compressed_text if model_reference_text is None else model_reference_text
+        )
         if not placeholders:
             labeled_tokens: list[CompressionToken] = []
             output_sections: list[CompressionOutputSection] = []
@@ -1683,6 +1731,8 @@ class PromptCompressionService:
                 text=compressed_text,
                 labeled_tokens=labeled_tokens,
                 output_sections=output_sections,
+                model_reference_parts=(reference_text,),
+                model_output_parts=(compressed_text,),
             )
 
         output_parts: list[str] = []
@@ -1735,6 +1785,18 @@ class PromptCompressionService:
             text="".join(output_parts),
             labeled_tokens=labeled_tokens,
             output_sections=output_sections,
+            model_reference_parts=self._text_parts_around_placeholders(
+                reference_text,
+                placeholders,
+            ),
+            model_output_parts=self._text_parts_around_placeholders(
+                compressed_text,
+                placeholders,
+            ),
+            protected_values=tuple(
+                (placeholder.protection_kind, placeholder.segment.text)
+                for placeholder in placeholders
+            ),
         )
 
     def _compress_prepared_model_input(
@@ -1758,6 +1820,9 @@ class PromptCompressionService:
         output_parts: list[str] = []
         labeled_tokens: list[CompressionToken] = []
         output_sections: list[CompressionOutputSection] = []
+        model_reference_parts: list[str] = []
+        model_output_integrity_parts: list[str] = []
+        protected_values: list[tuple[str, str]] = []
         placeholder_counts: list[int] = []
         char_counts: list[int] = []
         llmlingua_call_count = 0
@@ -1797,6 +1862,9 @@ class PromptCompressionService:
                     output_parts,
                     labeled_tokens,
                     output_sections,
+                    model_reference_parts,
+                    model_output_integrity_parts,
+                    protected_values,
                 )
                 model_output_parts.append(chunk.text)
                 continue
@@ -1834,6 +1902,9 @@ class PromptCompressionService:
                 output_parts,
                 labeled_tokens,
                 output_sections,
+                model_reference_parts,
+                model_output_integrity_parts,
+                protected_values,
             )
 
         return _ChunkedCompressionResult(
@@ -1841,6 +1912,9 @@ class PromptCompressionService:
                 text="".join(output_parts),
                 labeled_tokens=labeled_tokens,
                 output_sections=output_sections,
+                model_reference_parts=tuple(model_reference_parts),
+                model_output_parts=tuple(model_output_integrity_parts),
+                protected_values=tuple(protected_values),
             ),
             stats=_ChunkedCompressionStats(
                 chunk_count=len(chunks),
@@ -1860,10 +1934,16 @@ class PromptCompressionService:
         output_parts: list[str],
         labeled_tokens: list[CompressionToken],
         output_sections: list[CompressionOutputSection],
+        model_reference_parts: list[str],
+        model_output_parts: list[str],
+        protected_values: list[tuple[str, str]],
     ) -> None:
         output_parts.append(expanded_chunk.text)
         labeled_tokens.extend(expanded_chunk.labeled_tokens)
         output_sections.extend(expanded_chunk.output_sections)
+        model_reference_parts.extend(expanded_chunk.model_reference_parts)
+        model_output_parts.extend(expanded_chunk.model_output_parts)
+        protected_values.extend(expanded_chunk.protected_values)
 
     def _compress_prepared_model_chunk(
         self,
@@ -1943,6 +2023,7 @@ class PromptCompressionService:
         expanded = self._expand_compressed_model_text(
             compressed_model_text,
             chunk.placeholders,
+            model_reference_text=chunk.text,
             include_sections=include_sections,
             model_labeled_tokens=model_labeled_tokens,
         )
@@ -2868,12 +2949,27 @@ class PromptCompressionService:
             if original_estimate.count < profile.json_value_min_tokens:
                 return None
 
+            # A selected value has already passed the explicit JSON-path
+            # authorization and the tenant-owned per-value size bound.  The
+            # outer model_auto ROI floor is designed for whole prompts and
+            # would otherwise reject every useful bounded value (the GPU floor
+            # is commonly larger than an individual summary).  Preserve a
+            # deterministic request's no-model guarantee, but treat authorized
+            # values as forced model candidates when the outer request uses
+            # model_auto.  The per-value acceptance checks below still reject
+            # empty, token-increasing, over-compressed, or integrity-breaking
+            # results.
+            value_mode = (
+                COMPRESSION_MODE_MODEL_FORCE
+                if mode == COMPRESSION_MODE_MODEL_AUTO
+                else mode
+            )
             result = self.compress(
                 text=value,
                 aggressiveness=aggressiveness,
                 include_sections=False,
                 tenant_profile=value_profile,
-                mode=mode,
+                mode=value_mode,
                 latency_budget_ms=latency_budget_ms,
                 allow_cpu_model_auto=allow_cpu_model_auto,
                 min_model_candidate_tokens=min_model_candidate_tokens,
@@ -3225,6 +3321,7 @@ class PromptCompressionService:
         compressed_text = expanded.text
         output_rollback_reason = None
         rejected_output_sha256 = None
+        integrity_result = IntegrityResult(passed=True)
         if llmlingua_called:
             required_terms = []
             if evaluation_constraints:
@@ -3235,9 +3332,20 @@ class PromptCompressionService:
                         [],
                     ),
                 ]
-            integrity = evaluate_integrity(
+            integrity_result = evaluate_segment_integrity(
                 deterministic_text,
                 compressed_text,
+                model_reference_parts=expanded.model_reference_parts,
+                model_output_parts=expanded.model_output_parts,
+                expected_protected_values=(
+                    []
+                    if prepared is None
+                    else [
+                        (item.protection_kind, item.segment.text)
+                        for item in prepared.placeholders
+                    ]
+                ),
+                restored_protected_values=expanded.protected_values,
                 placeholder_tokens=(
                     [] if prepared is None else [item.token for item in prepared.placeholders]
                 ),
@@ -3251,9 +3359,9 @@ class PromptCompressionService:
                     resolved_protection_mode == PROTECTION_MODE_HYBRID
                 ),
             )
-            if not integrity.passed:
+            if not integrity_result.passed:
                 rejected_output_sha256 = sha256_text(compressed_text)
-                failure = integrity.primary_failure or "unknown"
+                failure = integrity_result.primary_failure or "unknown"
                 output_rollback_reason = f"output_rejected_integrity_{failure}"
                 expanded = self._uncompressed_result_parts(
                     segments,
@@ -3426,6 +3534,7 @@ class PromptCompressionService:
                     integrity_reference_text=deterministic_text,
                     output_rollback_reason=output_rollback_reason,
                     rejected_output_sha256=rejected_output_sha256,
+                    integrity_result=integrity_result,
                     literal_placeholder_count=literal_placeholdering.placeholder_count,
                     literal_placeholder_tokens_saved=literal_placeholdering.tokens_saved,
                     literal_aliases_enabled=(

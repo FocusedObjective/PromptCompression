@@ -412,6 +412,79 @@ const defaults = {enabled: true, label: "Keep   spaces"};
     assert compressor.force_tokens_values[0][0] == "__CK_KEEP_0000__"
 
 
+def test_nocompress_reference_data_with_delimited_rows_is_preserved_verbatim():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    reference_data = """<reference-data>
+contacts:
+  rows:
+    03e353c7-45f1-4b74-8c09-3df40f6375fe,Lexi Conaway,candidate,NOT_ADVANCING
+    1e0a55f0-4b95-42af-94c9-c4c842623d2b,Christina Drown,candidate,SOURCED
+  totalCount: 2
+- --currentTimeUTC: 2026-08-27T01:09:25.495Z
+</reference-data>"""
+    text = (
+        "Summarize the current records without changing their identity values.\n"
+        f"<nocompress>{reference_data}</nocompress>\n"
+        "Then report the exact total."
+    )
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert reference_data in result.compressed_text
+    assert "<nocompress>" not in result.compressed_text
+    assert [section.kind for section in result.output_sections] == [
+        "prose",
+        "nocompress",
+        "prose",
+    ]
+    assert len(compressor.inputs) == 1
+    assert "03e353c7-45f1-4b74-8c09-3df40f6375fe" not in compressor.inputs[0]
+    assert "2026-08-27T01:09:25.495Z" not in compressor.inputs[0]
+    assert "__CK_KEEP_0000__" in compressor.inputs[0]
+
+
+def test_compress_prose_allowlist_protects_everything_outside_wrappers():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    policy = "Never alter account identifiers or runtime policy."
+    reference = (
+        "<reference-data>\n"
+        "03e353c7-45f1-4b74-8c09-3df40f6375fe,Lexi Conaway,candidate,SOURCED\n"
+        "</reference-data>"
+    )
+    text = (
+        f"{policy}\n"
+        "<compress-prose>Please review this long narrative summary.</compress-prose>\n"
+        f"{reference}"
+    )
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert result.compressed_text == (
+        f"{policy}\nReview this long narrative summary.\n{reference}"
+    )
+    assert len(compressor.inputs) == 1
+    assert "Please review this long narrative summary." in compressor.inputs[0]
+    assert policy not in compressor.inputs[0]
+    assert reference not in compressor.inputs[0]
+
+
+def test_malformed_compress_prose_allowlist_fails_closed():
+    compressor = RecordingCompressor()
+    service = build_service_with_pipeline(compressor)
+    text = (
+        "Never alter this policy.\n"
+        "<compress-prose>Please review this narrative without a closing tag."
+    )
+
+    result = service.compress(text, aggressiveness=0.25)
+
+    assert result.compressed_text == text
+    assert compressor.inputs == []
+    assert [section.kind for section in result.output_sections] == ["verbatim"]
+
+
 def test_documented_tag_examples_remain_compressible_prose():
     compressor = RecordingCompressor()
     service = build_service_with_pipeline(compressor)

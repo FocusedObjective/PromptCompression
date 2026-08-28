@@ -92,6 +92,23 @@ PROTECTED_PATTERN_SPECS = [
         ),
     ),
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")),
+    (
+        "uuid",
+        re.compile(
+            r"(?<![0-9A-Fa-f])(?:"
+            r"\{[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\}"
+            r"|[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"
+            r")(?![0-9A-Fa-f])"
+        ),
+    ),
+    (
+        "timestamp",
+        re.compile(
+            r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+            r"(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b",
+            re.IGNORECASE,
+        ),
+    ),
     ("money", re.compile(r"\$\s?\d+(?:[.,]\d+)*")),
     (
         "constraint",
@@ -128,6 +145,8 @@ MACHINE_CRITICAL_SPAN_KINDS = frozenset(
         "template",
         "url",
         "email",
+        "uuid",
+        "timestamp",
         "inline_code",
         "identifier",
     }

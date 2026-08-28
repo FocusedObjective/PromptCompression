@@ -166,3 +166,34 @@ def test_protected_spans_include_non_http_uris_and_snake_case_identifiers():
         ("runtime://skills/canary_test_2", "url"),
         ("ff_sourcing_run_orchestrator_v1", "identifier"),
     ]
+
+
+def test_protected_spans_keep_uuid_and_timestamp_atomic():
+    text = (
+        "contactId: c111b3aa-0174-0c54-cd8d-ce861b853de6\n"
+        "updatedAt: 2026-08-27T16:05:29.452Z\n"
+    )
+
+    spans = protected_spans_for_text(text)
+
+    assert [(span.text, span.kind) for span in spans] == [
+        ("c111b3aa-0174-0c54-cd8d-ce861b853de6", "uuid"),
+        ("2026-08-27T16:05:29.452Z", "timestamp"),
+    ]
+
+
+def test_machine_critical_filter_includes_runtime_identity_values():
+    text = (
+        "Run 03e353c7-45f1-4b74-8c09-3df40f6375fe at "
+        "2026-08-27T01:09:25-07:00."
+    )
+
+    spans = protected_spans_for_text(
+        text,
+        allowed_kinds=MACHINE_CRITICAL_SPAN_KINDS,
+    )
+
+    assert [(span.text, span.kind) for span in spans] == [
+        ("03e353c7-45f1-4b74-8c09-3df40f6375fe", "uuid"),
+        ("2026-08-27T01:09:25-07:00", "timestamp"),
+    ]

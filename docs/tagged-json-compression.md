@@ -86,6 +86,12 @@ Compression limits remain server-owned. The request's tenant profile supplies
 `json_value_min_tokens`, `json_value_max_reduction`, and
 `json_value_max_values`; their defaults are 200, 0.25, and 8.
 
+For `model_auto` requests, an authorized value that passes
+`json_value_min_tokens` is treated as an explicit model candidate instead of
+being rejected by the whole-prompt candidate-token and expected-savings floors.
+The per-value acceptance checks and `json_value_max_values` bound still apply.
+`deterministic` requests never send selected values to the model.
+
 ## Tenant-policy format
 
 Production callers should authorize paths in `tenant_profile`:

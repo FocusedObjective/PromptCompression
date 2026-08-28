@@ -16,7 +16,7 @@ from threading import Lock
 from typing import Any, Callable
 
 from app.experiment_profiles import ExperimentProfile
-from app.integrity_policy import evaluate_integrity
+from app.integrity_policy import IntegrityResult, evaluate_integrity
 from app.protected_spans import MACHINE_CRITICAL_SPAN_KINDS
 from app.version import DEPLOYMENT_VERSION
 
@@ -283,6 +283,7 @@ def build_detailed_analytics(
     duplicate_wrapper_aliases_enabled: bool = False,
     tenant_boilerplate_enabled: bool = True,
     protection_mode: str = "hybrid",
+    integrity_result: IntegrityResult | None = None,
 ) -> DetailedAnalytics:
     active_preprocessor = preprocessor or service.preprocessor
     def estimate(value: str) -> int:
@@ -343,6 +344,7 @@ def build_detailed_analytics(
         integrity_reference_text or input_text,
         final_text,
         placeholder_tokens,
+        result=integrity_result,
         evaluation_constraints=evaluation_constraints,
         output_rollback_reason=output_rollback_reason,
         rejected_output_sha256=rejected_output_sha256,
@@ -813,6 +815,7 @@ def _integrity_validation(
     output: str,
     placeholder_tokens: list[str],
     *,
+    result: IntegrityResult | None = None,
     evaluation_constraints: dict[str, list[str]] | None = None,
     output_rollback_reason: str | None = None,
     rejected_output_sha256: str | None = None,
@@ -823,18 +826,19 @@ def _integrity_validation(
         *constraints.get("required_substrings", []),
         *constraints.get("required_whitespace_insensitive_substrings", []),
     ]
-    result = evaluate_integrity(
-        original,
-        output,
-        placeholder_tokens=placeholder_tokens,
-        required_terms=required_terms,
-        allowed_span_kinds=(
-            MACHINE_CRITICAL_SPAN_KINDS
-            if protection_mode == "explicit_first"
-            else None
-        ),
-        protect_critical_clauses=protection_mode == "hybrid",
-    )
+    if result is None:
+        result = evaluate_integrity(
+            original,
+            output,
+            placeholder_tokens=placeholder_tokens,
+            required_terms=required_terms,
+            allowed_span_kinds=(
+                MACHINE_CRITICAL_SPAN_KINDS
+                if protection_mode == "explicit_first"
+                else None
+            ),
+            protect_critical_clauses=protection_mode == "hybrid",
+        )
     warnings = [f"integrity_{failure}" for failure in result.failure_classes]
     if output_rollback_reason:
         warnings.append(output_rollback_reason)
