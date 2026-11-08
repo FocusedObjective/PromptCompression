@@ -1,0 +1,30 @@
+{
+  "schema": "benchmark-pricing.v1",
+  "model": "gpt-6.1-terra",
+  "currency": "USD",
+  "as_of": "2026-11-08",
+  "tier": "standard",
+  "input_per_million": 1.0,
+  "cached_input_per_million": 0.05,
+  "output_per_million": 5.0,
+  "cache_write_30m_per_million": 1.25,
+  "cache_write_12h_per_million": 2.5,
+  "long_context_threshold": 272000,
+  "long_context_input_multiplier": 2.0,
+  "long_context_output_multiplier": 1.5,
+  "compression_saved_tokens_per_million": 0.30,
+  "compression_included_saved_tokens_per_month": 5000000,
+  "sources": [
+    "https://developers.openai.com/api/docs/pricing",
+    "https://developers.openai.com/api/docs/models/gpt-6.1-terra",
+    "https://developers.openai.com/api/docs/guides/prompt-caching",
+    "https://usagetap.com/pricing"
+  ],
+  "notes": [
+    "API-equivalent modeled costs; Codex subscription calls do not create these API charges.",
+    "Headline prompt costs exclude Codex agent overhead and use the recorded proxy tokenizer.",
+    "Primary scenario assumes ordinary uncached input, no cache writes, no Batch/Flex, no Fast mode or regional premium.",
+    "Compression charge uses the service's measured saved-token meter, which can use a different tokenizer from the downstream model.",
+    "Headline compression charge assumes the free allowance is exhausted; the included-allowance scenario is shown separately. Account allowance remaining is unknown."
+  ]
+}

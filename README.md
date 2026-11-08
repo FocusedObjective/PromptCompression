@@ -974,6 +974,32 @@ conditions; it never refetches a cohort between conditions.
 
 ## Notes
 
+### Public quality benchmarks with Codex CLI
+
+Use `scripts/codex_benchmark.py` to compare unchanged, deterministic-only and full
+compression prompts through fresh Codex CLI calls using your ChatGPT subscription.
+JSON cases also include a minified baseline. The runner imports LongBench and TOON
+cases, freezes prompt hashes, resumes completed work, and reports paired answer
+scores, context-token savings, CLI usage and latency. See
+[Codex benchmark setup and commands](docs/codex-benchmarks.md).
+Pass `--public-compressor` when preparing cases to use the deployed GPU service
+at `https://compress.usagetap.com/compress`; add `--demo-session` for bounded
+public demo access without a compression API key.
+The answer runner defaults to GPT-6.1 Terra at medium reasoning.
+`scripts/render_benchmark_report.py` creates a portable HTML presentation with
+summary charts, before/after strikethrough text, per-repeat answers and a complete
+API-equivalent cost ledger. Its dated Terra and UsageTap rates are stored in
+`data/benchmark_pricing_terra.json`; see the setup guide for cache and allowance scenarios.
+
+The completed [20-task benchmark](outputs/terra-full-benchmark-20261108-195352/README.txt)
+contains 210 Terra answers and a separate Luna low semantic review of the saved
+answers. It measured 19.8% context reduction and 14.2% modeled net API savings
+after compression fees. JSON accuracy stayed at 100%; prose lexical and semantic
+results are reported separately, including regressions and partial answers.
+Open the [HTML report](outputs/terra-full-benchmark-20261108-195352/report.html),
+inspect the [validation and results](outputs/terra-full-benchmark-20261108-195352/validation.json),
+or download the [complete evidence archive](outputs/terra-full-benchmark-20261108-195352/all-results.zip).
+
 This project uses an existing LLMLingua-2 model for the first milestone. The next milestone is to create your own original/compressed pairs, convert them into KEEP/DROP labels, and fine-tune a smaller classifier on your own domain data.
 
 ## Synthetic LoRA Probe

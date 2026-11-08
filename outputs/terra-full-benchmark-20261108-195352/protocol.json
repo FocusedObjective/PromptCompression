@@ -1,0 +1,48 @@
+{
+  "answer_model": "gpt-6.1-terra",
+  "reasoning_effort": "medium",
+  "answer_authentication": "Codex ChatGPT subscription",
+  "compression_endpoint": "https://compress.usagetap.com/compress",
+  "compression_authentication": "API key from ignored local file",
+  "demo_session": false,
+  "compression_preparations": {
+    "conditions": [
+      "deterministic_only",
+      "full"
+    ],
+    "once_per_task_variant": true,
+    "public_requests_completed": 40,
+    "public_http_statuses": {
+      "200": 40
+    },
+    "full_mode": "model_force",
+    "aggressiveness": 0.5
+  },
+  "assessment": {
+    "tasks": 20,
+    "source_contexts": 19,
+    "repeats": 3,
+    "planned_answer_calls": 210,
+    "shared_context_note": "The two analytics questions share one source JSON document. Repeated calls are not independent source documents."
+  },
+  "route_history": {
+    "initial_public_health_check": "HTTP 503; stopped before compression or answer calls",
+    "direct_google_attempt": "User-requested route test; health HTTP 200; interrupted when user chose public domain; 4 completed task preparation records retained separately. An additional task was in flight, so the exact interrupted request count is not known.",
+    "actual_benchmark_preparation": "public-prepared/manifest.json; public domain only"
+  },
+  "quality_protocol": "Official LongBench QA F1/ROUGE-L and frozen official TOON comparator; deterministic scoring. Compression output frozen once and reused across repeats. All integrity-guard pass-through cases retained.",
+  "cost_protocol": "Dated API-equivalent prices applied to application prompt proxy counts and observed Codex output usage. Not an actual API invoice. Sol/Astra/Opus are cost-only projections; their model quality and tokenization are unmeasured.",
+  "supplemental_semantic_review": {
+    "reviewer": "gpt-6-luna",
+    "reasoning_effort": "low",
+    "calls": 20,
+    "distinct_answers": 70,
+    "mapped_original_results": 210,
+    "condition_labels_and_official_scores_withheld": true,
+    "source_context": "original uncompressed input plus references",
+    "original_benchmark_answers_regenerated": false,
+    "official_scores_unchanged": true,
+    "judgments_per_distinct_answer": 1,
+    "cli_api_equivalent_usd": 0.04541978
+  }
+}

@@ -1,0 +1,149 @@
+{
+  "tasks": 20,
+  "prose_tasks": 10,
+  "json_tasks": 10,
+  "seed": 42,
+  "repeats": 3,
+  "expected_answer_calls": 210,
+  "expected_compression_operations": 40,
+  "selection": "Balanced seeded sample: Qasper 4, HotpotQA 3, QMSum 3; one seeded question from each of 9 TOON datasets, plus a second analytics question. Selection is independent of compression or answer outcomes.",
+  "dataset_counts": {
+    "longbench/qasper": 4,
+    "longbench/hotpotqa": 3,
+    "longbench/qmsum": 3,
+    "toon/analytics": 2,
+    "toon/event-logs": 1,
+    "toon/github": 1,
+    "toon/keyed": 1,
+    "toon/nested": 1,
+    "toon/nested-config": 1,
+    "toon/nested-group": 1,
+    "toon/structural-validation-control": 1,
+    "toon/tabular": 1
+  },
+  "distinct_source_contexts": 19,
+  "max_original_prompt_proxy_tokens": 25979,
+  "total_compressor_input_characters": 1299120,
+  "cases": [
+    {
+      "id": "longbench/qasper/17a2b96e126ab914e1179b4794d18513627ade82d5c35554",
+      "dataset": "longbench/qasper",
+      "characters": 25779,
+      "prompt_proxy_tokens": 5304
+    },
+    {
+      "id": "longbench/qasper/1fc62062641bf85a160d7465aefb91870235e6c815b392cf",
+      "dataset": "longbench/qasper",
+      "characters": 14143,
+      "prompt_proxy_tokens": 2832
+    },
+    {
+      "id": "longbench/qasper/43ffd7775c3b4a541e227c120bffcc7c7b31fb184ba94d69",
+      "dataset": "longbench/qasper",
+      "characters": 9022,
+      "prompt_proxy_tokens": 2045
+    },
+    {
+      "id": "longbench/qasper/ea4db579b5224fe0fa413ee436a5f4f56777dfa3e25d99d7",
+      "dataset": "longbench/qasper",
+      "characters": 24886,
+      "prompt_proxy_tokens": 5791
+    },
+    {
+      "id": "longbench/hotpotqa/3f17f12cfde4c677f3af81362ce1df42f949bee1ceae40f4",
+      "dataset": "longbench/hotpotqa",
+      "characters": 68066,
+      "prompt_proxy_tokens": 15715
+    },
+    {
+      "id": "longbench/hotpotqa/87fd3f0590498461d595ff1823632c79b66cf313cf55fbb3",
+      "dataset": "longbench/hotpotqa",
+      "characters": 60092,
+      "prompt_proxy_tokens": 13243
+    },
+    {
+      "id": "longbench/hotpotqa/97b31d6d7a9137c220726ad51a6dca3e957e2c94ce5e65b8",
+      "dataset": "longbench/hotpotqa",
+      "characters": 62284,
+      "prompt_proxy_tokens": 14483
+    },
+    {
+      "id": "longbench/qmsum/2cc7738467d6098ff04980af3f7cd9ef3610f97d63a8c211",
+      "dataset": "longbench/qmsum",
+      "characters": 95966,
+      "prompt_proxy_tokens": 25979
+    },
+    {
+      "id": "longbench/qmsum/78f6c42056bd08025eeed815449c24526a051751d7c415fd",
+      "dataset": "longbench/qmsum",
+      "characters": 66640,
+      "prompt_proxy_tokens": 18320
+    },
+    {
+      "id": "longbench/qmsum/8a2a85eefebeb2986e417fd8388c3be0b68e33911dcc98ca",
+      "dataset": "longbench/qmsum",
+      "characters": 56387,
+      "prompt_proxy_tokens": 15673
+    },
+    {
+      "id": "toon/analytics/q75",
+      "dataset": "toon/analytics",
+      "characters": 9542,
+      "prompt_proxy_tokens": 3789
+    },
+    {
+      "id": "toon/event-logs/q128",
+      "dataset": "toon/event-logs",
+      "characters": 20858,
+      "prompt_proxy_tokens": 6907
+    },
+    {
+      "id": "toon/github/q109",
+      "dataset": "toon/github",
+      "characters": 44098,
+      "prompt_proxy_tokens": 15459
+    },
+    {
+      "id": "toon/keyed/q182",
+      "dataset": "toon/keyed",
+      "characters": 5357,
+      "prompt_proxy_tokens": 1991
+    },
+    {
+      "id": "toon/nested/q41",
+      "dataset": "toon/nested",
+      "characters": 34920,
+      "prompt_proxy_tokens": 11147
+    },
+    {
+      "id": "toon/nested-config/q153",
+      "dataset": "toon/nested-config",
+      "characters": 3161,
+      "prompt_proxy_tokens": 1022
+    },
+    {
+      "id": "toon/nested-group/q202",
+      "dataset": "toon/nested-group",
+      "characters": 13409,
+      "prompt_proxy_tokens": 4151
+    },
+    {
+      "id": "toon/structural-validation-control/q240",
+      "dataset": "toon/structural-validation-control",
+      "characters": 4178,
+      "prompt_proxy_tokens": 1392
+    },
+    {
+      "id": "toon/tabular/q217",
+      "dataset": "toon/tabular",
+      "characters": 20900,
+      "prompt_proxy_tokens": 6456
+    },
+    {
+      "id": "toon/analytics/q77",
+      "dataset": "toon/analytics",
+      "characters": 9542,
+      "prompt_proxy_tokens": 3790
+    }
+  ]
+}

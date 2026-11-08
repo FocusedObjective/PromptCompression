@@ -1,0 +1,30 @@
+{
+  "schema": "codex-compression-benchmark.v1",
+  "created_at": "2026-11-08T20:12:05.262413+00:00",
+  "settings": {
+    "manifest_sha256": "3b065a3433855c3d7392820179f2bf99c238fadb3fbf105c6ad9c1b21b90bf91",
+    "model": "gpt-6.1-terra",
+    "reasoning_effort": "medium",
+    "repeats": 3,
+    "seed": 42,
+    "cli_version": "codex-cli 0.166.0",
+    "codex_executable": "C:\\Users\\troym\\AppData\\Roaming\\npm\\codex.cmd",
+    "max_prompt_tokens": 64000,
+    "safe_config": [
+      "forced_login_method=\"chatgpt\"",
+      "model_provider=\"openai\"",
+      "web_search=\"disabled\"",
+      "project_doc_max_bytes=0",
+      "features.shell_tool=false",
+      "features.apps=false",
+      "features.multi_agent=false",
+      "features.memories=false",
+      "features.hooks=false",
+      "features.goals=false",
+      "features.plugins=false",
+      "features.remote_plugin=false"
+    ],
+    "code_sha256": "50c81ceea6c039dddacd4fe2f22d403f37a0bd115cf7255bd53f5f6da06d478c"
+  },
+  "manifest_path": "C:\\Users\\troym\\Git\\PromptCompression\\data\\public-benchmarks\\terra-full-20261108-195352\\public-prepared\\manifest.json"
+}

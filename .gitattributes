@@ -1,0 +1,4 @@
+# Preserve frozen benchmark evidence and checksums byte-for-byte across platforms.
+outputs/terra-compression-benchmark/** -text
+outputs/terra-key-benchmark-20261108-194322/** -text
+outputs/terra-full-benchmark-20261108-195352/** -text

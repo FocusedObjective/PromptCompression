@@ -1,0 +1,51 @@
+{
+  "answer_model": "gpt-6.1-terra",
+  "reasoning_effort": "medium",
+  "tasks": 2,
+  "answer_calls": 21,
+  "public_demo_new_compression_operations": 2,
+  "prose_compression": "reused frozen public GPU preparation",
+  "tests_passed": 100,
+  "desktop_preview": {
+    "width": 1200,
+    "console_errors": 0
+  },
+  "mobile_qa": {
+    "width": 390,
+    "checks": [
+      "six charts render",
+      "Python/JavaScript cost ledger parity",
+      "exact before and after text recovery",
+      "case and variant selection",
+      "cached-baseline scenario can yield negative savings",
+      "free-allowance scenario",
+      "artifact fee amortization",
+      "no horizontal page overflow"
+    ],
+    "status": "passed"
+  },
+  "cost_basis": "Standard API-equivalent prompt/output rates plus published post-allowance compression fee; not an actual API invoice",
+  "pricing_projection_update": {
+    "models": [
+      "gpt-6.1-sol",
+      "gpt-6-astra",
+      "claude-opus-5-5"
+    ],
+    "new_model_calls": 0,
+    "new_compression_calls": 0,
+    "prices_verified": "2026-11-08",
+    "desktop_width": 1200,
+    "mobile_width": 390,
+    "checks": [
+      "published-rate arithmetic",
+      "4 model rows",
+      "workload and variant filters",
+      "cold scenario independent of Terra cache overrides",
+      "no invented variant pairs",
+      "minification has no compression fee",
+      "21 original attempts preserved",
+      "no page horizontal overflow"
+    ],
+    "status": "passed"
+  }
+}

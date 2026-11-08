@@ -1,0 +1,11 @@
+{
+  "checked_at": "2026-11-08T20:08:12.068070+00:00",
+  "url": "https://compress.usagetap.com/health",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-cloud-trace-context": "2f79611cd579c162c2480bb8d8fdb723;o=1",
+    "date": "Sun, 08 Nov 2026 20:08:14 GMT",
+    "server": "Google Frontend"
+  }
+}

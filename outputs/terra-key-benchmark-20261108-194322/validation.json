@@ -1,0 +1,46 @@
+{
+  "model": "gpt-6.1-terra",
+  "reasoning_effort": "medium",
+  "tasks": 2,
+  "answer_calls": 21,
+  "statuses": {
+    "ok": 21
+  },
+  "compression_endpoint": "https://compress.usagetap.com/compress",
+  "authentication": "API key from ignored local file",
+  "demo_session": false,
+  "new_compression_operations": 4,
+  "tests_passed": 100,
+  "html_checks": [
+    "21 successful calls",
+    "API-key provenance",
+    "cost parity",
+    "four pricing models",
+    "exact compressed text recovery",
+    "no desktop horizontal overflow"
+  ],
+  "full_compression": {
+    "matched_pairs": 6,
+    "before_api_usd": 0.024815999999999998,
+    "after_with_compression_usd": 0.0179044,
+    "net_saving_usd": 0.006911599999999997,
+    "net_saving_fraction": 0.27851386202450024
+  },
+  "secret_scan": "passed; credential absent from all exported files and raw run artifacts",
+  "cost_basis": "Modeled standard API prices; generation used Codex subscription; not an API invoice",
+  "presentation_update": {
+    "view": "single original text with removals struck through",
+    "report_tests_passed": 26,
+    "checks": [
+      "one text column",
+      "exact original text recovery",
+      "strikeouts visible",
+      "300px compact preview",
+      "full text expansion",
+      "case selection",
+      "no horizontal page overflow"
+    ],
+    "new_model_calls": 0,
+    "new_compression_operations": 0
+  }
+}

@@ -6,6 +6,7 @@ __pycache__/
 .ruff_cache/
 .env
 .env.local
+compress-usagetap-key.local.txt
 .DS_Store
 .vscode/.ropeproject/
 models/
@@ -15,3 +16,4 @@ edge/.wrangler/
 edge/dist/
 edge/.dev.vars
 edge/wrangler-tail.tmp.log*
+data/public-benchmarks/
